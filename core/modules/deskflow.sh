@@ -7,7 +7,7 @@ KNOT_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
 source "$KNOT_ROOT/core/lib.sh"
 source "$KNOT_ROOT/core/modules/autounlock.sh"
 
-deskflow_write_server_conf() {
+deskflow_compile_server_config() {
   local mode="${1:-unlocked}"
   local home
   home="$(knot_detect_user_home)"
@@ -20,6 +20,10 @@ deskflow_write_server_conf() {
   local topo_file=""
   if [ -r "$home/.config/knot/swarms/${active_swarm}/topology.json" ]; then
     topo_file="$home/.config/knot/swarms/${active_swarm}/topology.json"
+  elif [ -r "/etc/knot/swarms.d/${active_swarm}/topology.json" ]; then
+    topo_file="/etc/knot/swarms.d/${active_swarm}/topology.json"
+  elif [ -r "$KNOT_ROOT/templates/topology.example.json" ]; then
+    topo_file="$KNOT_ROOT/templates/topology.example.json"
   elif [ -r "$KNOT_ROOT/registry/topology.json" ]; then
     topo_file="$KNOT_ROOT/registry/topology.json"
   fi
@@ -27,6 +31,10 @@ deskflow_write_server_conf() {
   local nodes_dir=""
   if [ -d "$home/.config/knot/swarms/${active_swarm}/nodes" ]; then
     nodes_dir="$home/.config/knot/swarms/${active_swarm}/nodes"
+  elif [ -d "/etc/knot/swarms.d/${active_swarm}/nodes" ]; then
+    nodes_dir="/etc/knot/swarms.d/${active_swarm}/nodes"
+  elif [ -d "$KNOT_ROOT/templates/nodes" ]; then
+    nodes_dir="$KNOT_ROOT/templates/nodes"
   elif [ -d "$KNOT_ROOT/registry/nodes" ]; then
     nodes_dir="$KNOT_ROOT/registry/nodes"
   fi
@@ -42,6 +50,10 @@ deskflow_write_server_conf() {
 
   knot_log_err "Could not find topology.json or nodes directory to compile Deskflow layout"
   return 1
+}
+
+deskflow_write_server_conf() {
+  deskflow_compile_server_config "$@"
 }
 
 deskflow_get_lock() {
@@ -215,8 +227,8 @@ NOTIFY_EOF
     local wants_dir="$home/.config/systemd/user/graphical-session.target.wants"
     mkdir -p "$wants_dir"
     ln -sf "$kde_portal_unit" "$wants_dir/plasma-xdg-desktop-portal-kde.service"
-    if ! systemctl --user is-active --quiet plasma-xdg-desktop-portal-kde.service 2>/dev/null; then
-      systemctl --user start plasma-xdg-desktop-portal-kde.service 2>/dev/null || true
+    if ! systemctl --user is-active --quiet plasma-xdg-desktop-portal-kde.service; then
+      systemctl --user start plasma-xdg-desktop-portal-kde.service
     fi
   fi
 
@@ -287,6 +299,25 @@ set -euo pipefail
 # Dynamic Knot Deskflow Client Runner
 # Connects to the Anchor workstation of the currently active swarm.
 
+ACTION="${1:-run}"
+
+if [ "$ACTION" = "stop" ]; then
+  if pgrep -f "deskflow-core client" >/dev/null; then
+    pkill -f "deskflow-core client"
+  fi
+  if command -v systemctl >/dev/null && systemctl --user is-active --quiet knot-deskflow.service; then
+    systemctl --user stop knot-deskflow.service
+  fi
+  exit 0
+fi
+
+if [ "$ACTION" = "reload" ] || [ "$ACTION" = "restart" ]; then
+  if command -v systemctl >/dev/null; then
+    systemctl --user restart knot-deskflow.service
+  fi
+  exit 0
+fi
+
 KNOT_CLI=""
 if command -v knot >/dev/null; then
   KNOT_CLI="$(command -v knot)"
@@ -303,15 +334,28 @@ if [ -z "$KNOT_CLI" ]; then
   exit 1
 fi
 
+ACTIVE_SWARM="none"
+if [ -r "/run/knot/active_swarm" ]; then
+  ACTIVE_SWARM="$(tr -d '[:space:]' < /run/knot/active_swarm)"
+elif [ -r "$HOME/.local/state/knot/active_swarm" ]; then
+  ACTIVE_SWARM="$(tr -d '[:space:]' < "$HOME/.local/state/knot/active_swarm")"
+fi
+
+if [ "$ACTIVE_SWARM" = "none" ] || [ -z "$ACTIVE_SWARM" ]; then
+  echo "Active swarm is none (graceful standalone mode). Knot deskflow client stopping."
+  exit 0
+fi
+
 ANCHOR_TARGET="desktop"
-ACTIVE_SWARM_FILE="/run/knot/active_swarm"
-if [ -r "$ACTIVE_SWARM_FILE" ]; then
-  ACTIVE_SWARM="$(tr -d '[:space:]' < "$ACTIVE_SWARM_FILE")"
-  if [ -n "$ACTIVE_SWARM" ] && [ "$ACTIVE_SWARM" != "none" ] && [ -r "/etc/knot/swarms.d/${ACTIVE_SWARM}.conf" ]; then
-    ANCHOR_CFG="$(awk -F= '/^ANCHOR_ID=/ {print $2}' "/etc/knot/swarms.d/${ACTIVE_SWARM}.conf" | tr -d '"' || true)"
-    if [ -n "$ANCHOR_CFG" ]; then
-      ANCHOR_TARGET="$ANCHOR_CFG"
-    fi
+if [ -r "/etc/knot/swarms.d/${ACTIVE_SWARM}.conf" ]; then
+  ANCHOR_CFG="$(awk -F= '/^ANCHOR_ID=/ {print $2}' "/etc/knot/swarms.d/${ACTIVE_SWARM}.conf" | tr -d '"')"
+  if [ -n "$ANCHOR_CFG" ]; then
+    ANCHOR_TARGET="$ANCHOR_CFG"
+  fi
+elif [ -r "$HOME/.config/knot/swarms/${ACTIVE_SWARM}/swarm.conf" ]; then
+  ANCHOR_CFG="$(awk -F= '/^ANCHOR_ID=/ {print $2}' "$HOME/.config/knot/swarms/${ACTIVE_SWARM}/swarm.conf" | tr -d '"')"
+  if [ -n "$ANCHOR_CFG" ]; then
+    ANCHOR_TARGET="$ANCHOR_CFG"
   fi
 fi
 
@@ -369,7 +413,17 @@ computerName=${MY_HOST:-localhost}
 remoteHost=$RESOLVED_IP
 CONF_EOF
 
-exec /usr/bin/deskflow-core client --new-instance -s "$CONF_DIR/Deskflow.conf"
+DESKFLOW_BIN="/usr/bin/deskflow-core"
+if command -v deskflow-core >/dev/null; then
+  DESKFLOW_BIN="$(command -v deskflow-core)"
+fi
+
+if [ ! -x "$DESKFLOW_BIN" ]; then
+  echo "deskflow-core executable not found at $DESKFLOW_BIN" >&2
+  exit 1
+fi
+
+exec "$DESKFLOW_BIN" client --new-instance -s "$CONF_DIR/Deskflow.conf"
 RUNNER_EOF
     sudo chmod 755 /usr/local/bin/knot-deskflow-client
 
@@ -388,7 +442,7 @@ Environment=WAYLAND_DISPLAY=wayland-0
 Environment=XDG_CURRENT_DESKTOP=KDE
 Environment=XDG_DESKTOP_PORTAL_APP_ID=org.deskflow.deskflow
 ExecStart=/usr/local/bin/knot-deskflow-client
-Restart=always
+Restart=on-failure
 RestartSec=3
 
 [Install]
