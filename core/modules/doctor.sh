@@ -234,7 +234,49 @@ doctor_check_local() {
     failures=$((failures + 1))
   fi
 
-  # 5. Auto-Unlock & Screen Session
+  # 5. Firewall & Mesh Ports
+  echo -e "\n${C_BOLD}[Firewall & Mesh Ports]${C_RESET}"
+  local engines
+  engines="$(knot_detect_firewalls)"
+  if [[ "$engines" =~ "firewalld" ]]; then
+    local fw_ports
+    if fw_ports="$(sudo -n firewall-cmd --list-ports 2>&1)"; then
+      if echo "$fw_ports" | grep -q "4242/tcp"; then
+        doc_ok "firewalld allows port 4242/tcp (Knot Hub / Onboarding)"
+      else
+        doc_fail "firewalld BLOCKS port 4242/tcp (Knot Hub / Onboarding)"
+        failures=$((failures + 1))
+      fi
+      if echo "$fw_ports" | grep -q "24800/tcp"; then
+        doc_ok "firewalld allows port 24800/tcp (Deskflow KVM)"
+      else
+        doc_fail "firewalld BLOCKS port 24800/tcp (Deskflow KVM)"
+        failures=$((failures + 1))
+      fi
+    else
+      doc_info "firewalld status check unavailable: $fw_ports"
+    fi
+  elif [[ "$engines" =~ "ufw" ]]; then
+    local ufw_out
+    if ufw_out="$(sudo -n ufw status 2>&1)"; then
+      if echo "$ufw_out" | grep -q "4242"; then
+        doc_ok "UFW allows port 4242/tcp (Knot Hub)"
+      else
+        doc_fail "UFW BLOCKS port 4242/tcp (Knot Hub)"
+        failures=$((failures + 1))
+      fi
+      if echo "$ufw_out" | grep -q "24800"; then
+        doc_ok "UFW allows port 24800/tcp (Deskflow KVM)"
+      else
+        doc_fail "UFW BLOCKS port 24800/tcp (Deskflow KVM)"
+        failures=$((failures + 1))
+      fi
+    fi
+  else
+    doc_ok "No restrictive firewall blocking local mesh ports (Engine: $engines)"
+  fi
+
+  # 6. Auto-Unlock & Screen Session
   echo -e "\n${C_BOLD}[Auto-Unlock & Screen Session]${C_RESET}"
   if systemctl is-enabled plasmalogin.service >/dev/null 2>&1; then
     doc_ok "Display manager standardized on plasma-login-manager (plasmalogin.service)"

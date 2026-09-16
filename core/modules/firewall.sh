@@ -45,6 +45,7 @@ firewall_configure() {
     sudo firewall-cmd --permanent --zone=public --add-rich-rule="rule family=\"ipv4\" source address=\"$subnet\" service name=\"ssh\" accept" >/dev/null
     sudo firewall-cmd --permanent --zone=public --add-service=kdeconnect >/dev/null
     sudo firewall-cmd --permanent --zone=public --add-service=mdns >/dev/null
+    sudo firewall-cmd --permanent --zone=public --add-port=4242/tcp >/dev/null
     sudo firewall-cmd --permanent --zone=public --add-port=24800/tcp >/dev/null
     sudo firewall-cmd --reload >/dev/null
     knot_log_ok "firewalld rules successfully applied."
