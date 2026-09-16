@@ -8,16 +8,19 @@ Zero external dependencies (uses standard library Python 3).
 """
 
 import glob
+import io
 import json
 import mimetypes
 import os
 import re
 import secrets
 import shutil
+import socket
 import sqlite3
 import ssl
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 import uuid
@@ -374,7 +377,7 @@ class EnrollmentCoordinator:
         self.sessions: dict[str, dict] = {}
         self.lock = threading.Lock()
 
-    def create_invite(self, expires_in: int = 600) -> dict:
+    def create_invite(self, expires_in: int = 600, anchor_ip: str = "") -> dict:
         pin = f"{secrets.randbelow(900000) + 100000}"
         from core.hub.tls import ensure_hub_tls
         tls_info = ensure_hub_tls()
@@ -386,6 +389,7 @@ class EnrollmentCoordinator:
             "token": token,
             "fingerprint": tls_info["fingerprint"],
             "fingerprint_short": fp_short,
+            "anchor_ip": anchor_ip,
             "created_at": time.time(),
             "expires_at": time.time() + expires_in,
             "attempts": 0,
@@ -449,6 +453,341 @@ class EnrollmentCoordinator:
 
 
 enrollment_coordinator = EnrollmentCoordinator()
+
+_dist_bundle_cache: Optional[bytes] = None
+_dist_bundle_cache_ts: float = 0
+_dist_bundle_lock = threading.Lock()
+
+
+def get_distribution_bundle() -> bytes:
+    """Dynamically packages a clean, lightweight tarball of knot-mesh excluding heavy/build artifacts."""
+    global _dist_bundle_cache, _dist_bundle_cache_ts
+    now = time.time()
+    with _dist_bundle_lock:
+        if _dist_bundle_cache is not None and (now - _dist_bundle_cache_ts < 300):
+            return _dist_bundle_cache
+
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+            def tar_filter(tarinfo):
+                name = tarinfo.name
+                for excl in ("/.git", "/node_modules", "/__pycache__", ".pyc", "/dist/knot-mesh.tar.gz", ".log"):
+                    if excl in name:
+                        return None
+                return tarinfo
+
+            for item in ("bin", "core", "systemd", "templates", "install.sh", "LICENSE", "README.md"):
+                p = os.path.join(REPO_ROOT, item)
+                if os.path.exists(p):
+                    tar.add(p, arcname=f"knot-mesh/{item}", filter=tar_filter)
+
+        data = buf.getvalue()
+        _dist_bundle_cache = data
+        _dist_bundle_cache_ts = now
+        return data
+
+
+def get_active_swarm_info() -> tuple[str, str]:
+    """Returns (swarm_id, swarm_name) based on active runtime swarm profile."""
+    active_swarm = "home"
+    active_f = "/run/knot/active_swarm"
+    if os.path.exists(active_f):
+        try:
+            with open(active_f, "r") as f:
+                content = f.read().strip()
+                if content and content != "none":
+                    active_swarm = content
+        except Exception:
+            pass
+    swarm_name = f"{active_swarm.capitalize()} Swarm"
+    for conf_dir in ("/etc/knot/swarms.d", os.path.expanduser("~/.config/knot/swarms")):
+        conf_file = os.path.join(conf_dir, f"{active_swarm}.conf")
+        if os.path.isfile(conf_file):
+            try:
+                with open(conf_file, "r") as cf:
+                    for line in cf:
+                        if line.startswith("SWARM_NAME="):
+                            name_val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                            if name_val:
+                                swarm_name = name_val
+                                break
+            except Exception:
+                pass
+    return active_swarm, swarm_name
+
+
+def render_onboarding_html(swarm_name: str, anchor_host: str, anchor_port: str, token: str, pin: str, fp_short: str) -> str:
+    """Renders modern dark-mode landing page for Magic URL browser visitors."""
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Knot Swarm Onboarding — {swarm_name}</title>
+  <style>
+    :root {{
+      --bg: #0b0f19;
+      --card: #111827;
+      --border: #1f293d;
+      --primary: #06b6d4;
+      --primary-hover: #0891b2;
+      --accent: #10b981;
+      --text: #f3f4f6;
+      --muted: #9ca3af;
+      --code-bg: #030712;
+    }}
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }}
+    .card {{
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px;
+      max-width: 680px;
+      width: 100%;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+    }}
+    .badge {{
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(6, 182, 212, 0.1);
+      color: var(--primary);
+      border: 1px solid rgba(6, 182, 212, 0.25);
+      border-radius: 9999px;
+      padding: 4px 12px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }}
+    .badge-dot {{
+      width: 8px;
+      height: 8px;
+      background: var(--accent);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--accent);
+    }}
+    h1 {{ font-size: 1.8rem; font-weight: 700; margin-bottom: 8px; color: #fff; }}
+    p.subtitle {{ color: var(--muted); font-size: 0.95rem; margin-bottom: 24px; }}
+    .grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }}
+    .stat {{ background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }}
+    .stat-label {{ font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 4px; }}
+    .stat-val {{ font-size: 1.05rem; font-weight: 600; font-family: monospace; color: var(--primary); word-break: break-all; }}
+    .command-box {{
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      position: relative;
+      margin-bottom: 24px;
+    }}
+    .command-text {{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.95rem;
+      color: #38bdf8;
+      word-break: break-all;
+      line-height: 1.5;
+    }}
+    .copy-btn {{
+      margin-top: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      background: var(--primary);
+      color: #000;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 16px;
+      cursor: pointer;
+      font-size: 0.95rem;
+      transition: background 0.2s;
+    }}
+    .copy-btn:hover {{ background: var(--primary-hover); }}
+    .steps {{ list-style: none; counter-reset: step-counter; }}
+    .steps li {{
+      position: relative;
+      padding-left: 36px;
+      margin-bottom: 12px;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.4;
+    }}
+    .steps li::before {{
+      content: counter(step-counter);
+      counter-increment: step-counter;
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 24px;
+      height: 24px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--primary);
+    }}
+    .footer {{ text-align: center; margin-top: 24px; font-size: 0.8rem; color: var(--muted); }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge"><span class="badge-dot"></span> Knot Swarm Pairing Active</div>
+    <h1>Magic Strand Onboarding</h1>
+    <p class="subtitle">Enroll this secondary device into the <strong>{swarm_name}</strong> mesh with zero prior configuration.</p>
+    
+    <div class="grid">
+      <div class="stat">
+        <div class="stat-label">Anchor Node</div>
+        <div class="stat-val">{anchor_host}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Pairing PIN</div>
+        <div class="stat-val">{pin}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">TLS Fingerprint</div>
+        <div class="stat-val">{fp_short}...</div>
+      </div>
+    </div>
+
+    <div class="command-box">
+      <div class="command-text" id="cmd">curl -kfsSL https://{anchor_host}:{anchor_port}/join/{token} | bash</div>
+      <button class="copy-btn" id="copy-btn" onclick="copyCmd()">
+        <span>Copy One-Liner Command</span>
+      </button>
+    </div>
+
+    <ul class="steps">
+      <li>Open any terminal on your secondary laptop or handheld device.</li>
+      <li>Paste and run the one-liner command above. The installer will download directly over local LAN.</li>
+      <li>Cryptographic TLS pinning verifies the Anchor and completes spatial pairing automatically.</li>
+    </ul>
+  </div>
+  <div class="footer">Knot Mesh v1.0 • Distributed Workspace Coordination Engine</div>
+
+  <script>
+    function copyCmd() {{
+      const text = document.getElementById('cmd').innerText;
+      navigator.clipboard.writeText(text).then(() => {{
+        const btn = document.getElementById('copy-btn');
+        btn.innerHTML = '<span>Copied to Clipboard! ✓</span>';
+        btn.style.background = '#10b981';
+        setTimeout(() => {{
+          btn.innerHTML = '<span>Copy One-Liner Command</span>';
+          btn.style.background = '#06b6d4';
+        }}, 2500);
+      }});
+    }}
+  </script>
+</body>
+</html>"""
+
+
+def render_bootstrap_script(swarm_name: str, anchor_host: str, anchor_port: str, token: str, pin: str, fp_short: str) -> str:
+    """Renders dynamic, self-enrolling bash script for curl | bash execution."""
+    return f"""#!/usr/bin/env bash
+set -euo pipefail
+
+# Knot Mesh Zero-Setup Strand Onboarding Bootstrap
+# Swarm: {swarm_name} | Anchor: {anchor_host}:{anchor_port}
+
+C_RESET=$'\\033[0m'
+C_BOLD=$'\\033[1m'
+C_GREEN=$'\\033[1;32m'
+C_CYAN=$'\\033[1;36m'
+C_YELLOW=$'\\033[1;33m'
+C_RED=$'\\033[1;31m'
+C_DIM=$'\\033[2m'
+
+ANCHOR_HOST="{anchor_host}"
+ANCHOR_PORT="{anchor_port}"
+TOKEN="{token}"
+PIN="{pin}"
+FP_SHORT="{fp_short}"
+INSTALL_DIR="$HOME/.local/share/knot-mesh"
+BIN_DIR="$HOME/.local/bin"
+
+echo -e "${{C_CYAN}}${{C_BOLD}}"
+cat << 'EOF_BANNER'
+  ██╗  ██╗███╗   ██╗ ██████╗ ████████╗   ███╗   ███╗███████╗███████╗██╗  ██╗
+  ██║ ██╔╝████╗  ██║██╔═══██╗╚══██╔══╝   ████╗ ████║██╔════╝██╔════╝██║  ██║
+  █████═╝ ██╔██╗ ██║██║   ██║   ██║█████╗██╔████╔██║█████╗  ███████╗███████║
+  ██╔═██╗ ██║╚██╗██║██║   ██║   ██║╚════╝██║╚██╔╝██║██╔══╝  ╚════██║██╔══██║
+  ██║ ╚██╗██║ ╚████║╚██████╔╝   ██║      ██║ ╚═╝ ██║███████╗███████║██║  ██║
+  ╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝    ╚═╝      ╚═╝     ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝
+EOF_BANNER
+echo -e "${{C_RESET}}${{C_DIM}}         Zero-Setup Strand Onboarding for Arch Linux / KDE Plasma 6 Wayland${{C_RESET}}\\n"
+echo -e "${{C_CYAN}}[•] Initiating onboarding to Anchor at ${{C_BOLD}}${{ANCHOR_HOST}}:${{ANCHOR_PORT}}${{C_RESET}}..."
+
+# Step 1: Cryptographic TLS Fingerprint Pinning
+echo -e "${{C_CYAN}}[•] Cryptographically verifying Anchor TLS certificate...${{C_RESET}}"
+python3 -c '
+import sys, socket, ssl, hashlib
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+expected_fp = sys.argv[3].lower()
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+
+try:
+    with socket.create_connection((host, port), timeout=10) as sock:
+        with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+            der = ssock.getpeercert(binary_form=True)
+            if not der:
+                print("Error: Could not retrieve peer certificate", file=sys.stderr)
+                sys.exit(1)
+            fp = hashlib.sha256(der).hexdigest().lower()
+            if not fp.startswith(expected_fp):
+                print("SECURITY ALERT: Certificate mismatch! Expected " + expected_fp + ", received " + fp, file=sys.stderr)
+                sys.exit(1)
+            print("[✓] Anchor TLS verified: " + fp[:16] + "...")
+except Exception as e:
+    print("TLS verification failed: " + str(e), file=sys.stderr)
+    sys.exit(1)
+' "$ANCHOR_HOST" "$ANCHOR_PORT" "$FP_SHORT"
+
+# Step 2: Download distribution bundle directly from Anchor over LAN
+echo -e "${{C_CYAN}}[•] Downloading Knot Mesh bundle directly from Anchor over LAN...${{C_RESET}}"
+mkdir -p "$INSTALL_DIR"
+curl -kfsSL "https://${{ANCHOR_HOST}}:${{ANCHOR_PORT}}/dist/knot-mesh.tar.gz" | tar -xzf - -C "$(dirname "$INSTALL_DIR")"
+
+# Step 3: Setup command symlinks and permissions
+echo -e "${{C_CYAN}}[•] Configuring Knot binaries and permissions...${{C_RESET}}"
+mkdir -p "$BIN_DIR"
+ln -sf "$INSTALL_DIR/bin/knot" "$BIN_DIR/knot"
+ln -sf "$INSTALL_DIR/bin/knot-installer" "$BIN_DIR/knot-installer"
+ln -sf "$INSTALL_DIR/bin/knot-autounlock" "$BIN_DIR/knot-autounlock"
+chmod +x "$INSTALL_DIR/bin/knot" "$INSTALL_DIR/bin/knot-installer" "$INSTALL_DIR/bin/knot-autounlock"
+chmod +x "$INSTALL_DIR/core/installer/display.sh" "$INSTALL_DIR/core/installer/enroll.py"
+
+export PATH="$BIN_DIR:$PATH"
+
+# Step 4: Execute enrollment handshake
+echo -e "${{C_CYAN}}[•] Submitting Strand enrollment to Anchor...${{C_RESET}}"
+"$BIN_DIR/knot-installer" join "${{ANCHOR_HOST}}:${{ANCHOR_PORT}}" "$TOKEN" --auto
+
+echo -e "\\n${{C_GREEN}}${{C_BOLD}}[✓] Success! This device is now onboarded and paired with the Swarm Anchor.${{C_RESET}}\\n"
+"""
 
 
 class Database:
@@ -1842,6 +2181,26 @@ class HubRequestHandler(BaseHTTPRequestHandler):
     def _send_error(self, message: str, status_code: int = 400):
         self._send_json({"error": message, "status": "ERROR"}, status_code)
 
+    def _send_text(self, text: str, content_type: str = "text/plain; charset=utf-8", status_code: int = 200):
+        body = text.encode("utf-8")
+        self.send_response(status_code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_bytes(self, data: bytes, content_type: str, status_code: int = 200, headers: dict = None):
+        self.send_response(status_code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        if headers:
+            for k, v in headers.items():
+                self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(data)
+
     def _serve_static(self, path: str):
         if not os.path.isdir(WEB_DIST_DIR):
             self._send_html(
@@ -1924,6 +2283,94 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 "tasks_blocked_dag": blocked,
                 "total_tasks_tracked": len(tasks)
             })
+
+        elif path == "/dist/knot-mesh.tar.gz":
+            bundle_data = get_distribution_bundle()
+            self._send_bytes(
+                bundle_data,
+                content_type="application/gzip",
+                status_code=200,
+                headers={"Content-Disposition": 'attachment; filename="knot-mesh.tar.gz"'}
+            )
+
+        elif path.startswith("/join/"):
+            raw_token = path.replace("/join/", "", 1).strip()
+            if not raw_token:
+                self._send_error("Pairing token required", 400)
+                return
+
+            pin = raw_token.split(".")[0].strip()
+            with enrollment_coordinator.lock:
+                session = enrollment_coordinator.sessions.get(pin)
+
+            now = time.time()
+            if not session or now > session["expires_at"]:
+                ua = self.headers.get("User-Agent", "").lower()
+                accept = self.headers.get("Accept", "").lower()
+                is_terminal = any(t in ua for t in ("curl", "wget", "httpie")) or "application/x-sh" in accept
+                if is_terminal:
+                    self._send_text(
+                        "#!/usr/bin/env bash\n"
+                        "echo -e '\\033[1;31m[✗] Error: Invalid or expired Knot pairing token.\\033[0m' >&2\n"
+                        "echo -e 'Please generate a new invitation on the Anchor using: knot-installer invite' >&2\n"
+                        "exit 1\n",
+                        content_type="application/x-sh",
+                        status_code=404
+                    )
+                else:
+                    self._send_html(
+                        "<!DOCTYPE html><html><head><title>Invalid Token — Knot Swarm</title>"
+                        "<style>body{background:#0b0f19;color:#f3f4f6;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}"
+                        ".box{background:#111827;border:1px solid #1f293d;border-radius:12px;padding:32px;max-width:480px;text-align:center;box-shadow:0 10px 25px rgba(0,0,0,0.5);}"
+                        "h2{color:#f87171;margin-bottom:12px;}code{background:#030712;padding:4px 8px;border-radius:6px;color:#38bdf8;font-family:monospace;}"
+                        "</style></head><body><div class='box'><h2>Invalid or Expired Pairing Token</h2>"
+                        "<p>This invitation token does not exist or has expired.</p>"
+                        "<p style='margin-top:16px;'>Generate a fresh invite on the Swarm Anchor:<br><br><code>knot-installer invite</code></p>"
+                        "</div></body></html>",
+                        status_code=404
+                    )
+                return
+
+            host_hdr = self.headers.get("Host", "").strip()
+            if host_hdr:
+                if ":" in host_hdr:
+                    req_host, req_port_str = host_hdr.split(":", 1)
+                else:
+                    req_host = host_hdr
+                    req_port_str = str(DEFAULT_PORT)
+            else:
+                req_host = session.get("anchor_ip") or "127.0.0.1"
+                req_port_str = str(DEFAULT_PORT)
+
+            token_val = session["token"]
+            pin_val = session["pin"]
+            fp_short = session["fingerprint_short"]
+            swarm_id, swarm_name = get_active_swarm_info()
+
+            ua = self.headers.get("User-Agent", "").lower()
+            accept = self.headers.get("Accept", "").lower()
+            is_terminal = any(t in ua for t in ("curl", "wget", "httpie")) or "application/x-sh" in accept
+
+            if not is_terminal and ("text/html" in accept or any(b in ua for b in ("mozilla", "chrome", "safari", "webkit"))):
+                html = render_onboarding_html(
+                    swarm_name=swarm_name,
+                    anchor_host=req_host,
+                    anchor_port=req_port_str,
+                    token=token_val,
+                    pin=pin_val,
+                    fp_short=fp_short
+                )
+                self._send_html(html, 200)
+            else:
+                script = render_bootstrap_script(
+                    swarm_name=swarm_name,
+                    anchor_host=req_host,
+                    anchor_port=req_port_str,
+                    token=token_val,
+                    pin=pin_val,
+                    fp_short=fp_short
+                )
+                self._send_text(script, content_type="application/x-sh", status_code=200)
 
         elif path in ("/tasks", "/tasks/list"):
             status_filter = query.get("status", [None])[0]
@@ -2123,7 +2570,8 @@ class HubRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/swarm/enroll/invite":
             expires_in = int(body.get("expires_in", 600))
-            session = enrollment_coordinator.create_invite(expires_in=expires_in)
+            anchor_ip = body.get("anchor_ip", "").strip()
+            session = enrollment_coordinator.create_invite(expires_in=expires_in, anchor_ip=anchor_ip)
             self._send_json({
                 "pin": session["pin"],
                 "token": session["token"],

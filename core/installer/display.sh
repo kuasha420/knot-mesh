@@ -168,20 +168,98 @@ display_format_json() {
   local res="$1"
   local refresh="$2"
   local scale="$3"
+  local raw_kscreen="${4:-}"
 
-  # Normalize numbers
-  local norm_refresh
-  norm_refresh="$(awk -v r="$refresh" 'BEGIN { printf "%.2f", r }')"
-  local norm_scale
-  norm_scale="$(awk -v s="$scale" 'BEGIN { printf "%.2f", s }')"
+  python3 -c '
+import sys, json, re
 
-  cat << JSON_EOF
-{
-  "resolution": "$res",
-  "refresh_rate": $norm_refresh,
-  "scale": $norm_scale
+res = sys.argv[1]
+try:
+    refresh = float(sys.argv[2])
+except ValueError:
+    refresh = 60.0
+try:
+    scale = float(sys.argv[3])
+except ValueError:
+    scale = 1.0
+
+kraw = sys.argv[4] if len(sys.argv) > 4 else ""
+outputs = []
+
+if kraw:
+    text = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", kraw)
+    cur = {}
+    for line in text.splitlines():
+        line = line.strip()
+        m_out = re.match(r"^Output:\s*\d+\s+([^\s]+)", line)
+        if m_out:
+            if cur and cur.get("enabled") and cur.get("connected") and cur.get("resolution"):
+                outputs.append(cur)
+            cur = {
+                "name": m_out.group(1),
+                "enabled": False,
+                "connected": False,
+                "priority": 999,
+                "scale": 1.0,
+                "geometry": "",
+                "resolution": "",
+                "refresh_rate": 60.0
+            }
+            continue
+        if not cur:
+            continue
+        if line == "enabled":
+            cur["enabled"] = True
+        elif line == "connected":
+            cur["connected"] = True
+        elif line.startswith("priority"):
+            parts = line.split()
+            if len(parts) >= 2 and parts[1].isdigit():
+                cur["priority"] = int(parts[1])
+        elif line.startswith("Geometry:"):
+            cur["geometry"] = line.split(":", 1)[1].strip()
+        elif line.startswith("Scale:"):
+            parts = line.split()
+            if len(parts) >= 2:
+                try:
+                    cur["scale"] = float(parts[1])
+                except ValueError:
+                    pass
+        elif "Modes:" in line or ("*" in line and "x" in line and "@" in line):
+            m_mode = re.search(r"(\d+)x(\d+)@([0-9.]+)\*", line)
+            if m_mode:
+                cur["resolution"] = f"{m_mode.group(1)}x{m_mode.group(2)}"
+                try:
+                    cur["refresh_rate"] = float(m_mode.group(3))
+                except ValueError:
+                    pass
+    if cur and cur.get("enabled") and cur.get("connected") and cur.get("resolution"):
+        outputs.append(cur)
+
+    outputs = sorted(outputs, key=lambda o: o["priority"])
+
+formatted_outputs = []
+for idx, o in enumerate(outputs):
+    formatted_outputs.append({
+        "name": o["name"],
+        "primary": (idx == 0),
+        "priority": o["priority"],
+        "resolution": o["resolution"],
+        "refresh_rate": round(o["refresh_rate"], 2),
+        "scale": round(o["scale"], 2),
+        "geometry": o["geometry"]
+    })
+
+payload = {
+    "resolution": res,
+    "refresh_rate": round(refresh, 2),
+    "scale": round(scale, 2)
 }
-JSON_EOF
+if formatted_outputs:
+    payload["outputs"] = formatted_outputs
+
+print(json.dumps(payload, indent=2))
+' "$res" "$refresh" "$scale" "$raw_kscreen"
 }
 
 main() {
@@ -224,6 +302,13 @@ main() {
   done
 
   local raw_detected
+  local raw_kscreen=""
+  if command -v kscreen-doctor >/dev/null; then
+    if ! raw_kscreen="$(kscreen-doctor -o 2>&1)"; then
+      raw_kscreen=""
+    fi
+  fi
+
   raw_detected="$(display_detect_specs)"
   read -r det_res det_refresh det_scale <<< "$raw_detected"
 
@@ -232,7 +317,7 @@ main() {
   local final_scale="${override_scale:-$det_scale}"
 
   if [ "$output_format" = "json" ]; then
-    display_format_json "$final_res" "$final_refresh" "$final_scale"
+    display_format_json "$final_res" "$final_refresh" "$final_scale" "$raw_kscreen"
   elif [ "$output_format" = "export" ]; then
     echo "export KNOT_DISPLAY_RES=\"$final_res\""
     echo "export KNOT_DISPLAY_REFRESH=\"$final_refresh\""

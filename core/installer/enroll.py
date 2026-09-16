@@ -92,9 +92,20 @@ def detect_display_specs() -> Dict[str, Any]:
 
 
 def detect_local_pubkey() -> str:
-    """Reads local Ed25519 public key."""
+    """Reads local Ed25519 public key, auto-generating one if missing."""
     home = os.environ.get("HOME", os.path.expanduser("~"))
     pub_path = os.path.join(home, ".ssh/id_ed25519.pub")
+    key_path = os.path.join(home, ".ssh/id_ed25519")
+    if not os.path.exists(pub_path):
+        os.makedirs(os.path.join(home, ".ssh"), mode=0o700, exist_ok=True)
+        try:
+            subprocess.run(
+                ["ssh-keygen", "-t", "ed25519", "-N", "", "-f", key_path, "-C", f"{os.environ.get('USER', 'knot')}@{socket.gethostname()}"],
+                check=True,
+                capture_output=True
+            )
+        except Exception:
+            pass
     if os.path.exists(pub_path):
         with open(pub_path, "r") as f:
             return f.read().strip()

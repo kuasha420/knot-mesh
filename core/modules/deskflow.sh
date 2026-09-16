@@ -56,6 +56,42 @@ deskflow_write_server_conf() {
   deskflow_compile_server_config "$@"
 }
 
+deskflow_sync_display_layout() {
+  local home
+  home="$(knot_detect_user_home)"
+  local active_swarm
+  active_swarm="$(knot_get_active_swarm)"
+  local my_host
+  my_host="$(knot_detect_hostname)"
+  local anchor_manifest="$home/.config/knot/swarms/${active_swarm}/nodes/${my_host}.json"
+
+  if [ -f "$anchor_manifest" ] && command -v kscreen-doctor >/dev/null; then
+    local display_sh="$KNOT_ROOT/core/installer/display.sh"
+    if [ -x "$display_sh" ]; then
+      local fresh_display
+      if fresh_display="$("$display_sh" --json 2>&1)"; then
+        if [ -n "$fresh_display" ]; then
+          python3 -c '
+import json, sys
+m_path = sys.argv[1]
+try:
+    fresh = json.loads(sys.argv[2])
+    with open(m_path, "r") as f:
+        data = json.load(f)
+    if data.get("display") != fresh:
+        data["display"] = fresh
+        with open(m_path, "w") as f:
+            json.dump(data, f, indent=2)
+except Exception as e:
+    sys.stderr.write(f"Notice: manifest display sync skipped: {e}\n")
+' "$anchor_manifest" "$fresh_display"
+        fi
+      fi
+    fi
+  fi
+  deskflow_compile_server_config "$(deskflow_get_lock)"
+}
+
 deskflow_get_lock() {
   local home
   home="$(knot_detect_user_home)"

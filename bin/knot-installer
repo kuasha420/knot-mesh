@@ -313,6 +313,19 @@ INVITE_HELP
 
   echo -e "\n${C_CYAN}[•] Requesting enrollment invitation from Knot Hub (https://${host}:${port})...${C_RESET}"
 
+  # Find external routable IP for user display and invite session
+  local anchor_ip="127.0.0.1"
+  if command -v ip >/dev/null; then
+    local route_out=""
+    if route_out="$(ip route get 1.1.1.1 2>&1)"; then
+      local parsed_ip
+      parsed_ip="$(echo "$route_out" | awk '{print $7; exit}')"
+      if [ -n "$parsed_ip" ]; then
+        anchor_ip="$parsed_ip"
+      fi
+    fi
+  fi
+
   local invite_payload
   invite_payload="$(python3 -c '
 import urllib.request, ssl, json, sys
@@ -323,7 +336,7 @@ ctx.verify_mode = ssl.CERT_NONE
 
 req = urllib.request.Request(
     "https://'"${host}:${port}"'/swarm/enroll/invite",
-    data=json.dumps({"expires_in": '"$ttl"'}).encode("utf-8"),
+    data=json.dumps({"expires_in": '"$ttl"', "anchor_ip": "'"${anchor_ip}"'"}).encode("utf-8"),
     headers={"Content-Type": "application/json"}
 )
 try:
@@ -339,27 +352,18 @@ except Exception as e:
   token="$(echo "$invite_payload" | python3 -c 'import json, sys; print(json.load(sys.stdin)["token"])')"
   fp_short="$(echo "$invite_payload" | python3 -c 'import json, sys; print(json.load(sys.stdin)["fingerprint_short"])')"
 
-  # Find external routable IP for user display
-  local anchor_ip="127.0.0.1"
-  if command -v ip >/dev/null; then
-    local route_out=""
-    if route_out="$(ip route get 1.1.1.1 2>&1)"; then
-      local parsed_ip
-      parsed_ip="$(echo "$route_out" | awk '{print $7; exit}')"
-      if [ -n "$parsed_ip" ]; then
-        anchor_ip="$parsed_ip"
-      fi
-    fi
-  fi
-
   echo -e "\n${C_GREEN}${C_BOLD}======================================================================${C_RESET}"
   echo -e "${C_GREEN}${C_BOLD}              KNOT MESH — STRAND ENROLLMENT INVITATION                 ${C_RESET}"
   echo -e "${C_GREEN}${C_BOLD}======================================================================${C_RESET}"
   echo -e "  ${C_BOLD}Pairing PIN:${C_RESET}    ${C_YELLOW}${pin}${C_RESET}"
   echo -e "  ${C_BOLD}Join Token:${C_RESET}     ${C_CYAN}${token}${C_RESET}"
   echo -e "  ${C_BOLD}Expires In:${C_RESET}     ${ttl} seconds"
-  echo -e "\n  ${C_BOLD}Run on Strand machine (laptop/handheld):${C_RESET}"
-  echo -e "    ${C_GREEN}knot-installer join ${anchor_ip}:${port} ${token}${C_RESET}"
+  echo -e "\n  ${C_BOLD}🪄 Magic Zero-Setup Onboarding (copy & paste in terminal on Strand):${C_RESET}"
+  echo -e "    ${C_GREEN}${C_BOLD}curl -kfsSL https://${anchor_ip}:${port}/join/${token} | bash${C_RESET}"
+  echo -e "\n  ${C_BOLD}🌐 Web Onboarding Page:${C_RESET}"
+  echo -e "    ${C_CYAN}https://${anchor_ip}:${port}/join/${token}${C_RESET}"
+  echo -e "\n  ${C_DIM}Or if Knot is already installed:${C_RESET}"
+  echo -e "    ${C_DIM}knot-installer join ${anchor_ip}:${port} ${token}${C_RESET}"
   echo -e "${C_GREEN}${C_BOLD}======================================================================${C_RESET}"
   echo -e "${C_CYAN}Waiting for Strand rendezvous connection (timeout: ${ttl}s)...${C_RESET}"
 
@@ -473,6 +477,7 @@ ${C_BOLD}Options:${C_RESET}
     --width <pixels>     Override screen width
     --height <pixels>    Override screen height
     --scale <factor>     Override display scale factor (e.g. 1.25)
+    --auto               Non-interactive automated enrollment mode
 JOIN_HELP
     exit 1
   fi
@@ -481,6 +486,7 @@ JOIN_HELP
   token="$2"
   shift 2
 
+  local auto_mode=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --id)
@@ -503,6 +509,10 @@ JOIN_HELP
         scale="$2"
         shift 2
         ;;
+      --auto)
+        auto_mode=1
+        shift
+        ;;
       *)
         echo -e "${C_RED}Error:${C_RESET} Unknown option '$1'" >&2
         exit 1
@@ -524,12 +534,41 @@ JOIN_HELP
   # Post-enrollment setup
   echo -e "${C_CYAN}[•] Finalizing local service configurations...${C_RESET}"
   if command -v systemctl >/dev/null; then
-    if systemctl --user is-active --quiet knot-deskflow.service; then
-      systemctl --user restart knot-deskflow.service
+    local s_out
+    if s_out="$(systemctl --user daemon-reload 2>&1)"; then
+      :
+    else
+      knot_log_warn "systemctl daemon-reload notice: $s_out"
     fi
-    if systemctl --user is-active --quiet knot-guard.service; then
-      systemctl --user restart knot-guard.service
+
+    local unit_dir="$KNOT_ROOT/systemd"
+    local user_systemd_dir="${HOME}/.config/systemd/user"
+    mkdir -p "$user_systemd_dir"
+
+    for unit in knot-guard knot-deskflow; do
+      if [ -f "$unit_dir/${unit}.service" ]; then
+        ln -sf "$unit_dir/${unit}.service" "$user_systemd_dir/${unit}.service"
+      fi
+    done
+
+    if s_out="$(systemctl --user daemon-reload 2>&1)"; then
+      :
+    else
+      knot_log_warn "systemctl daemon-reload notice: $s_out"
     fi
+
+    for unit in knot-guard.service knot-deskflow.service; do
+      if systemctl --user is-enabled --quiet "$unit"; then
+        systemctl --user restart "$unit"
+      else
+        local act_out
+        if act_out="$(systemctl --user enable --now "$unit" 2>&1)"; then
+          echo -e "    Enabled and started ${unit}"
+        else
+          knot_log_warn "Could not enable ${unit}: ${act_out}"
+        fi
+      fi
+    done
   fi
 
   echo -e "${C_GREEN}${C_BOLD}[✓] Onboarding complete! This device is now an active Strand in the mesh.${C_RESET}\n"
