@@ -12,9 +12,12 @@ NODE="${1:-}"
 PORT_ARG="${2:-}"
 MODE="print"
 EXPLICIT_SWARM=""
-
-shift || true
-[ $# -gt 0 ] && shift || true
+if [ $# -ge 1 ]; then
+  shift
+fi
+if [ $# -ge 1 ]; then
+  shift
+fi
 
 while [ $# -gt 0 ]; do
   case "$1" in
