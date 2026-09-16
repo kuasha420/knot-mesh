@@ -1,0 +1,1 @@
+{"name":"knot_task_batch_status","description":"Query progress summary and individual subtask statuses for a fan-out batch ID.","parameters":{"properties":{"batch_id":{"description":"The unique UUID of the batch to inspect.","type":"string"}},"required":["batch_id"],"type":"object"}}

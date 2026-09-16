@@ -1,0 +1,35 @@
+{
+  "anchor": "desktop",
+  "nodes": {
+    "desktop": {
+      "screens": ["desktop"],
+      "resolution": "2560x1440",
+      "scale": 1.0
+    },
+    "laptop": {
+      "screens": ["laptop"],
+      "resolution": "1920x1080",
+      "scale": 1.25
+    },
+    "steamdeck": {
+      "screens": ["steamdeck"],
+      "resolution": "1280x800",
+      "scale": 1.0
+    }
+  },
+  "links": [
+    {
+      "from": "desktop",
+      "direction": "left",
+      "to": "laptop",
+      "fractional": true
+    },
+    {
+      "from": "desktop",
+      "direction": "down",
+      "to": "steamdeck",
+      "fractional": true
+    }
+  ],
+  "locked": false
+}

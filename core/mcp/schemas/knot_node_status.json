@@ -1,0 +1,1 @@
+{"name":"knot_node_status","description":"Check mesh health, active nodes, hardware architecture, and capabilities across the Knot Swarm.","parameters":{"properties":{},"type":"object"}}

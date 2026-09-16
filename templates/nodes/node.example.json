@@ -1,0 +1,22 @@
+{
+  "id": "laptop",
+  "hostname": "arch-laptop",
+  "role": "strand",
+  "arch": "x86_64",
+  "os": "Arch Linux / KDE Plasma 6 Wayland",
+  "capabilities": {
+    "gpu": true,
+    "cuda": false,
+    "cores": 8,
+    "battery": true
+  },
+  "display": {
+    "resolution": "2560x1440",
+    "refresh_rate": 60.0,
+    "scale": 1.25
+  },
+  "network": {
+    "ssh_port": 22,
+    "interfaces": ["wlan0", "eth0"]
+  }
+}

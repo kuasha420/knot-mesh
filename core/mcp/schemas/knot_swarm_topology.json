@@ -1,0 +1,8 @@
+{
+  "name": "knot_swarm_topology",
+  "description": "Get a consolidated snapshot of the entire Knot Swarm: online nodes, IPs, assigned LLM models, GPU backends (CUDA/ROCm/UMA), active tasks/activity, and 5h/weekly quota percentages in a single call. Eliminates repetitive multi-step inspection loops.",
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  }
+}

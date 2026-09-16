@@ -1,0 +1,1 @@
+{"name":"knot_quota_matrix","description":"Render the 5-hour and weekly Google AI Pro/Ultra model quota matrix with progress bars and reset countdowns.","parameters":{"properties":{"target":{"default":"all","description":"Target node to inspect ('all' or specific node ID like 'desktop', 'laptop', 'steamdeck').","type":"string"}},"type":"object"}}

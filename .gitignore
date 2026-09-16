@@ -1,0 +1,32 @@
+# Knot Mesh Runtime & Temporary State
+state/
+*.tmp
+*.log
+__pycache__/
+*.pyc
+*.so
+
+# Build & Web artifacts
+node_modules/
+web/dist/
+.cache/
+
+# Local Swarm Profiles & Registries (Keep examples only)
+swarms.d/*.conf
+!templates/swarms.d/*.conf
+registry/
+local/
+
+# Strict Secret & Key Leakage Prevention (Defense in Depth)
+*id_rsa*
+*id_ed25519*
+*id_ecdsa*
+*.key
+*.pem
+*.priv
+!*.pub
+
+# Local Environment Overrides
+.env
+.env.*
+local-override.sh

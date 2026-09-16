@@ -1,0 +1,2432 @@
+#!/usr/bin/env python3
+"""
+Knot Swarm Blackboard Hub (knot-hub)
+Lightweight coordination daemon implementing Linda Tuplespace primitives (OUT, IN, RD),
+DAG task dependency resolution, batch fan-out / barrier joins, Swarm Konversations channel ledger,
+3-state atomic artifact lease vault, and real-time Server-Sent Events (SSE).
+Zero external dependencies (uses standard library Python 3).
+"""
+
+import glob
+import json
+import mimetypes
+import os
+import re
+import shutil
+import sqlite3
+import subprocess
+import sys
+import threading
+import time
+import uuid
+from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
+
+from datetime import datetime, timezone
+
+WEB_DIST_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "web", "dist")
+)
+
+DEFAULT_PORT = 4242
+DEFAULT_DB_PATH = os.path.expanduser("~/.config/knot/hub.db")
+DEFAULT_LEASE_TTL = 60  # seconds
+DEFAULT_ARTIFACT_LEASE_TTL = 120  # seconds
+
+OFFICIAL_MODELS = [
+    {
+        "id": "gemini-3.8-flash-high",
+        "name": "Gemini 3.8 Flash (High)",
+        "tier": "flash",
+        "provider": "google",
+        "description": "Fast & intelligent with high reasoning effort"
+    },
+    {
+        "id": "gemini-3.8-flash-medium",
+        "name": "Gemini 3.8 Flash (Medium)",
+        "tier": "flash",
+        "provider": "google",
+        "description": "Fast & efficient with medium reasoning effort"
+    },
+    {
+        "id": "gemini-3.8-flash-low",
+        "name": "Gemini 3.8 Flash (Low)",
+        "tier": "flash",
+        "provider": "google",
+        "description": "Ultra-fast with minimal reasoning overhead"
+    },
+    {
+        "id": "gemini-3.7-flash-high",
+        "name": "Gemini 3.7 Flash (High)",
+        "tier": "flash",
+        "provider": "google",
+        "description": "Gemini 3.7 Flash with high reasoning effort"
+    },
+    {
+        "id": "gemini-3.7-flash-medium",
+        "name": "Gemini 3.7 Flash (Medium)",
+        "tier": "flash",
+        "provider": "google",
+        "description": "Gemini 3.7 Flash with medium reasoning effort"
+    },
+    {
+        "id": "gemini-3.7-flash-low",
+        "name": "Gemini 3.7 Flash (Low)",
+        "tier": "flash",
+        "provider": "google",
+        "description": "Gemini 3.7 Flash with minimal reasoning overhead"
+    },
+    {
+        "id": "gemini-3.6-flash-high",
+        "name": "Gemini 3.6 Flash (High)",
+        "tier": "flash",
+        "provider": "google",
+        "description": "Gemini 3.6 Flash with high reasoning effort"
+    },
+    {
+        "id": "gemini-3.6-flash-medium",
+        "name": "Gemini 3.6 Flash (Medium)",
+        "tier": "flash",
+        "provider": "google",
+        "description": "Gemini 3.6 Flash with medium reasoning effort"
+    },
+    {
+        "id": "gemini-3.6-flash-low",
+        "name": "Gemini 3.6 Flash (Low)",
+        "tier": "flash",
+        "provider": "google",
+        "description": "Gemini 3.6 Flash with minimal reasoning overhead"
+    },
+    {
+        "id": "gemini-3.1-pro-high",
+        "name": "Gemini 3.1 Pro (High)",
+        "tier": "pro",
+        "provider": "google",
+        "description": "Deep reasoning heavyweight model for complex architecture"
+    },
+    {
+        "id": "gemini-3.1-pro-low",
+        "name": "Gemini 3.1 Pro (Low)",
+        "tier": "pro",
+        "provider": "google",
+        "description": "Pro-tier model with low reasoning effort"
+    },
+    {
+        "id": "claude-sonnet-4-6",
+        "name": "Claude Sonnet 4.6 (Thinking)",
+        "tier": "claude",
+        "provider": "anthropic",
+        "description": "Anthropic Claude Sonnet 4.6 with thinking mode"
+    },
+    {
+        "id": "claude-opus-4-6-thinking",
+        "name": "Claude Opus 4.6 (Thinking)",
+        "tier": "claude",
+        "provider": "anthropic",
+        "description": "Anthropic Claude Opus 4.6 with extended thinking"
+    },
+    {
+        "id": "gpt-oss-120b-medium",
+        "name": "GPT-OSS 120B (Medium)",
+        "tier": "oss",
+        "provider": "openai",
+        "description": "Open weights 120B parameter model"
+    },
+]
+AVAILABLE_MODELS = OFFICIAL_MODELS
+DEFAULT_SWARM_MODEL = "gemini-3.8-flash-high"
+
+_cached_live_models = None
+_cached_live_models_ts = 0
+
+
+def get_available_models() -> list[dict]:
+    global _cached_live_models, _cached_live_models_ts
+    now = time.time()
+    if _cached_live_models and (now - _cached_live_models_ts < 300):
+        return _cached_live_models
+
+    agy_bin = shutil.which("agy") or os.path.expanduser("~/.local/bin/agy")
+    if agy_bin and os.path.exists(agy_bin):
+        try:
+            res = subprocess.run([agy_bin, "models"], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0 and res.stdout:
+                parsed = []
+                for line in res.stdout.splitlines():
+                    clean = re.sub(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", "", line).strip()
+                    if not clean or "Fetching" in clean or clean.startswith("⠋") or clean.startswith("⠙"):
+                        continue
+                    parts = clean.split(None, 1)
+                    if len(parts) == 2:
+                        mid, mname = parts[0].strip(), parts[1].strip()
+                        tier = "flash" if "flash" in mid else ("pro" if "pro" in mid else ("claude" if "claude" in mid else ("oss" if "oss" in mid else "general")))
+                        prov = "google" if "gemini" in mid else ("anthropic" if "claude" in mid else ("openai" if "gpt" in mid else "other"))
+                        parsed.append({
+                            "id": mid,
+                            "name": mname,
+                            "tier": tier,
+                            "provider": prov,
+                            "description": f"Antigravity official model: {mname}"
+                        })
+                if parsed:
+                    _cached_live_models = parsed
+                    _cached_live_models_ts = now
+                    return parsed
+        except Exception:
+            pass
+
+    _cached_live_models = OFFICIAL_MODELS
+    _cached_live_models_ts = now
+    return OFFICIAL_MODELS
+
+
+
+def format_reset_countdown(reset_iso: str | None) -> str:
+    if not reset_iso:
+        return "-"
+    try:
+        clean_iso = re.sub(r"(\.\d{6})\d+", r"\1", str(reset_iso))
+        dt = datetime.fromisoformat(clean_iso.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        diff = dt - now
+        secs = int(diff.total_seconds())
+        if secs <= 0:
+            return "Ready"
+        hrs = secs // 3600
+        mins = (secs % 3600) // 60
+        days = hrs // 24
+        if days > 0:
+            rem_hrs = hrs % 24
+            return f"in {days}d {rem_hrs}h"
+        return f"in {hrs}h {mins}m"
+    except Exception:
+        return str(reset_iso)[:16]
+
+# Global subscriber queues for SSE broadcasting
+_subscribers_lock = threading.Lock()
+_subscribers = set()
+
+
+def broadcast_event(event_type: str, data: dict):
+    payload = f"event: {event_type}\ndata: {json.dumps(data)}\n\n".encode("utf-8")
+    with _subscribers_lock:
+        dead = []
+        for q in _subscribers:
+            try:
+                q.put_nowait(payload)
+            except Exception:
+                dead.append(q)
+        for d in dead:
+            _subscribers.discard(d)
+
+
+KNOT_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+)
+REGISTRY_NODES_DIR = os.path.join(KNOT_ROOT, "registry", "nodes")
+SCREEN_CACHE_DIR = "/tmp/knot_screens"
+SCREEN_CACHE_TTL = 8.0  # seconds for thumbnail
+SCREEN_CACHE_TTL_HI = 1.2  # seconds for high-quality expanded stream
+
+_node_screen_locks: dict[str, threading.Lock] = {}
+_screen_locks_mutex = threading.Lock()
+
+
+def get_node_manifest(node_id: str) -> dict:
+    if not re.match(r"^[a-zA-Z0-9_-]+$", str(node_id)):
+        return {}
+    path = os.path.join(REGISTRY_NODES_DIR, f"{node_id}.json")
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _get_screen_lock(node_id: str) -> threading.Lock:
+    with _screen_locks_mutex:
+        if node_id not in _node_screen_locks:
+            _node_screen_locks[node_id] = threading.Lock()
+        return _node_screen_locks[node_id]
+
+
+def _generate_screen_placeholder_svg(node_id: str, message: str = "Display Offline / Sleeping") -> bytes:
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="480" height="270" viewBox="0 0 480 270">
+  <rect width="480" height="270" fill="#16161e"/>
+  <rect x="2" y="2" width="476" height="266" rx="8" fill="#1a1b26" stroke="#24283b" stroke-width="2"/>
+  <circle cx="240" cy="100" r="28" fill="#24283b" stroke="#7aa2f7" stroke-width="1.5" stroke-dasharray="4 2"/>
+  <path d="M228 92h24v16h-24z" fill="none" stroke="#7aa2f7" stroke-width="2" rx="2"/>
+  <path d="M236 108v4h8v-4" fill="none" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="240" y="150" fill="#c0caf5" font-family="monospace" font-size="14" font-weight="bold" text-anchor="middle">@{node_id}</text>
+  <text x="240" y="175" fill="#565f89" font-family="monospace" font-size="11" text-anchor="middle">{message}</text>
+  <text x="240" y="240" fill="#414868" font-family="monospace" font-size="9" text-anchor="middle">KNOT SWARM TELEMETRY DISPLAY</text>
+</svg>"""
+    return svg.encode("utf-8")
+
+
+def capture_node_screen(node_id: str, force: bool = False, quality: str = "low") -> tuple[bytes | None, str]:
+    if not re.match(r"^[a-zA-Z0-9_-]+$", str(node_id)):
+        return None, "image/jpeg"
+
+    is_high = quality in ("high", "hi", "hd", "1")
+    os.makedirs(SCREEN_CACHE_DIR, exist_ok=True)
+    cache_file = os.path.join(SCREEN_CACHE_DIR, f"{node_id}_hi.jpg" if is_high else f"{node_id}.jpg")
+    ttl = SCREEN_CACHE_TTL_HI if is_high else SCREEN_CACHE_TTL
+
+    now = time.time()
+    if not force and os.path.isfile(cache_file):
+        try:
+            mtime = os.path.getmtime(cache_file)
+            if (now - mtime) < ttl and os.path.getsize(cache_file) > 500:
+                with open(cache_file, "rb") as f:
+                    return f.read(), "image/jpeg"
+        except Exception:
+            pass
+
+    lock = _get_screen_lock(node_id)
+    lock_timeout = 2.0 if is_high else 5.0
+    acquired = lock.acquire(timeout=lock_timeout)
+    if not acquired:
+        if os.path.isfile(cache_file) and os.path.getsize(cache_file) > 500:
+            with open(cache_file, "rb") as f:
+                return f.read(), "image/jpeg"
+        return _generate_screen_placeholder_svg(node_id, "Capture In Progress..."), "image/svg+xml"
+
+    try:
+        if not force and os.path.isfile(cache_file):
+            mtime = os.path.getmtime(cache_file)
+            if (time.time() - mtime) < ttl and os.path.getsize(cache_file) > 500:
+                with open(cache_file, "rb") as f:
+                    return f.read(), "image/jpeg"
+
+        manifest = get_node_manifest(node_id)
+        raw_png = os.path.join(SCREEN_CACHE_DIR, f"{node_id}_raw.png")
+
+        res_geom = "1280x" if is_high else "480x"
+        res_qual = "82" if is_high else "60"
+
+        if node_id == "desktop":
+            env = os.environ.copy()
+            env.setdefault("WAYLAND_DISPLAY", "wayland-0")
+            env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+            cmd_capture = ["spectacle", "-b", "-n", "-o", raw_png]
+            res1 = subprocess.run(cmd_capture, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=4)
+            if res1.returncode == 0 and os.path.isfile(raw_png):
+                cmd_resize = ["magick", raw_png, "-resize", res_geom, "-quality", res_qual, cache_file]
+                res2 = subprocess.run(cmd_resize, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=4)
+                if res2.returncode == 0 and os.path.isfile(cache_file) and os.path.getsize(cache_file) > 500:
+                    with open(cache_file, "rb") as f:
+                        return f.read(), "image/jpeg"
+        else:
+            ip = manifest.get("ip_hint") or ""
+            if not ip and "interfaces" in manifest:
+                for iface in manifest["interfaces"].values():
+                    if isinstance(iface, dict) and iface.get("ip"):
+                        ip = iface["ip"]
+                        break
+            user = manifest.get("user") or "kuasha"
+            port = str(manifest.get("port") or 22)
+
+            if ip:
+                remote_cmd = (
+                    f"WAYLAND_DISPLAY=wayland-0 spectacle -b -n -o /tmp/knot_screen_{node_id}.png 2>/dev/null && "
+                    f"magick /tmp/knot_screen_{node_id}.png -resize {res_geom} -quality {res_qual} /tmp/knot_screen_{node_id}.jpg 2>/dev/null && "
+                    f"cat /tmp/knot_screen_{node_id}.jpg"
+                )
+                ssh_cmd = [
+                    "ssh", "-o", "ConnectTimeout=3", "-o", "StrictHostKeyChecking=no",
+                    "-p", port, f"{user}@{ip}", remote_cmd
+                ]
+                res = subprocess.run(ssh_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=6)
+                if res.returncode == 0 and len(res.stdout) > 500:
+                    with open(cache_file, "wb") as f:
+                        f.write(res.stdout)
+                    return res.stdout, "image/jpeg"
+
+        if os.path.isfile(cache_file) and os.path.getsize(cache_file) > 500:
+            with open(cache_file, "rb") as f:
+                return f.read(), "image/jpeg"
+
+        return _generate_screen_placeholder_svg(node_id, "Display Unavailable"), "image/svg+xml"
+    except Exception as e:
+        if os.path.isfile(cache_file) and os.path.getsize(cache_file) > 500:
+            with open(cache_file, "rb") as f:
+                return f.read(), "image/jpeg"
+        return _generate_screen_placeholder_svg(node_id, f"Display Offline ({type(e).__name__})"), "image/svg+xml"
+    finally:
+        lock.release()
+
+
+class Database:
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+        self._local = threading.local()
+        self._node_activities: dict[str, dict] = {}
+        self._activities_lock = threading.Lock()
+        self._init_schema()
+
+    def set_node_activity(self, node_id: str, activity: dict):
+        with self._activities_lock:
+            self._node_activities[node_id] = activity
+
+    def get_node_activity(self, node_id: str) -> dict:
+        with self._activities_lock:
+            return self._node_activities.get(node_id, {})
+
+    def get_all_node_activities(self) -> dict[str, dict]:
+        with self._activities_lock:
+            return dict(self._node_activities)
+
+    def get_connection(self) -> sqlite3.Connection:
+        if not hasattr(self._local, "conn"):
+            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("PRAGMA synchronous=NORMAL;")
+            conn.row_factory = sqlite3.Row
+            self._local.conn = conn
+        return self._local.conn
+
+    def _init_schema(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        with conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS tasks (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    prompt TEXT NOT NULL,
+                    target_plane TEXT NOT NULL DEFAULT 'any',
+                    status TEXT NOT NULL DEFAULT 'QUEUED',
+                    claimed_by TEXT,
+                    claimed_at INTEGER,
+                    lease_ttl_sec INTEGER DEFAULT 60,
+                    heartbeat_at INTEGER,
+                    result TEXT,
+                    session_id TEXT,
+                    duration_seconds REAL,
+                    tokens_used INTEGER,
+                    retry_count INTEGER DEFAULT 0,
+                    batch_id TEXT,
+                    parent_id TEXT,
+                    dependencies TEXT DEFAULT '[]',
+                    meta TEXT DEFAULT '{}',
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_target ON tasks(target_plane);")
+
+            # Idempotent column migrations for existing databases
+            cur = conn.cursor()
+            cur.execute("PRAGMA table_info(tasks)")
+            existing_task_cols = {row[1] for row in cur.fetchall()}
+            task_migrations = {
+                "batch_id": "TEXT",
+                "parent_id": "TEXT",
+                "dependencies": "TEXT DEFAULT '[]'",
+                "meta": "TEXT DEFAULT '{}'"
+            }
+            for col_name, col_def in task_migrations.items():
+                if col_name not in existing_task_cols:
+                    conn.execute(f"ALTER TABLE tasks ADD COLUMN {col_name} {col_def}")
+
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_batch ON tasks(batch_id);")
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS nodes (
+                    id TEXT PRIMARY KEY,
+                    hostname TEXT NOT NULL,
+                    capabilities TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'ONLINE',
+                    last_heartbeat INTEGER NOT NULL,
+                    agy_version TEXT,
+                    agy_auth TEXT,
+                    quota_5h_gemini REAL DEFAULT 1.0,
+                    quota_weekly_gemini REAL DEFAULT 1.0,
+                    quota_5h_3p REAL DEFAULT 1.0,
+                    quota_weekly_3p REAL DEFAULT 1.0,
+                    quota_data TEXT DEFAULT '{}',
+                    quota_updated_at INTEGER DEFAULT 0,
+                    power_state TEXT DEFAULT '{}',
+                    ip TEXT DEFAULT ''
+                );
+            """)
+
+            cur.execute("PRAGMA table_info(nodes)")
+            existing_node_cols = {row[1] for row in cur.fetchall()}
+            if "power_state" not in existing_node_cols:
+                conn.execute("ALTER TABLE nodes ADD COLUMN power_state TEXT DEFAULT '{}'")
+            if "ip" not in existing_node_cols:
+                conn.execute("ALTER TABLE nodes ADD COLUMN ip TEXT DEFAULT ''")
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS messages (
+                    id TEXT PRIMARY KEY,
+                    conv_id TEXT NOT NULL DEFAULT 'main',
+                    sender TEXT NOT NULL,
+                    mentions TEXT DEFAULT '[]',
+                    content TEXT NOT NULL,
+                    artifacts TEXT DEFAULT '[]',
+                    reply_to TEXT,
+                    meta TEXT DEFAULT '{}',
+                    created_at INTEGER NOT NULL
+                );
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conv_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(created_at);")
+
+            cur = conn.cursor()
+            cur.execute("PRAGMA table_info(messages)")
+            existing_msg_cols = {row[1] for row in cur.fetchall()}
+            if "meta" not in existing_msg_cols:
+                conn.execute("ALTER TABLE messages ADD COLUMN meta TEXT DEFAULT '{}'")
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS artifact_leases (
+                    name TEXT PRIMARY KEY,
+                    state TEXT NOT NULL DEFAULT 'DRAFTING',
+                    locked_by TEXT,
+                    lease_ttl_sec INTEGER DEFAULT 120,
+                    locked_at INTEGER,
+                    expires_at INTEGER,
+                    meta TEXT DEFAULT '{}',
+                    updated_at INTEGER NOT NULL
+                );
+            """)
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT DEFAULT '',
+                    folders TEXT DEFAULT '[]',
+                    default_channel TEXT DEFAULT 'main',
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+            """)
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS conversations (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL DEFAULT 'knot',
+                    title TEXT NOT NULL,
+                    description TEXT DEFAULT '',
+                    created_by TEXT NOT NULL DEFAULT 'human',
+                    is_archived INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_proj ON conversations(project_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at);")
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS node_conversation_sessions (
+                    conv_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    agy_session_id TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (conv_id, node_id)
+                );
+            """)
+
+            cur.execute("PRAGMA table_info(conversations)")
+            existing_conv_cols = {row[1] for row in cur.fetchall()}
+            if "selected_model" not in existing_conv_cols:
+                conn.execute("ALTER TABLE conversations ADD COLUMN selected_model TEXT DEFAULT ''")
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS conversation_node_models (
+                    conv_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (conv_id, node_id)
+                );
+            """)
+
+            cur.execute("PRAGMA table_info(nodes)")
+            existing_node_cols = {row[1] for row in cur.fetchall()}
+            node_migrations = {
+                "quota_5h_gemini": "REAL DEFAULT 1.0",
+                "quota_weekly_gemini": "REAL DEFAULT 1.0",
+                "quota_5h_3p": "REAL DEFAULT 1.0",
+                "quota_weekly_3p": "REAL DEFAULT 1.0",
+                "quota_data": "TEXT DEFAULT '{}'",
+                "quota_updated_at": "INTEGER DEFAULT 0"
+            }
+            for col_name, col_def in node_migrations.items():
+                if col_name not in existing_node_cols:
+                    conn.execute(f"ALTER TABLE nodes ADD COLUMN {col_name} {col_def}")
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS node_models (
+                    node_id TEXT PRIMARY KEY,
+                    model TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+            """)
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+            """)
+
+            self.sync_native_antigravity_projects(conn)
+
+        conn.close()
+
+    # -------------------------------------------------------------
+    # Settings & Model Management
+    # -------------------------------------------------------------
+
+    def get_setting(self, key: str, default: str = "") -> str:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM settings WHERE key = ?", (key,))
+        row = cur.fetchone()
+        return row["value"] if row else default
+
+    def set_setting(self, key: str, value: str):
+        conn = self.get_connection()
+        now = int(time.time())
+        with conn:
+            conn.execute("""
+                INSERT INTO settings (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at
+            """, (key, value, now))
+
+    def get_node_model(self, node_id: str) -> str:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT model FROM node_models WHERE node_id = ?", (node_id,))
+        row = cur.fetchone()
+        if row and row["model"]:
+            return row["model"]
+        return self.get_setting("default_swarm_model", DEFAULT_SWARM_MODEL)
+
+    def set_node_model(self, node_id: str, model: str):
+        conn = self.get_connection()
+        now = int(time.time())
+        with conn:
+            conn.execute("""
+                INSERT INTO node_models (node_id, model, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(node_id) DO UPDATE SET
+                    model = excluded.model,
+                    updated_at = excluded.updated_at
+            """, (node_id, model, now))
+
+    def get_all_node_models(self) -> dict[str, str]:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT node_id, model FROM node_models")
+        return {row["node_id"]: row["model"] for row in cur.fetchall()}
+
+    def set_all_node_models(self, model: str):
+        conn = self.get_connection()
+        now = int(time.time())
+        with conn:
+            self.set_setting("default_swarm_model", model)
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM nodes")
+            for row in cur.fetchall():
+                conn.execute("""
+                    INSERT INTO node_models (node_id, model, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(node_id) DO UPDATE SET
+                        model = excluded.model,
+                        updated_at = excluded.updated_at
+                """, (row["id"], model, now))
+
+    # -------------------------------------------------------------
+    # Task Operations & DAG Resolution
+    # -------------------------------------------------------------
+
+    def post_task(self, title: str, prompt: str, target_plane: str = "any",
+                  lease_ttl: int = DEFAULT_LEASE_TTL, batch_id: str | None = None,
+                  parent_id: str | None = None, dependencies: list[str] | None = None,
+                  meta: dict | None = None) -> dict:
+        task_id = str(uuid.uuid4())
+        now = int(time.time())
+        deps_list = dependencies or []
+        deps_json = json.dumps(deps_list)
+        meta_json = json.dumps(meta or {})
+
+        # Evaluate initial DAG state: if dependencies are provided, verify if all are completed
+        initial_status = "QUEUED"
+        if deps_list:
+            conn = self.get_connection()
+            cur = conn.cursor()
+            q_marks = ",".join("?" for _ in deps_list)
+            cur.execute(f"SELECT COUNT(*) as c FROM tasks WHERE id IN ({q_marks}) AND status = 'COMPLETED'", deps_list)
+            row = cur.fetchone()
+            if not row or row["c"] < len(deps_list):
+                initial_status = "BLOCKED_ON_DEPS"
+
+        conn = self.get_connection()
+        with conn:
+            conn.execute("""
+                INSERT INTO tasks (
+                    id, title, prompt, target_plane, status, lease_ttl_sec,
+                    batch_id, parent_id, dependencies, meta, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (task_id, title, prompt, target_plane, initial_status, lease_ttl,
+                  batch_id, parent_id, deps_json, meta_json, now, now))
+
+        task = self.get_task(task_id)
+        broadcast_event("task_created", task)
+        return task
+
+    def post_fanout(self, tasks: list[dict], barrier_task: dict | None = None, batch_id: str | None = None) -> dict:
+        """
+        Divide-and-Conquer: Posts a batch of parallel subtasks and an optional barrier task
+        that is held in BLOCKED_ON_DEPS until all subtasks finish.
+        """
+        batch_id = batch_id or str(uuid.uuid4())
+        created_subtasks = []
+        subtask_ids = []
+
+        for tspec in tasks:
+            title = tspec.get("title") or "Fan-out Subtask"
+            prompt = tspec.get("prompt", "")
+            plane = tspec.get("target_plane", "any")
+            ttl = int(tspec.get("lease_ttl", DEFAULT_LEASE_TTL))
+            meta = tspec.get("meta", {})
+            st = self.post_task(
+                title=title,
+                prompt=prompt,
+                target_plane=plane,
+                lease_ttl=ttl,
+                batch_id=batch_id,
+                meta=meta
+            )
+            created_subtasks.append(st)
+            subtask_ids.append(st["id"])
+
+        created_barrier = None
+        if barrier_task:
+            b_title = barrier_task.get("title") or "Barrier Reducer Task"
+            b_prompt = barrier_task.get("prompt", "Synthesize and verify subtask results.")
+            b_plane = barrier_task.get("target_plane", "any")
+            b_ttl = int(barrier_task.get("lease_ttl", DEFAULT_LEASE_TTL))
+            b_meta = barrier_task.get("meta", {})
+            created_barrier = self.post_task(
+                title=b_title,
+                prompt=b_prompt,
+                target_plane=b_plane,
+                lease_ttl=b_ttl,
+                batch_id=batch_id,
+                dependencies=subtask_ids,
+                meta=b_meta
+            )
+
+        return {
+            "batch_id": batch_id,
+            "subtasks": created_subtasks,
+            "barrier_task": created_barrier
+        }
+
+    def get_task(self, task_id: str) -> dict | None:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM tasks WHERE id = ? OR id LIKE ? ORDER BY created_at DESC LIMIT 1", (task_id, f"{task_id}%"))
+        row = cur.fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d["dependencies"] = json.loads(d.get("dependencies") or "[]")
+        except Exception:
+            d["dependencies"] = []
+        try:
+            d["meta"] = json.loads(d.get("meta") or "{}")
+        except Exception:
+            d["meta"] = {}
+        return d
+
+    def list_tasks(self, status: str | None = None, batch_id: str | None = None, limit: int = 50) -> list[dict]:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        conditions = []
+        params = []
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        if batch_id:
+            conditions.append("batch_id = ?")
+            params.append(batch_id)
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        query = f"SELECT * FROM tasks {where} ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+
+        cur.execute(query, params)
+        rows = []
+        for r in cur.fetchall():
+            d = dict(r)
+            try:
+                d["dependencies"] = json.loads(d.get("dependencies") or "[]")
+            except Exception:
+                d["dependencies"] = []
+            try:
+                d["meta"] = json.loads(d.get("meta") or "{}")
+            except Exception:
+                d["meta"] = {}
+            rows.append(d)
+        return rows
+
+    def get_batch_status(self, batch_id: str) -> dict:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM tasks WHERE batch_id = ? ORDER BY created_at ASC", (batch_id,))
+        rows = []
+        for r in cur.fetchall():
+            d = dict(r)
+            try:
+                d["dependencies"] = json.loads(d.get("dependencies") or "[]")
+            except Exception:
+                d["dependencies"] = []
+            try:
+                d["meta"] = json.loads(d.get("meta") or "{}")
+            except Exception:
+                d["meta"] = {}
+            rows.append(d)
+
+        total = len(rows)
+        completed = sum(1 for r in rows if r["status"] == "COMPLETED")
+        running = sum(1 for r in rows if r["status"] in ("CLAIMED", "RUNNING"))
+        queued = sum(1 for r in rows if r["status"] == "QUEUED")
+        blocked = sum(1 for r in rows if r["status"] == "BLOCKED_ON_DEPS")
+        failed = sum(1 for r in rows if r["status"] in ("FAILED", "ERROR", "BLOCKED_FAILED", "TIMEOUT"))
+        is_done = (completed + failed == total) if total > 0 else False
+
+        return {
+            "batch_id": batch_id,
+            "total_tasks": total,
+            "completed": completed,
+            "running": running,
+            "queued": queued,
+            "blocked_on_deps": blocked,
+            "failed": failed,
+            "is_done": is_done,
+            "tasks": rows
+        }
+
+    def claim_task(self, node_id: str, capabilities: list[str]) -> dict | None:
+        conn = self.get_connection()
+        now = int(time.time())
+
+        # Quota-aware load balancing:
+        effective_caps = list(capabilities)
+        cur = conn.cursor()
+        cur.execute("SELECT quota_5h_gemini FROM nodes WHERE id = ?", (node_id,))
+        node_row = cur.fetchone()
+        my_quota = node_row["quota_5h_gemini"] if node_row else None
+        if my_quota is not None and my_quota < 0.15:
+            cur.execute("""
+                SELECT COUNT(*) as c FROM nodes
+                WHERE id != ? AND (status = 'ONLINE' OR last_heartbeat > ?) AND quota_5h_gemini >= ? + 0.10
+            """, (node_id, now - 30, my_quota))
+            healthier = cur.fetchone()
+            if healthier and healthier["c"] > 0:
+                effective_caps = [c for c in effective_caps if c not in ("any", "general")]
+
+        # Atomically find and claim the oldest QUEUED task matching node capabilities
+        with conn:
+            cur = conn.cursor()
+            placeholders = [node_id] + effective_caps
+            if "any" in effective_caps and "any" not in placeholders:
+                placeholders.append("any")
+            placeholders = list(dict.fromkeys(placeholders))
+            q_marks = ",".join("?" for _ in placeholders)
+            query = f"""
+                SELECT id, lease_ttl_sec FROM tasks
+                WHERE status = 'QUEUED' AND target_plane IN ({q_marks})
+                ORDER BY created_at ASC LIMIT 1
+            """
+            cur.execute(query, placeholders)
+            row = cur.fetchone()
+            if not row:
+                return None
+
+            task_id = row["id"]
+            lease_ttl = row["lease_ttl_sec"] or DEFAULT_LEASE_TTL
+            conn.execute("""
+                UPDATE tasks
+                SET status = 'CLAIMED', claimed_by = ?, claimed_at = ?, heartbeat_at = ?, updated_at = ?
+                WHERE id = ? AND status = 'QUEUED'
+            """, (node_id, now, now, now, task_id))
+
+        task = self.get_task(task_id)
+        if task and task.get("claimed_by") == node_id:
+            broadcast_event("task_claimed", task)
+            return task
+        return None
+
+    def task_heartbeat(self, task_id: str, node_id: str) -> bool:
+        now = int(time.time())
+        conn = self.get_connection()
+        with conn:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE tasks
+                SET heartbeat_at = ?, status = 'RUNNING', updated_at = ?
+                WHERE id = ? AND claimed_by = ? AND status IN ('CLAIMED', 'RUNNING')
+            """, (now, now, task_id, node_id))
+            return cur.rowcount > 0
+
+    def complete_task(self, task_id: str, node_id: str, status: str, result: str,
+                      session_id: str = "", duration_seconds: float = 0.0, tokens_used: int = 0) -> dict | None:
+        now = int(time.time())
+        if status in ("SUCCESS", "COMPLETED"):
+            status = "COMPLETED"
+        conn = self.get_connection()
+        with conn:
+            conn.execute("""
+                UPDATE tasks
+                SET status = ?, result = ?, session_id = ?, duration_seconds = ?, tokens_used = ?, updated_at = ?
+                WHERE id = ? AND claimed_by = ?
+            """, (status, result, session_id, duration_seconds, tokens_used, now, task_id, node_id))
+
+        task = self.get_task(task_id)
+        if task:
+            broadcast_event("task_finished", task)
+
+        # Trigger DAG dependency resolution or failure propagation
+        if status == "COMPLETED":
+            self._resolve_dependencies(task_id)
+        elif status in ("FAILED", "ERROR", "TIMEOUT"):
+            self._fail_dependent_tasks(task_id, status)
+
+        return task
+
+    def _fail_dependent_tasks(self, failed_task_id: str, fail_status: str):
+        conn = self.get_connection()
+        now = int(time.time())
+        with conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id, dependencies FROM tasks WHERE status = 'BLOCKED_ON_DEPS'")
+            for row in cur.fetchall():
+                try:
+                    deps = json.loads(row["dependencies"] or "[]")
+                except Exception:
+                    deps = []
+                if failed_task_id in deps:
+                    err_msg = f"Prerequisite task {failed_task_id[:8]} failed with status {fail_status}."
+                    conn.execute("""
+                        UPDATE tasks
+                        SET status = 'BLOCKED_FAILED', result = ?, updated_at = ?
+                        WHERE id = ?
+                    """, (err_msg, now, row["id"]))
+                    t = self.get_task(row["id"])
+                    if t:
+                        broadcast_event("task_blocked_failed", t)
+
+    def _resolve_dependencies(self, completed_task_id: str):
+        """
+        Evaluates tasks in BLOCKED_ON_DEPS. If all prerequisite tasks have reached COMPLETED,
+        injects a markdown summary table into the reducer prompt and unblocks the task to QUEUED.
+        """
+        conn = self.get_connection()
+        now = int(time.time())
+        with conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM tasks WHERE status = 'BLOCKED_ON_DEPS'")
+            blocked_tasks = [dict(r) for r in cur.fetchall()]
+
+            for bt in blocked_tasks:
+                try:
+                    dep_ids = json.loads(bt.get("dependencies") or "[]")
+                except Exception:
+                    dep_ids = []
+
+                if not dep_ids:
+                    continue
+
+                q_marks = ",".join("?" for _ in dep_ids)
+                cur.execute(f"SELECT id, title, target_plane, status, result FROM tasks WHERE id IN ({q_marks})", dep_ids)
+                dep_rows = [dict(r) for r in cur.fetchall()]
+
+                # Check if any prerequisite failed
+                failed = [r for r in dep_rows if r["status"] in ("FAILED", "ERROR", "BLOCKED_FAILED", "TIMEOUT")]
+                if failed:
+                    f_id = failed[0]["id"]
+                    f_st = failed[0]["status"]
+                    err_msg = f"Prerequisite task {f_id[:8]} failed ({f_st})."
+                    conn.execute("""
+                        UPDATE tasks SET status = 'BLOCKED_FAILED', result = ?, updated_at = ? WHERE id = ?
+                    """, (err_msg, now, bt["id"]))
+                    t = self.get_task(bt["id"])
+                    if t:
+                        broadcast_event("task_blocked_failed", t)
+                    continue
+
+                # Check if all prerequisites completed
+                completed = [r for r in dep_rows if r["status"] == "COMPLETED"]
+                if len(completed) == len(dep_ids) and len(dep_ids) > 0:
+                    # Construct Markdown summary matrix & detailed traces
+                    matrix = [
+                        "\n\n---",
+                        "### [Prerequisite Subtasks Matrix]",
+                        "| Subtask ID | Title | Plane | Status | Output Summary |",
+                        "| :--- | :--- | :--- | :--- | :--- |"
+                    ]
+                    for dr in dep_rows:
+                        raw_res = (dr.get("result") or "").strip()
+                        summary = raw_res.replace("\n", " ")
+                        if len(summary) > 100:
+                            summary = summary[:97] + "..."
+                        summary = summary.replace("|", "\\|")
+                        matrix.append(f"| `{dr['id'][:8]}` | {dr.get('title', 'Subtask')} | `{dr.get('target_plane', 'any')}` | {dr.get('status')} | {summary} |")
+
+                    matrix.append("\n#### Detailed Subtask Traces:")
+                    for dr in dep_rows:
+                        matrix.append(
+                            f"\n<details><summary>Subtask {dr['id'][:8]}: {dr.get('title')} ({dr.get('target_plane')})</summary>\n\n```\n{dr.get('result') or '(No output)'}\n```\n</details>"
+                        )
+
+                    new_prompt = bt["prompt"] + "\n" + "\n".join(matrix)
+                    conn.execute("""
+                        UPDATE tasks SET status = 'QUEUED', prompt = ?, updated_at = ? WHERE id = ?
+                    """, (new_prompt, now, bt["id"]))
+                    unblocked = self.get_task(bt["id"])
+                    if unblocked:
+                        broadcast_event("task_unblocked", unblocked)
+
+    # -------------------------------------------------------------
+    # Multi-Project & Native Antigravity Workspaces
+    # -------------------------------------------------------------
+
+    def sync_native_antigravity_projects(self, conn=None):
+        """
+        Scans native Antigravity project definitions in ~/.gemini/config/projects/*.json
+        and synchronizes them into the Knot SQLite projects registry.
+        """
+        close_at_end = False
+        if conn is None:
+            conn = self.get_connection()
+            close_at_end = True
+
+        projects_dir = os.path.expanduser("~/.gemini/config/projects")
+        now = int(time.time())
+        knot_root = os.path.expanduser("~/Dev/knot")
+        knot_folder_uri = f"file://{knot_root}/"
+
+        if os.path.isdir(projects_dir):
+            for f in glob.glob(os.path.join(projects_dir, "*.json")):
+                try:
+                    with open(f, "r", encoding="utf-8") as fp:
+                        pdata = json.load(fp)
+                    pid = pdata.get("id") or os.path.basename(f)[:-5]
+                    pname = pdata.get("name") or pid
+                    if pid in ("default-cli-project", "outside-of-project"):
+                        continue
+
+                    resources = pdata.get("projectResources", {}).get("resources", [])
+                    folders = []
+                    for r in resources:
+                        furi = r.get("gitFolder", {}).get("folderUri") or r.get("folderUri")
+                        if furi and furi not in folders:
+                            folders.append(furi)
+
+                    folders_json = json.dumps(folders)
+                    with conn:
+                        conn.execute("""
+                            INSERT INTO projects (id, name, description, folders, default_channel, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, 'main', ?, ?)
+                            ON CONFLICT(id) DO UPDATE SET
+                                name = excluded.name,
+                                folders = excluded.folders,
+                                updated_at = excluded.updated_at
+                        """, (pid, pname, f"Native Antigravity project ({len(folders)} folders)", folders_json, now, now))
+
+                        main_conv_id = f"{pid}-main" if pid != "1da6ae24-e267-49d2-8aac-44bdf83d7d0e" and pid != "knot" else "main"
+                        conn.execute("""
+                            INSERT OR IGNORE INTO conversations (id, project_id, title, description, created_by, created_at, updated_at)
+                            VALUES (?, ?, 'Main Swarm', 'Primary swarm coordination channel', 'system', ?, ?)
+                        """, (main_conv_id, pid, now, now))
+                except Exception:
+                    pass
+
+        with conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM projects WHERE id = 'knot' OR name = 'knot'")
+            if not cur.fetchone():
+                conn.execute("""
+                    INSERT OR IGNORE INTO projects (id, name, description, folders, default_channel, created_at, updated_at)
+                    VALUES ('knot', 'knot', 'Knot Swarm Core repository', ?, 'main', ?, ?)
+                """, (json.dumps([knot_folder_uri]), now, now))
+
+            conn.execute("""
+                INSERT OR IGNORE INTO conversations (id, project_id, title, description, created_by, created_at, updated_at)
+                VALUES ('main', 'knot', 'Main Swarm', 'Primary swarm coordination channel', 'system', ?, ?)
+            """, (now, now))
+
+            conn.execute("""
+                INSERT OR IGNORE INTO conversations (id, project_id, title, description, created_by, created_at, updated_at)
+                SELECT DISTINCT conv_id, 'knot', '#' || conv_id, 'Migrated conversation', 'system', MIN(created_at), MAX(created_at)
+                FROM messages GROUP BY conv_id
+            """)
+
+        if close_at_end:
+            conn.close()
+
+    def list_projects(self) -> list[dict]:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM projects ORDER BY updated_at DESC")
+        rows = [dict(r) for r in cur.fetchall()]
+        for r in rows:
+            try:
+                r["folders"] = json.loads(r.get("folders") or "[]")
+            except Exception:
+                r["folders"] = []
+        return rows
+
+    def get_project(self, project_id: str) -> dict | None:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM projects WHERE id = ? OR name = ?", (project_id, project_id))
+        row = cur.fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d["folders"] = json.loads(d.get("folders") or "[]")
+        except Exception:
+            d["folders"] = []
+        return d
+
+    def create_project(self, project_id: str, name: str, description: str = "",
+                       folders: list[str] | None = None) -> dict:
+        now = int(time.time())
+        folders_list = folders or []
+        folders_json = json.dumps(folders_list)
+        conn = self.get_connection()
+        with conn:
+            conn.execute("""
+                INSERT INTO projects (id, name, description, folders, default_channel, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'main', ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    description = excluded.description,
+                    folders = excluded.folders,
+                    updated_at = excluded.updated_at
+            """, (project_id, name, description, folders_json, now, now))
+
+            main_conv_id = f"{project_id}-main" if project_id != "knot" else "main"
+            conn.execute("""
+                INSERT OR IGNORE INTO conversations (id, project_id, title, description, created_by, created_at, updated_at)
+                VALUES (?, ?, 'Main Swarm', 'Primary swarm coordination channel', 'system', ?, ?)
+            """, (main_conv_id, project_id, now, now))
+
+        projects_dir = os.path.expanduser("~/.gemini/config/projects")
+        if os.path.isdir(projects_dir):
+            target_json = os.path.join(projects_dir, f"{project_id}.json")
+            resources = []
+            for furi in folders_list:
+                resources.append({"gitFolder": {"folderUri": furi, "defaultBranch": "main"}})
+            native_spec = {
+                "id": project_id,
+                "name": name,
+                "projectResources": {"resources": resources},
+                "settings": {},
+                "isWorkspaceOnly": False
+            }
+            try:
+                with open(target_json, "w", encoding="utf-8") as fp:
+                    json.dump(native_spec, fp, indent=2)
+            except Exception:
+                pass
+
+        proj = self.get_project(project_id)
+        if proj:
+            broadcast_event("project_created", proj)
+        return proj or {}
+
+    # -------------------------------------------------------------
+    # Multi-Group Conversations & Channels
+    # -------------------------------------------------------------
+
+    def list_conversations(self, project_id: str | None = None, include_archived: bool = False) -> list[dict]:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        query = "SELECT c.*, p.name as project_name FROM conversations c LEFT JOIN projects p ON c.project_id = p.id"
+        params = []
+        conditions = []
+        if project_id:
+            conditions.append("(c.project_id = ? OR p.name = ?)")
+            params.extend([project_id, project_id])
+        if not include_archived:
+            conditions.append("c.is_archived = 0")
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        query += " ORDER BY c.updated_at DESC"
+
+        cur.execute(query, params)
+        convs = [dict(r) for r in cur.fetchall()]
+
+        for c in convs:
+            cid = c["id"]
+            cur.execute("SELECT COUNT(*) as cnt FROM messages WHERE conv_id = ?", (cid,))
+            c["message_count"] = cur.fetchone()["cnt"]
+
+            cur.execute("""
+                SELECT id, sender, content, created_at FROM messages
+                WHERE conv_id = ? ORDER BY created_at DESC LIMIT 1
+            """, (cid,))
+            last_m = cur.fetchone()
+            c["last_message"] = dict(last_m) if last_m else None
+
+            cur.execute("SELECT node_id, agy_session_id FROM node_conversation_sessions WHERE conv_id = ?", (cid,))
+            c["node_sessions"] = {row["node_id"]: row["agy_session_id"] for row in cur.fetchall()}
+
+            cur.execute("SELECT node_id, model FROM conversation_node_models WHERE conv_id = ?", (cid,))
+            c["node_models"] = {row["node_id"]: row["model"] for row in cur.fetchall()}
+
+        return convs
+
+    def get_conversation(self, conv_id: str) -> dict | None:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT c.*, p.name as project_name FROM conversations c
+            LEFT JOIN projects p ON c.project_id = p.id
+            WHERE c.id = ?
+        """, (conv_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        c = dict(row)
+        cur.execute("SELECT COUNT(*) as cnt FROM messages WHERE conv_id = ?", (conv_id,))
+        c["message_count"] = cur.fetchone()["cnt"]
+
+        cur.execute("""
+            SELECT id, sender, content, created_at FROM messages
+            WHERE conv_id = ? ORDER BY created_at DESC LIMIT 1
+        """, (conv_id,))
+        last_m = cur.fetchone()
+        c["last_message"] = dict(last_m) if last_m else None
+
+        cur.execute("SELECT node_id, agy_session_id FROM node_conversation_sessions WHERE conv_id = ?", (conv_id,))
+        c["node_sessions"] = {r["node_id"]: r["agy_session_id"] for r in cur.fetchall()}
+
+        cur.execute("SELECT node_id, model FROM conversation_node_models WHERE conv_id = ?", (conv_id,))
+        c["node_models"] = {r["node_id"]: r["model"] for r in cur.fetchall()}
+        return c
+
+    def create_conversation(self, conv_id: str, title: str, project_id: str = "knot",
+                            description: str = "", created_by: str = "human") -> dict:
+        now = int(time.time())
+        conn = self.get_connection()
+        with conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM projects WHERE id = ? OR name = ?", (project_id, project_id))
+            prow = cur.fetchone()
+            resolved_proj_id = prow["id"] if prow else project_id
+            if not prow:
+                conn.execute("""
+                    INSERT OR IGNORE INTO projects (id, name, description, folders, default_channel, created_at, updated_at)
+                    VALUES (?, ?, 'Auto-created project', '[]', 'main', ?, ?)
+                """, (resolved_proj_id, resolved_proj_id, now, now))
+
+            conn.execute("""
+                INSERT INTO conversations (id, project_id, title, description, created_by, is_archived, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    title = excluded.title,
+                    description = excluded.description,
+                    updated_at = excluded.updated_at
+            """, (conv_id, resolved_proj_id, title, description, created_by, now, now))
+
+        conv = self.get_conversation(conv_id)
+        if conv:
+            broadcast_event("conversation_created", conv)
+        return conv or {}
+
+    def get_node_session(self, conv_id: str, node_id: str) -> str | None:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT agy_session_id FROM node_conversation_sessions WHERE conv_id = ? AND node_id = ?", (conv_id, node_id))
+        row = cur.fetchone()
+        return row["agy_session_id"] if row else None
+
+    def set_node_session(self, conv_id: str, node_id: str, agy_session_id: str):
+        now = int(time.time())
+        conn = self.get_connection()
+        with conn:
+            conn.execute("""
+                INSERT INTO node_conversation_sessions (conv_id, node_id, agy_session_id, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(conv_id, node_id) DO UPDATE SET
+                    agy_session_id = excluded.agy_session_id,
+                    updated_at = excluded.updated_at
+            """, (conv_id, node_id, agy_session_id, now))
+
+    def get_conversation_models(self, conv_id: str) -> dict:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT selected_model FROM conversations WHERE id = ?", (conv_id,))
+        row = cur.fetchone()
+        default_model = (row["selected_model"] if row and row["selected_model"] else "")
+
+        cur.execute("SELECT node_id, model FROM conversation_node_models WHERE conv_id = ?", (conv_id,))
+        node_models = {r["node_id"]: r["model"] for r in cur.fetchall()}
+        return {
+            "conv_id": conv_id,
+            "default_model": default_model,
+            "node_models": node_models
+        }
+
+    def set_conversation_model(self, conv_id: str, model: str, node_id: str | None = None) -> dict:
+        conn = self.get_connection()
+        now = int(time.time())
+        with conn:
+            if node_id:
+                if model:
+                    conn.execute("""
+                        INSERT INTO conversation_node_models (conv_id, node_id, model, updated_at)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(conv_id, node_id) DO UPDATE SET model = excluded.model, updated_at = excluded.updated_at
+                    """, (conv_id, node_id, model, now))
+                else:
+                    conn.execute("DELETE FROM conversation_node_models WHERE conv_id = ? AND node_id = ?", (conv_id, node_id))
+            else:
+                conn.execute("UPDATE conversations SET selected_model = ?, updated_at = ? WHERE id = ?", (model, now, conv_id))
+
+        res = self.get_conversation_models(conv_id)
+        broadcast_event("conversation_model_updated", res)
+        return res
+
+    # -------------------------------------------------------------
+    # Swarm Konversations Group Chat Ledger
+    # -------------------------------------------------------------
+
+    def post_chat_message(self, sender: str, content: str, conv_id: str = "main",
+                          mentions: list[str] | None = None, artifacts: list[str] | None = None,
+                          reply_to: str | None = None, meta: dict | None = None) -> dict:
+        msg_id = str(uuid.uuid4())
+        now = int(time.time())
+
+        # Auto-extract @mentions and merge with any explicitly passed mentions
+        extracted_mentions = list(set(re.findall(r'@([a-zA-Z0-9_\-]+)', content)))
+        if mentions:
+            mentions = list(set([m.lstrip('@') for m in mentions] + extracted_mentions))
+        else:
+            mentions = extracted_mentions
+
+        mentions_json = json.dumps(mentions)
+        artifacts_json = json.dumps(artifacts or [])
+        meta_json = json.dumps(meta or {})
+
+        conn = self.get_connection()
+        with conn:
+            # Ensure conversation exists; if not, auto-create under 'knot' project
+            conn.execute("""
+                INSERT OR IGNORE INTO conversations (id, project_id, title, description, created_by, created_at, updated_at)
+                VALUES (?, 'knot', ?, 'Auto-created group channel', ?, ?, ?)
+            """, (conv_id, f"#{conv_id}", sender, now, now))
+
+            conn.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, conv_id))
+
+            conn.execute("""
+                INSERT INTO messages (id, conv_id, sender, mentions, content, artifacts, reply_to, meta, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (msg_id, conv_id, sender, mentions_json, content, artifacts_json, reply_to, meta_json, now))
+
+        msg = self.get_chat_message(msg_id)
+        broadcast_event("chat_message", msg)
+        return msg
+
+    def get_chat_message(self, msg_id: str) -> dict | None:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM messages WHERE id = ?", (msg_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d["mentions"] = json.loads(d.get("mentions") or "[]")
+        except Exception:
+            d["mentions"] = []
+        try:
+            d["artifacts"] = json.loads(d.get("artifacts") or "[]")
+        except Exception:
+            d["artifacts"] = []
+        try:
+            d["meta"] = json.loads(d.get("meta") or "{}")
+        except Exception:
+            d["meta"] = {}
+        return d
+
+    def list_chat_messages(self, conv_id: str = "main", limit: int = 50, before_ts: int | None = None) -> list[dict]:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        if conv_id == "all":
+            if before_ts:
+                cur.execute("""
+                    SELECT * FROM messages
+                    WHERE created_at < ?
+                    ORDER BY created_at DESC LIMIT ?
+                """, (before_ts, limit))
+            else:
+                cur.execute("""
+                    SELECT * FROM messages
+                    ORDER BY created_at DESC LIMIT ?
+                """, (limit,))
+        else:
+            if before_ts:
+                cur.execute("""
+                    SELECT * FROM messages
+                    WHERE conv_id = ? AND created_at < ?
+                    ORDER BY created_at DESC LIMIT ?
+                """, (conv_id, before_ts, limit))
+            else:
+                cur.execute("""
+                    SELECT * FROM messages
+                    WHERE conv_id = ?
+                    ORDER BY created_at DESC LIMIT ?
+                """, (conv_id, limit))
+
+        rows = [dict(r) for r in cur.fetchall()]
+        rows.reverse()  # Return in chronological order
+        for r in rows:
+            try:
+                r["mentions"] = json.loads(r.get("mentions") or "[]")
+            except Exception:
+                r["mentions"] = []
+            try:
+                r["artifacts"] = json.loads(r.get("artifacts") or "[]")
+            except Exception:
+                r["artifacts"] = []
+        return rows
+
+    # -------------------------------------------------------------
+    # Atomic 3-State Artifact Leases
+    # -------------------------------------------------------------
+
+    def lock_artifact(self, name: str, locked_by: str, ttl_sec: int = DEFAULT_ARTIFACT_LEASE_TTL,
+                      state: str = "LOCKED_SURGERY") -> dict:
+        now = int(time.time())
+        expires_at = now + ttl_sec
+        conn = self.get_connection()
+        with conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM artifact_leases WHERE name = ?", (name,))
+            row = cur.fetchone()
+            if row:
+                cur_locked_by = row["locked_by"]
+                cur_expires = row["expires_at"] or 0
+                if cur_locked_by and cur_locked_by != locked_by and now < cur_expires:
+                    return {
+                        "ok": False,
+                        "error": f"Artifact '{name}' is currently locked by '{cur_locked_by}' until {cur_expires} ({cur_expires - now}s remaining).",
+                        "lease": dict(row)
+                    }
+                conn.execute("""
+                    UPDATE artifact_leases
+                    SET state = ?, locked_by = ?, lease_ttl_sec = ?, locked_at = ?, expires_at = ?, updated_at = ?
+                    WHERE name = ?
+                """, (state, locked_by, ttl_sec, now, expires_at, now, name))
+            else:
+                conn.execute("""
+                    INSERT INTO artifact_leases (name, state, locked_by, lease_ttl_sec, locked_at, expires_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (name, state, locked_by, ttl_sec, now, expires_at, now))
+
+        lease = self.get_artifact_lease(name)
+        broadcast_event("artifact_locked", lease)
+        return {"ok": True, "lease": lease}
+
+    def release_artifact(self, name: str, node_id: str, new_state: str = "VERIFIED_COMMITTED") -> dict:
+        now = int(time.time())
+        conn = self.get_connection()
+        with conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM artifact_leases WHERE name = ?", (name,))
+            row = cur.fetchone()
+            if not row:
+                return {"ok": False, "error": f"Artifact lease '{name}' not found."}
+
+            cur_locked_by = row["locked_by"]
+            cur_expires = row["expires_at"] or 0
+            if cur_locked_by and cur_locked_by != node_id and now < cur_expires:
+                return {"ok": False, "error": f"Cannot release: locked by '{cur_locked_by}', not '{node_id}'"}
+
+            conn.execute("""
+                UPDATE artifact_leases
+                SET state = ?, locked_by = NULL, locked_at = NULL, expires_at = NULL, updated_at = ?
+                WHERE name = ?
+            """, (new_state, now, name))
+
+        lease = self.get_artifact_lease(name)
+        broadcast_event("artifact_released", lease)
+        return {"ok": True, "lease": lease}
+
+    def get_artifact_lease(self, name: str) -> dict | None:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM artifact_leases WHERE name = ?", (name,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d["meta"] = json.loads(d.get("meta") or "{}")
+        except Exception:
+            d["meta"] = {}
+        return d
+
+    def list_artifact_leases(self) -> list[dict]:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM artifact_leases ORDER BY updated_at DESC")
+        rows = [dict(r) for r in cur.fetchall()]
+        for r in rows:
+            try:
+                r["meta"] = json.loads(r.get("meta") or "{}")
+            except Exception:
+                r["meta"] = {}
+        return rows
+
+    def reap_expired_artifact_leases(self):
+        now = int(time.time())
+        conn = self.get_connection()
+        with conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT name, locked_by, state, expires_at FROM artifact_leases
+                WHERE locked_by IS NOT NULL AND expires_at < ?
+            """, (now,))
+            expired = cur.fetchall()
+            for exp in expired:
+                name = exp["name"]
+                locked_by = exp["locked_by"]
+                conn.execute("""
+                    UPDATE artifact_leases
+                    SET state = 'DRAFTING', locked_by = NULL, locked_at = NULL, expires_at = NULL, updated_at = ?
+                    WHERE name = ?
+                """, (now, name))
+                broadcast_event("artifact_lease_expired", {"name": name, "expired_from": locked_by})
+
+    # -------------------------------------------------------------
+    # Node Heartbeat & Telemetry
+    # -------------------------------------------------------------
+
+    def register_node_heartbeat(self, node_id: str, hostname: str, capabilities: list[str],
+                                agy_ver: str = "", agy_auth: str = "", quota: dict | None = None,
+                                power: dict | None = None, ip: str = "") -> dict:
+        now = int(time.time())
+        cap_json = json.dumps(capabilities)
+        conn = self.get_connection()
+
+        q_5h_gem = quota.get("gemini_5h_fraction") if quota else None
+        q_wk_gem = quota.get("gemini_weekly_fraction") if quota else None
+        q_5h_3p = quota.get("third_party_5h_fraction") if quota else None
+        q_wk_3p = quota.get("third_party_weekly_fraction") if quota else None
+        q_data = json.dumps(quota) if quota else None
+        q_ts = now if quota else None
+        p_data = json.dumps(power) if power else None
+
+        with conn:
+            conn.execute("""
+                INSERT INTO nodes (
+                    id, hostname, capabilities, status, last_heartbeat, agy_version, agy_auth,
+                    quota_5h_gemini, quota_weekly_gemini, quota_5h_3p, quota_weekly_3p, quota_data, quota_updated_at,
+                    power_state, ip
+                )
+                VALUES (?, ?, ?, 'ONLINE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    hostname = excluded.hostname,
+                    capabilities = excluded.capabilities,
+                    status = 'ONLINE',
+                    last_heartbeat = excluded.last_heartbeat,
+                    agy_version = excluded.agy_version,
+                    agy_auth = excluded.agy_auth,
+                    quota_5h_gemini = COALESCE(excluded.quota_5h_gemini, nodes.quota_5h_gemini),
+                    quota_weekly_gemini = COALESCE(excluded.quota_weekly_gemini, nodes.quota_weekly_gemini),
+                    quota_5h_3p = COALESCE(excluded.quota_5h_3p, nodes.quota_5h_3p),
+                    quota_weekly_3p = COALESCE(excluded.quota_weekly_3p, nodes.quota_weekly_3p),
+                    quota_data = COALESCE(excluded.quota_data, nodes.quota_data),
+                    quota_updated_at = COALESCE(excluded.quota_updated_at, nodes.quota_updated_at),
+                    power_state = COALESCE(excluded.power_state, nodes.power_state),
+                    ip = CASE WHEN excluded.ip != '' AND excluded.ip != '127.0.0.1' THEN excluded.ip ELSE nodes.ip END
+            """, (node_id, hostname, cap_json, now, agy_ver, agy_auth,
+                  q_5h_gem, q_wk_gem, q_5h_3p, q_wk_3p, q_data, q_ts, p_data, ip))
+        selected_model = self.get_node_model(node_id)
+        broadcast_event("node_heartbeat", {"node_id": node_id, "selected_model": selected_model})
+        return {"id": node_id, "status": "ONLINE", "last_heartbeat": now, "selected_model": selected_model}
+
+    def list_nodes(self) -> list[dict]:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM nodes ORDER BY id ASC")
+        rows = cur.fetchall()
+        now = int(time.time())
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["capabilities"] = json.loads(d.get("capabilities") or "[]")
+            d["selected_model"] = self.get_node_model(d["id"])
+
+            manifest = get_node_manifest(d["id"])
+            manifest_ip = manifest.get("ip_hint") or ""
+            if not manifest_ip and "interfaces" in manifest and isinstance(manifest["interfaces"], dict):
+                for iface in manifest["interfaces"].values():
+                    if isinstance(iface, dict) and iface.get("ip"):
+                        manifest_ip = iface["ip"]
+                        break
+
+            # Resolve real LAN IP
+            current_ip = d.get("ip") or ""
+            if current_ip and current_ip != "127.0.0.1":
+                d["ip"] = current_ip
+            else:
+                d["ip"] = manifest_ip or "127.0.0.1"
+
+            d["user"] = manifest.get("user") or d.get("user") or "user"
+            d["port"] = manifest.get("port") or 22
+            if manifest.get("hostname") and not d.get("hostname"):
+                d["hostname"] = manifest["hostname"]
+
+            if d.get("quota_data"):
+                try:
+                    d["quota_data"] = json.loads(d["quota_data"])
+                except Exception:
+                    pass
+            if isinstance(d.get("quota_data"), dict):
+                qd = d["quota_data"]
+                if "gemini_5h_reset" in qd:
+                    qd["gemini_5h_reset_in"] = format_reset_countdown(qd.get("gemini_5h_reset"))
+                if "gemini_weekly_reset" in qd:
+                    qd["gemini_weekly_reset_in"] = format_reset_countdown(qd.get("gemini_weekly_reset"))
+                if "third_party_5h_reset" in qd:
+                    qd["third_party_5h_reset_in"] = format_reset_countdown(qd.get("third_party_5h_reset"))
+                if "third_party_weekly_reset" in qd:
+                    qd["third_party_weekly_reset_in"] = format_reset_countdown(qd.get("third_party_weekly_reset"))
+                if "account" in qd:
+                    d["account"] = qd["account"]
+            d["power"] = {}
+            if d.get("power_state"):
+                try:
+                    d["power"] = json.loads(d["power_state"])
+                except Exception:
+                    pass
+            d["activity"] = self._node_activities.get(d["id"], {})
+            if isinstance(d["power"], dict) and d["activity"]:
+                d["power"]["activity"] = d["activity"]
+            if now - d.get("last_heartbeat", 0) > 30:
+                d["status"] = "OFFLINE"
+            result.append(d)
+        return result
+
+    def get_swarm_activity(self, idle_timeout_sec: int = 1800) -> dict:
+        """
+        Calculates wholesale swarm activity across tasks, messages, and manual wake holds.
+        Used to enforce sleep/idle inhibition across nodes when plugged into AC power.
+        """
+        now = int(time.time())
+        conn = self.get_connection()
+        cur = conn.cursor()
+
+        # 1. Any active tasks currently queued, claimed, or running
+        cur.execute("SELECT COUNT(*) as c FROM tasks WHERE status IN ('QUEUED', 'CLAIMED', 'RUNNING')")
+        active_tasks = cur.fetchone()["c"]
+
+        # 2. Most recent task activity timestamp
+        cur.execute("SELECT MAX(updated_at) as m FROM tasks")
+        row = cur.fetchone()
+        last_task_ts = row["m"] if row and row["m"] else 0
+
+        # 3. Most recent chat message timestamp
+        cur.execute("SELECT MAX(created_at) as m FROM messages")
+        row = cur.fetchone()
+        last_msg_ts = row["m"] if row and row["m"] else 0
+
+        # 4. Manual wake hold
+        manual_hold_until = getattr(self, "_manual_wake_until", 0)
+        manual_hold_remaining = max(0, int(manual_hold_until - now))
+
+        latest_activity_ts = max(last_task_ts, last_msg_ts)
+        sec_since_activity = (now - latest_activity_ts) if latest_activity_ts > 0 else 999999
+
+        is_active = False
+        reasons = []
+
+        if active_tasks > 0:
+            is_active = True
+            reasons.append(f"tasks_running ({active_tasks} active)")
+
+        if manual_hold_remaining > 0:
+            is_active = True
+            reasons.append(f"manual_hold ({manual_hold_remaining}s remaining)")
+
+        if sec_since_activity < idle_timeout_sec:
+            is_active = True
+            reasons.append(f"recent_activity ({sec_since_activity}s ago)")
+
+        return {
+            "active": is_active,
+            "reasons": reasons,
+            "active_tasks_count": active_tasks,
+            "last_activity_sec_ago": sec_since_activity,
+            "idle_timeout_sec": idle_timeout_sec,
+            "manual_hold_sec_remaining": manual_hold_remaining
+        }
+
+    def reap_expired_leases(self):
+        now = int(time.time())
+        conn = self.get_connection()
+        with conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, claimed_by, heartbeat_at, lease_ttl_sec
+                FROM tasks
+                WHERE status IN ('CLAIMED', 'RUNNING')
+            """)
+            rows = cur.fetchall()
+            for r in rows:
+                heartbeat = r["heartbeat_at"] or 0
+                ttl = r["lease_ttl_sec"] or DEFAULT_LEASE_TTL
+                if now - heartbeat > ttl:
+                    task_id = r["id"]
+                    claimed_by = r["claimed_by"]
+                    conn.execute("""
+                        UPDATE tasks
+                        SET status = 'QUEUED', claimed_by = NULL, claimed_at = NULL,
+                            heartbeat_at = NULL, retry_count = retry_count + 1, updated_at = ?
+                        WHERE id = ?
+                    """, (now, task_id))
+                    eviction_info = {"id": task_id, "expired_from": claimed_by, "reason": "lease_timeout"}
+                    print(f"[*] Lease expired for task {task_id} on node {claimed_by}; requeued.")
+                    broadcast_event("lease_expired", eviction_info)
+
+
+class HubRequestHandler(BaseHTTPRequestHandler):
+    db: Database = None
+
+    def _send_json(self, data: dict | list, status_code: int = 200):
+        body = json.dumps(data, indent=2).encode("utf-8")
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_html(self, html_content: str, status_code: int = 200):
+        body = html_content.encode("utf-8")
+        self.send_response(status_code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_image(self, data: bytes, content_type: str = "image/jpeg", status_code: int = 200):
+        self.send_response(status_code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_error(self, message: str, status_code: int = 400):
+        self._send_json({"error": message, "status": "ERROR"}, status_code)
+
+    def _serve_static(self, path: str):
+        if not os.path.isdir(WEB_DIST_DIR):
+            self._send_html(
+                "<!DOCTYPE html><html><head><title>Knot Cockpit</title></head>"
+                "<body style='background:#16161e;color:#c0caf5;font-family:monospace;padding:2rem;'>"
+                "<h2>Knot Cockpit Static Assets Not Built</h2>"
+                "<p>Run: <code>cd web && pnpm build</code></p>"
+                "<p>Or run development server: <code>cd web && pnpm dev</code> (http://localhost:5173)</p>"
+                "</body></html>",
+                status_code=200
+            )
+            return
+
+        clean_path = path.lstrip("/")
+        if not clean_path or clean_path in ("kafe", "cockpit", "chat", "dag", "artifacts", "projects"):
+            target = os.path.join(WEB_DIST_DIR, "index.html")
+        else:
+            target = os.path.abspath(os.path.join(WEB_DIST_DIR, clean_path))
+            if not target.startswith(WEB_DIST_DIR):
+                self._send_error("Forbidden", 403)
+                return
+            if not os.path.isfile(target):
+                # SPA fallback for client-side routing
+                target = os.path.join(WEB_DIST_DIR, "index.html")
+
+        if not os.path.isfile(target):
+            self._send_error("File not found", 404)
+            return
+
+        mime_type, _ = mimetypes.guess_type(target)
+        if not mime_type:
+            mime_type = "application/octet-stream"
+
+        try:
+            with open(target, "rb") as f:
+                content = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", f"{mime_type}; charset=utf-8" if mime_type.startswith("text/") else mime_type)
+            self.send_header("Content-Length", str(len(content)))
+            if "/assets/" in target or target.endswith((".js", ".css", ".svg", ".png", ".woff2")):
+                self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+            else:
+                self.send_header("Cache-Control", "no-cache")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(content)
+        except Exception as e:
+            self._send_error(f"Failed to serve file: {e}", 500)
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
+    def do_HEAD(self):
+        self.do_GET()
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = parse_qs(parsed.query)
+
+        if path == "/health":
+            nodes = self.db.list_nodes()
+            online_nodes = [n for n in nodes if n["status"] == "ONLINE"]
+            tasks = self.db.list_tasks(limit=100)
+            queued = sum(1 for t in tasks if t["status"] == "QUEUED")
+            running = sum(1 for t in tasks if t["status"] in ("CLAIMED", "RUNNING"))
+            blocked = sum(1 for t in tasks if t["status"] == "BLOCKED_ON_DEPS")
+            self._send_json({
+                "status": "OK",
+                "service": "knot-hub",
+                "timestamp": int(time.time()),
+                "mesh_nodes": len(nodes),
+                "online_nodes": len(online_nodes),
+                "tasks_queued": queued,
+                "tasks_active": running,
+                "tasks_blocked_dag": blocked,
+                "total_tasks_tracked": len(tasks)
+            })
+
+        elif path in ("/tasks", "/tasks/list"):
+            status_filter = query.get("status", [None])[0]
+            batch_filter = query.get("batch_id", [None])[0]
+            limit = int(query.get("limit", [50])[0])
+            tasks = self.db.list_tasks(status=status_filter, batch_id=batch_filter, limit=limit)
+            self._send_json(tasks)
+
+        elif path.startswith("/tasks/batch/"):
+            batch_id = path.replace("/tasks/batch/", "").strip()
+            self._send_json(self.db.get_batch_status(batch_id))
+
+        elif path.startswith("/tasks/"):
+            task_id = path.replace("/tasks/", "").strip()
+            task = self.db.get_task(task_id)
+            if task:
+                self._send_json(task)
+            else:
+                self._send_error("Task not found", 404)
+
+        elif path == "/nodes":
+            self._send_json(self.db.list_nodes())
+
+        elif path.startswith("/nodes/") and path.endswith("/screen"):
+            parts = [p for p in path.split("/") if p]
+            if len(parts) == 3 and parts[0] == "nodes" and parts[2] == "screen":
+                node_id = parts[1]
+                force = "force" in query or query.get("force", ["0"])[0] in ("1", "true")
+                quality = query.get("quality", ["low"])[0]
+                img_data, ctype = capture_node_screen(node_id, force=force, quality=quality)
+                if img_data:
+                    self._send_image(img_data, ctype)
+                else:
+                    self._send_error("Screen unavailable", 404)
+            else:
+                self._send_error("Invalid screen request path", 400)
+
+        elif path == "/swarm/models":
+            default_model = self.db.get_setting("default_swarm_model", DEFAULT_SWARM_MODEL)
+            node_models = self.db.get_all_node_models()
+            self._send_json({
+                "available_models": get_available_models(),
+                "default_model": default_model,
+                "node_models": node_models
+            })
+
+        elif path == "/quota":
+            nodes = self.db.list_nodes()
+            result = []
+            for n in nodes:
+                q_data = n.get("quota_data") or {}
+                result.append({
+                    "node_id": n["id"],
+                    "account": n.get("account") or q_data.get("account"),
+                    "groups": {
+                        "gemini": {
+                            "five_hour": {
+                                "current": n.get("quota_5h_gemini") if n.get("quota_5h_gemini") is not None else 1.0,
+                                "limit": 1.0,
+                                "pct": int((n.get("quota_5h_gemini") if n.get("quota_5h_gemini") is not None else 1.0) * 100),
+                                "status": "OK" if (n.get("quota_5h_gemini") or 1.0) > 0.3 else "LOW",
+                                "next_reset_in": q_data.get("gemini_5h_reset_in") or format_reset_countdown(q_data.get("gemini_5h_reset"))
+                            },
+                            "weekly": {
+                                "current": n.get("quota_weekly_gemini") if n.get("quota_weekly_gemini") is not None else 1.0,
+                                "limit": 1.0,
+                                "pct": int((n.get("quota_weekly_gemini") if n.get("quota_weekly_gemini") is not None else 1.0) * 100),
+                                "status": "OK" if (n.get("quota_weekly_gemini") or 1.0) > 0.3 else "LOW",
+                                "next_reset_in": q_data.get("gemini_weekly_reset_in") or format_reset_countdown(q_data.get("gemini_weekly_reset"))
+                            }
+                        }
+                    }
+                })
+            self._send_json(result)
+
+        elif path == "/projects":
+            self._send_json(self.db.list_projects())
+
+        elif path.startswith("/projects/"):
+            pid = path.replace("/projects/", "").strip()
+            p = self.db.get_project(pid)
+            if p:
+                self._send_json(p)
+            else:
+                self._send_error("Project not found", 404)
+
+        elif path == "/chat/conversations":
+            proj_id = query.get("project_id", [None])[0]
+            self._send_json(self.db.list_conversations(project_id=proj_id))
+
+        elif path.startswith("/chat/conversations/") and path.endswith("/models"):
+            cid = path.replace("/chat/conversations/", "").replace("/models", "").strip()
+            self._send_json(self.db.get_conversation_models(cid))
+
+        elif path.startswith("/chat/conversations/"):
+            cid = path.replace("/chat/conversations/", "").strip()
+            c = self.db.get_conversation(cid)
+            if c:
+                self._send_json(c)
+            else:
+                self._send_error("Conversation not found", 404)
+
+        elif path == "/chat/session":
+            conv_id = query.get("conv_id", [""])[0]
+            node_id = query.get("node_id", [""])[0]
+            session_id = self.db.get_node_session(conv_id, node_id)
+            self._send_json({"conv_id": conv_id, "node_id": node_id, "agy_session_id": session_id})
+
+        elif path == "/chat/messages":
+            conv_id = query.get("conv_id", ["main"])[0]
+            limit = int(query.get("limit", [50])[0])
+            before_ts = int(query.get("before_ts", [0])[0]) or None
+            self._send_json(self.db.list_chat_messages(conv_id=conv_id, limit=limit, before_ts=before_ts))
+
+        elif path == "/artifacts/leases":
+            self._send_json(self.db.list_artifact_leases())
+
+        elif path.startswith("/artifacts/lease/"):
+            name = path.replace("/artifacts/lease/", "").strip()
+            lease = self.db.get_artifact_lease(name)
+            if lease:
+                self._send_json(lease)
+            else:
+                self._send_error("Artifact lease not found", 404)
+
+        elif path == "/swarm/activity":
+            timeout = int(query.get("timeout", [1800])[0])
+            self._send_json(self.db.get_swarm_activity(idle_timeout_sec=timeout))
+
+        elif path == "/nodes/activity":
+            self._send_json(self.db.get_all_node_activities())
+
+        elif path == "/power/status":
+            nodes = self.db.list_nodes()
+            activity = self.db.get_swarm_activity()
+            self._send_json({
+                "swarm_active": activity["active"],
+                "activity": activity,
+                "nodes": [
+                    {
+                        "id": n["id"],
+                        "hostname": n.get("hostname", n["id"]),
+                        "status": n["status"],
+                        "last_heartbeat": n["last_heartbeat"],
+                        "power": n.get("power", {})
+                    }
+                    for n in nodes
+                ]
+            })
+
+        elif path in ("/stream", "/events"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+
+            import queue
+            q = queue.Queue(maxsize=100)
+            with _subscribers_lock:
+                _subscribers.add(q)
+
+            init_msg = f"event: connected\ndata: {json.dumps({'time': int(time.time())})}\n\n".encode("utf-8")
+            try:
+                self.wfile.write(init_msg)
+                self.wfile.flush()
+                while True:
+                    try:
+                        msg = q.get(timeout=15.0)
+                        self.wfile.write(msg)
+                        self.wfile.flush()
+                    except queue.Empty:
+                        self.wfile.write(b": heartbeat\n\n")
+                        self.wfile.flush()
+            except (ConnectionResetError, BrokenPipeError):
+                pass
+            finally:
+                with _subscribers_lock:
+                    _subscribers.discard(q)
+
+        else:
+            self._serve_static(path)
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        post_data = self.rfile.read(content_length) if content_length > 0 else b"{}"
+
+        try:
+            body = json.loads(post_data.decode("utf-8")) if post_data else {}
+        except Exception:
+            self._send_error("Invalid JSON body", 400)
+            return
+
+        if path == "/tasks/post":
+            title = body.get("title", "").strip() or "Autonomous Swarm Task"
+            prompt = body.get("prompt", "").strip()
+            if not prompt:
+                self._send_error("Field 'prompt' is required", 400)
+                return
+
+            target_plane = body.get("target_plane", "any").strip()
+            lease_ttl = int(body.get("lease_ttl", DEFAULT_LEASE_TTL))
+            batch_id = body.get("batch_id")
+            parent_id = body.get("parent_id")
+            dependencies = body.get("dependencies", [])
+            meta = body.get("meta", {})
+
+            task = self.db.post_task(
+                title=title,
+                prompt=prompt,
+                target_plane=target_plane,
+                lease_ttl=lease_ttl,
+                batch_id=batch_id,
+                parent_id=parent_id,
+                dependencies=dependencies,
+                meta=meta
+            )
+            self._send_json(task, 201)
+
+        elif path == "/tasks/fanout":
+            tasks = body.get("tasks", [])
+            barrier_task = body.get("barrier_task", None)
+            batch_id = body.get("batch_id", None)
+            if not tasks:
+                self._send_error("Field 'tasks' array is required and cannot be empty", 400)
+                return
+
+            res = self.db.post_fanout(tasks=tasks, barrier_task=barrier_task, batch_id=batch_id)
+            self._send_json(res, 201)
+
+        elif path == "/tasks/claim":
+            node_id = body.get("node_id", "").strip()
+            capabilities = body.get("capabilities", [])
+            if not node_id:
+                self._send_error("Field 'node_id' is required", 400)
+                return
+
+            task = self.db.claim_task(node_id, capabilities)
+            if task:
+                self._send_json(task, 200)
+            else:
+                self._send_json({"message": "no matching queued tasks", "task": None}, 200)
+
+        elif path == "/tasks/heartbeat":
+            task_id = body.get("task_id", "").strip()
+            node_id = body.get("node_id", "").strip()
+            if not task_id or not node_id:
+                self._send_error("Fields 'task_id' and 'node_id' are required", 400)
+                return
+
+            success = self.db.task_heartbeat(task_id, node_id)
+            self._send_json({"ok": success, "task_id": task_id})
+
+        elif path == "/tasks/result":
+            task_id = body.get("task_id", "").strip()
+            node_id = body.get("node_id", "").strip()
+            status = body.get("status", "COMPLETED").strip()
+            result = body.get("result", "")
+            session_id = body.get("session_id", "")
+            duration_sec = float(body.get("duration_seconds", 0.0))
+            tokens_used = int(body.get("tokens_used", 0))
+
+            if not task_id or not node_id:
+                self._send_error("Fields 'task_id' and 'node_id' are required", 400)
+                return
+
+            task = self.db.complete_task(
+                task_id=task_id,
+                node_id=node_id,
+                status=status,
+                result=result,
+                session_id=session_id,
+                duration_seconds=duration_sec,
+                tokens_used=tokens_used
+            )
+            if task:
+                self._send_json(task, 200)
+            else:
+                self._send_error("Failed to record result or task not found", 404)
+
+        elif path == "/node/heartbeat":
+            node_id = body.get("node_id", "").strip()
+            hostname = body.get("hostname", "").strip()
+            capabilities = body.get("capabilities", [])
+            agy_ver = body.get("agy_version", "")
+            agy_auth = body.get("agy_auth", "")
+            quota = body.get("quota", None)
+            power = body.get("power", None)
+
+            if not node_id:
+                self._send_error("Field 'node_id' is required", 400)
+                return
+
+            client_ip = self.client_address[0] if hasattr(self, "client_address") and self.client_address else ""
+            resp = self.db.register_node_heartbeat(
+                node_id=node_id,
+                hostname=hostname or node_id,
+                capabilities=capabilities,
+                agy_ver=agy_ver,
+                agy_auth=agy_auth,
+                quota=quota,
+                power=power,
+                ip=client_ip
+            )
+            self._send_json(resp, 200)
+
+        elif path == "/node/activity":
+            node_id = body.get("node_id", "").strip()
+            activity = body.get("activity", {})
+            if not node_id:
+                self._send_error("Field 'node_id' is required", 400)
+                return
+            self.db.set_node_activity(node_id, activity)
+            broadcast_event("node_activity", {"node_id": node_id, "activity": activity})
+            self._send_json({"ok": True}, 200)
+
+        elif path == "/swarm/wake":
+            duration = int(body.get("duration_sec", 3600))
+            self.db._manual_wake_until = int(time.time()) + duration
+            broadcast_event("swarm_wake_hold", {"duration_sec": duration, "until": self.db._manual_wake_until})
+            self._send_json({"ok": True, "manual_wake_until": self.db._manual_wake_until})
+
+        elif path == "/swarm/sleep-allow":
+            self.db._manual_wake_until = 0
+            broadcast_event("swarm_wake_released", {})
+            self._send_json({"ok": True, "manual_wake_until": 0})
+
+        elif path == "/mesh/action":
+            action = body.get("action", "").strip()
+            target = body.get("target", "").strip() or "--all"
+
+            allowed_actions = {
+                "restart_kvm": ["knot", "kvm", "restart"],
+                "screen_lock": ["knot", "screen", "lock", target],
+                "screen_unlock": ["knot", "screen", "unlock", target],
+                "screen_status": ["knot", "screen", "status", target],
+                "doctor": ["knot", "doctor", target],
+            }
+
+            if action not in allowed_actions:
+                self._send_error(f"Unsupported action '{action}'. Allowed: {list(allowed_actions.keys())}", 400)
+                return
+
+            cmd = list(allowed_actions[action])
+            knot_path = shutil.which("knot") or os.path.expanduser("~/Dev/knot/bin/knot")
+            cmd[0] = knot_path
+
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=45.0
+                )
+                output = proc.stdout + (("\n" + proc.stderr) if proc.stderr else "")
+                self._send_json({
+                    "ok": proc.returncode == 0,
+                    "action": action,
+                    "target": target,
+                    "exit_code": proc.returncode,
+                    "output": output.strip()
+                }, 200)
+            except subprocess.TimeoutExpired:
+                self._send_json({
+                    "ok": False,
+                    "action": action,
+                    "target": target,
+                    "exit_code": -1,
+                    "output": "Action timed out after 45 seconds"
+                }, 504)
+            except Exception as e:
+                self._send_json({
+                    "ok": False,
+                    "action": action,
+                    "target": target,
+                    "exit_code": -1,
+                    "output": str(e)
+                }, 500)
+
+        elif path == "/mesh/exec":
+            target = (body.get("target") or body.get("node") or "").strip()
+            command = body.get("command", "").strip()
+            timeout = float(body.get("timeout", 30))
+
+            if not target or not command:
+                self._send_error("Fields 'target' and 'command' are required", 400)
+                return
+
+            knot_path = shutil.which("knot") or os.path.expanduser("~/Dev/knot/bin/knot")
+            cmd = [knot_path, "exec", target, command]
+
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout
+                )
+                self._send_json({
+                    "ok": proc.returncode == 0,
+                    "target": target,
+                    "command": command,
+                    "exit_code": proc.returncode,
+                    "stdout": proc.stdout,
+                    "stderr": proc.stderr
+                }, 200)
+            except subprocess.TimeoutExpired:
+                self._send_json({
+                    "ok": False,
+                    "target": target,
+                    "command": command,
+                    "exit_code": -1,
+                    "stdout": "",
+                    "stderr": f"Command timed out after {timeout} seconds on {target}"
+                }, 200)
+            except Exception as e:
+                self._send_json({
+                    "ok": False,
+                    "target": target,
+                    "command": command,
+                    "exit_code": -1,
+                    "stdout": "",
+                    "stderr": str(e)
+                }, 500)
+
+        elif path == "/swarm/model":
+            model = body.get("model", "").strip()
+            node_id = body.get("node_id", "").strip() or None
+            apply_to_all = bool(body.get("apply_to_all", False))
+
+            if not model:
+                self._send_error("Field 'model' is required", 400)
+                return
+
+            if apply_to_all:
+                self.db.set_all_node_models(model)
+            elif node_id:
+                self.db.set_node_model(node_id, model)
+            else:
+                self.db.set_setting("default_swarm_model", model)
+
+            default_model = self.db.get_setting("default_swarm_model", DEFAULT_SWARM_MODEL)
+            node_models = self.db.get_all_node_models()
+
+            broadcast_event("model_updated", {
+                "default_model": default_model,
+                "node_models": node_models,
+                "updated_node": node_id if (node_id and not apply_to_all) else None,
+                "model": model,
+                "apply_to_all": apply_to_all
+            })
+            self._send_json({
+                "ok": True,
+                "default_model": default_model,
+                "node_models": node_models,
+                "updated_node": node_id,
+                "model": model,
+                "apply_to_all": apply_to_all
+            }, 200)
+
+        elif path == "/projects":
+            pid = body.get("id", "").strip() or str(uuid.uuid4())
+            name = body.get("name", pid).strip() or pid
+            desc = body.get("description", "").strip()
+            folders = body.get("folders", [])
+            proj = self.db.create_project(project_id=pid, name=name, description=desc, folders=folders)
+            self._send_json(proj, 201)
+
+        elif path == "/chat/conversations":
+            cid = body.get("id", "").strip() or re.sub(r'[^a-zA-Z0-9_-]', '-', body.get("title", "").strip().lower()) or str(uuid.uuid4())
+            title = body.get("title", cid).strip() or cid
+            proj_id = body.get("project_id", "knot").strip() or "knot"
+            desc = body.get("description", "").strip()
+            created_by = body.get("created_by", "human").strip() or "human"
+            conv = self.db.create_conversation(conv_id=cid, title=title, project_id=proj_id, description=desc, created_by=created_by)
+            self._send_json(conv, 201)
+
+        elif path.startswith("/chat/conversations/") and path.endswith("/model"):
+            cid = path.replace("/chat/conversations/", "").replace("/model", "").strip()
+            model = body.get("model", "").strip()
+            node_id = body.get("node_id", "").strip() or None
+            res = self.db.set_conversation_model(conv_id=cid, model=model, node_id=node_id)
+            self._send_json(res, 200)
+
+        elif path == "/chat/session":
+            conv_id = body.get("conv_id", "").strip()
+            node_id = body.get("node_id", "").strip()
+            agy_session_id = body.get("agy_session_id", "").strip()
+            if not conv_id or not node_id or not agy_session_id:
+                self._send_error("Fields conv_id, node_id, and agy_session_id are required", 400)
+                return
+            self.db.set_node_session(conv_id, node_id, agy_session_id)
+            self._send_json({"ok": True, "conv_id": conv_id, "node_id": node_id, "agy_session_id": agy_session_id}, 200)
+
+        elif path == "/chat/messages":
+            sender = body.get("sender", "user").strip() or "user"
+            content = body.get("content", "").strip()
+            conv_id = body.get("conv_id", "main").strip() or "main"
+            mentions = body.get("mentions", None)
+            artifacts = body.get("artifacts", None)
+            reply_to = body.get("reply_to", None)
+            meta = body.get("meta", None)
+
+            if not content:
+                self._send_error("Field 'content' is required", 400)
+                return
+
+            msg = self.db.post_chat_message(
+                sender=sender,
+                content=content,
+                conv_id=conv_id,
+                mentions=mentions,
+                artifacts=artifacts,
+                reply_to=reply_to,
+                meta=meta
+            )
+            self._send_json(msg, 201)
+
+        elif path == "/artifacts/lock":
+            name = body.get("name", "").strip()
+            locked_by = body.get("node_id", body.get("locked_by", "")).strip()
+            ttl_sec = int(body.get("ttl", body.get("lease_ttl", DEFAULT_ARTIFACT_LEASE_TTL)))
+            state = body.get("state", "LOCKED_SURGERY").strip() or "LOCKED_SURGERY"
+
+            if not name or not locked_by:
+                self._send_error("Fields 'name' and 'node_id' (or 'locked_by') are required", 400)
+                return
+
+            res = self.db.lock_artifact(name=name, locked_by=locked_by, ttl_sec=ttl_sec, state=state)
+            status_code = 200 if res.get("ok") else 409
+            self._send_json(res, status_code)
+
+        elif path == "/artifacts/release":
+            name = body.get("name", "").strip()
+            node_id = body.get("node_id", "").strip()
+            new_state = body.get("state", "VERIFIED_COMMITTED").strip() or "VERIFIED_COMMITTED"
+
+            if not name or not node_id:
+                self._send_error("Fields 'name' and 'node_id' are required", 400)
+                return
+
+            res = self.db.release_artifact(name=name, node_id=node_id, new_state=new_state)
+            status_code = 200 if res.get("ok") else 400
+            self._send_json(res, status_code)
+
+        else:
+            self._send_error("Not found", 404)
+
+    def log_message(self, format, *args):
+        # Suppress poll logs
+        if args and str(args[1]) in ("200", "201"):
+            cmd_path = str(args[0])
+            if any(p in cmd_path for p in ("/tasks/claim", "/chat/messages", "/artifacts/leases")):
+                return
+        super().log_message(format, *args)
+
+
+def lease_reaper_loop(db: Database, stop_event: threading.Event):
+    while not stop_event.is_set():
+        try:
+            db.reap_expired_leases()
+            db.reap_expired_artifact_leases()
+        except Exception as e:
+            print(f"[!] Error in lease reaper: {e}", file=sys.stderr)
+        stop_event.wait(5.0)
+
+
+def main():
+    port = int(os.environ.get("KNOT_HUB_PORT", DEFAULT_PORT))
+    db_path = os.environ.get("KNOT_HUB_DB", DEFAULT_DB_PATH)
+
+    db = Database(db_path)
+    HubRequestHandler.db = db
+
+    server = ThreadingHTTPServer(("0.0.0.0", port), HubRequestHandler)
+    print(f"[*] Knot Swarm Blackboard Hub listening on 0.0.0.0:{port}")
+    print(f"[*] Database: {db_path} (WAL mode active)")
+    print(f"[*] Web Cockpit available at: http://0.0.0.0:{port}/kafe")
+
+    stop_event = threading.Event()
+    reaper_thread = threading.Thread(target=lease_reaper_loop, args=(db, stop_event), daemon=True)
+    reaper_thread.start()
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n[*] Shutting down Knot Hub...")
+    finally:
+        stop_event.set()
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()

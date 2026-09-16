@@ -1,0 +1,20 @@
+# Knot Mesh Swarm Profile Template
+# Place active profiles in /etc/knot/swarms.d/<swarm_id>.conf
+
+SWARM_ID="home"
+SWARM_NAME="Home Mesh"
+ANCHOR_ID="desktop"
+ANCHOR_HOST="desktop.home.local"
+
+# Physical Hardware Network Fencing
+# Gateway MAC is matched against default route (Ethernet prioritized over Wi-Fi)
+GATEWAY_MAC="00:11:22:33:44:55"
+SSID="MyHomeWiFi"
+SUBNET="192.168.1.0/24"
+
+# Swarm Hub & Telemetry Port
+HUB_PORT=4242
+
+# Security Policy
+ALLOW_NOPASSWD_SUDO=true
+ALLOW_DESKFLOW_KVM=true

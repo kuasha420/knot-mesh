@@ -1,0 +1,464 @@
+#!/usr/bin/env /usr/bin/python3
+"""
+Knot Dynamic Crossover Strip Daemon (knot-stripd)
+Dynamic Wayland crossover indicator strips for Anchor display in KDE Plasma 6.
+Renders high-visibility, tasteful border strips along active crossover zones with
+GPU-accelerated physics impulse flare animations when the cursor transitions across mesh nodes.
+"""
+
+import sys
+import os
+import re
+import shutil
+import socket
+import subprocess
+import threading
+import time
+from PyQt6.QtCore import QObject, pyqtSignal, pyqtProperty, QUrl, QTimer
+from PyQt6.QtGui import QGuiApplication
+from PyQt6.QtQml import QQmlApplicationEngine, QQmlComponent
+
+LEFT_QML = """
+import QtQuick
+import QtQuick.Window
+import org.kde.layershell as LayerShell
+
+Window {
+    id: leftWin
+    visible: true
+    flags: Qt.WindowTransparentForInput | Qt.FramelessWindowHint
+    color: "transparent"
+
+    LayerShell.Window.layer: LayerShell.Window.LayerOverlay
+    LayerShell.Window.anchors: LayerShell.Window.AnchorLeft | LayerShell.Window.AnchorBottom
+    LayerShell.Window.exclusionZone: -1
+    LayerShell.Window.keyboardInteractivity: LayerShell.Window.KeyboardInteractivityNone
+
+    width: leftStrip.thickness
+    height: Math.round(Screen.height * 0.35)
+
+    Item {
+        id: leftStrip
+        anchors.fill: parent
+        property int thickness: 5
+        opacity: (!bridge.locked && bridge.laptopConnected) ? 0.45 : 0.0
+
+        Behavior on opacity {
+            NumberAnimation { duration: 250; easing.type: Easing.InOutQuad }
+        }
+
+        // Inner solid core
+        Rectangle {
+            anchors.fill: parent
+            radius: 2
+            gradient: Gradient {
+                orientation: Gradient.Vertical
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.25; color: bridge.laptopColor }
+                GradientStop { position: 1.0; color: bridge.laptopColor }
+            }
+        }
+
+        // Outer glow
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -1
+            radius: 3
+            opacity: 0.35
+            color: "transparent"
+            border.width: 1
+            border.color: bridge.laptopColor
+        }
+
+        SequentialAnimation {
+            id: leftPulseAnim
+            ParallelAnimation {
+                NumberAnimation {
+                    target: leftStrip
+                    property: "opacity"
+                    to: 0.90
+                    duration: 40
+                    easing.type: Easing.OutQuad
+                }
+                NumberAnimation {
+                    target: leftStrip
+                    property: "thickness"
+                    to: 8
+                    duration: 40
+                    easing.type: Easing.OutQuad
+                }
+            }
+            ParallelAnimation {
+                NumberAnimation {
+                    target: leftStrip
+                    property: "opacity"
+                    to: (!bridge.locked && bridge.laptopConnected) ? 0.45 : 0.0
+                    duration: 320
+                    easing.type: Easing.OutCubic
+                }
+                NumberAnimation {
+                    target: leftStrip
+                    property: "thickness"
+                    to: 5
+                    duration: 320
+                    easing.type: Easing.OutCubic
+                }
+            }
+        }
+
+        Connections {
+            target: bridge
+            function onLaptopCrossover() {
+                leftPulseAnim.restart();
+            }
+        }
+    }
+}
+"""
+
+BOTTOM_QML = """
+import QtQuick
+import QtQuick.Window
+import org.kde.layershell as LayerShell
+
+Window {
+    id: bottomWin
+    visible: true
+    flags: Qt.WindowTransparentForInput | Qt.FramelessWindowHint
+    color: "transparent"
+
+    LayerShell.Window.layer: LayerShell.Window.LayerOverlay
+    LayerShell.Window.anchors: LayerShell.Window.AnchorBottom | LayerShell.Window.AnchorLeft
+    LayerShell.Window.exclusionZone: -1
+    LayerShell.Window.keyboardInteractivity: LayerShell.Window.KeyboardInteractivityNone
+    LayerShell.Window.margins.left: Math.round(Screen.width * 0.45)
+
+    width: Math.round(Screen.width * 0.40)
+    height: bottomStrip.thickness
+
+    Item {
+        id: bottomStrip
+        anchors.fill: parent
+        property int thickness: 5
+        opacity: (!bridge.locked && bridge.deckConnected) ? 0.45 : 0.0
+
+        Behavior on opacity {
+            NumberAnimation { duration: 250; easing.type: Easing.InOutQuad }
+        }
+
+        // Inner solid core
+        Rectangle {
+            anchors.fill: parent
+            radius: 2
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.15; color: bridge.deckColor }
+                GradientStop { position: 0.85; color: bridge.deckColor }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+        }
+
+        // Outer glow
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -1
+            radius: 3
+            opacity: 0.35
+            color: "transparent"
+            border.width: 1
+            border.color: bridge.deckColor
+        }
+
+        SequentialAnimation {
+            id: bottomPulseAnim
+            ParallelAnimation {
+                NumberAnimation {
+                    target: bottomStrip
+                    property: "opacity"
+                    to: 0.90
+                    duration: 40
+                    easing.type: Easing.OutQuad
+                }
+                NumberAnimation {
+                    target: bottomStrip
+                    property: "thickness"
+                    to: 8
+                    duration: 40
+                    easing.type: Easing.OutQuad
+                }
+            }
+            ParallelAnimation {
+                NumberAnimation {
+                    target: bottomStrip
+                    property: "opacity"
+                    to: (!bridge.locked && bridge.deckConnected) ? 0.45 : 0.0
+                    duration: 320
+                    easing.type: Easing.OutCubic
+                }
+                NumberAnimation {
+                    target: bottomStrip
+                    property: "thickness"
+                    to: 5
+                    duration: 320
+                    easing.type: Easing.OutCubic
+                }
+            }
+        }
+
+        Connections {
+            target: bridge
+            function onDeckCrossover() {
+                bottomPulseAnim.restart();
+            }
+        }
+    }
+}
+"""
+
+class KnotEventBridge(QObject):
+    laptopConnectedChanged = pyqtSignal(bool)
+    deckConnectedChanged = pyqtSignal(bool)
+    lockedChanged = pyqtSignal(bool)
+    laptopCrossover = pyqtSignal()
+    deckCrossover = pyqtSignal()
+
+    def __init__(self, engine_mode="journal", laptop_color="#00f0ff", deck_color="#ffaa00"):
+        super().__init__()
+        self._engine_mode = engine_mode
+        self._laptop_color = laptop_color
+        self._deck_color = deck_color
+        self._laptop_connected = False
+        self._deck_connected = False
+        self._locked = False
+        self._active_screen = socket.gethostname()
+        self._stop_event = threading.Event()
+
+    @pyqtProperty(bool, notify=laptopConnectedChanged)
+    def laptopConnected(self):
+        return self._laptop_connected
+
+    @pyqtProperty(bool, notify=deckConnectedChanged)
+    def deckConnected(self):
+        return self._deck_connected
+
+    @pyqtProperty(bool, notify=lockedChanged)
+    def locked(self):
+        return self._locked
+
+    @pyqtProperty(str, constant=True)
+    def laptopColor(self):
+        return self._laptop_color
+
+    @pyqtProperty(str, constant=True)
+    def deckColor(self):
+        return self._deck_color
+
+    def set_laptop_connected(self, state: bool):
+        if self._laptop_connected != state:
+            self._laptop_connected = state
+            self.laptopConnectedChanged.emit(state)
+
+    def set_deck_connected(self, state: bool):
+        if self._deck_connected != state:
+            self._deck_connected = state
+            self.deckConnectedChanged.emit(state)
+
+    def set_locked(self, state: bool):
+        if self._locked != state:
+            self._locked = state
+            self.lockedChanged.emit(state)
+
+    def check_lock_state(self):
+        lock_file = os.path.expanduser("~/.local/state/knot/kvm_lock")
+        is_locked = False
+        try:
+            if os.path.exists(lock_file):
+                with open(lock_file, "r") as f:
+                    is_locked = (f.read().strip() == "locked")
+        except Exception:
+            pass
+        self.set_locked(is_locked)
+
+    def _resolve_peer_ip(self, node_id: str, default_ip: str) -> str:
+        home = os.path.expanduser("~")
+        cache_dir = os.path.join(home, ".cache/knot/leases")
+        if os.path.isdir(cache_dir):
+            for fname in os.listdir(cache_dir):
+                if fname.endswith(f"_{node_id}") or fname == node_id:
+                    try:
+                        with open(os.path.join(cache_dir, fname), "r") as f:
+                            ip = f.read().strip()
+                            if ip:
+                                return ip
+                    except Exception:
+                        pass
+        knot_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        manifest = os.path.join(knot_root, "registry/nodes", f"{node_id}.json")
+        if os.path.isfile(manifest):
+            try:
+                import json
+                with open(manifest, "r") as f:
+                    d = json.load(f)
+                    ip = d.get("ip_hint") or d.get("ip")
+                    if ip:
+                        return ip
+            except Exception:
+                pass
+        return default_ip
+
+    def check_initial_connections(self):
+        try:
+            res = subprocess.run(
+                ["ss", "-t", "state", "established", "( sport = :24800 )"],
+                capture_output=True, text=True, check=True
+            )
+            out = res.stdout
+            laptop_ip = self._resolve_peer_ip("laptop", "")
+            deck_ip = self._resolve_peer_ip("steamdeck", "")
+            self.set_laptop_connected(bool(laptop_ip and laptop_ip in out))
+            self.set_deck_connected(bool(deck_ip and deck_ip in out))
+        except Exception as e:
+            sys.stderr.write(f"[knot-stripd] ss check error: {e}\n")
+
+    def start_engine(self):
+        self.check_initial_connections()
+        self.check_lock_state()
+
+        self._timer_lock = QTimer()
+        self._timer_lock.timeout.connect(self.check_lock_state)
+        self._timer_lock.start(300)
+
+        if self._engine_mode == "journal":
+            t_journal = threading.Thread(target=self._journal_worker, daemon=True)
+            t_journal.start()
+        else:
+            self._timer = QTimer()
+            self._timer.timeout.connect(self.check_initial_connections)
+            self._timer.start(1000)
+
+        t_kbd = threading.Thread(target=self._keyboard_worker, daemon=True)
+        t_kbd.start()
+
+    def _keyboard_worker(self):
+        import select
+        import time
+        try:
+            import evdev
+            from evdev import ecodes
+        except ImportError:
+            sys.stderr.write("[knot-stripd] evdev not available, keyboard listener disabled\n")
+            return
+
+        while not self._stop_event.is_set():
+            devices = []
+            try:
+                for path in evdev.list_devices():
+                    try:
+                        dev = evdev.InputDevice(path)
+                        caps = dev.capabilities().get(ecodes.EV_KEY, [])
+                        if ecodes.KEY_SCROLLLOCK in caps:
+                            devices.append(dev)
+                        else:
+                            dev.close()
+                    except Exception:
+                        pass
+            except Exception as e:
+                sys.stderr.write(f"[knot-stripd] Failed to list input devices: {e}\n")
+
+            if not devices:
+                time.sleep(2)
+                continue
+
+            try:
+                last_toggle = 0.0
+                while not self._stop_event.is_set():
+                    r, _, _ = select.select(devices, [], [], 1.0)
+                    for dev in r:
+                        try:
+                            for event in dev.read():
+                                if event.type == ecodes.EV_KEY and event.code == ecodes.KEY_SCROLLLOCK and event.value == 1:
+                                    now = time.time()
+                                    if now - last_toggle > 0.4:
+                                        last_toggle = now
+                                        knot_bin = shutil.which("knot") or os.path.abspath(os.path.join(os.path.dirname(__file__), "knot"))
+                                        subprocess.Popen([knot_bin, "kvm", "lock-toggle"])
+                        except OSError:
+                            raise
+            except Exception:
+                for d in devices:
+                    try:
+                        d.close()
+                    except Exception:
+                        pass
+                time.sleep(1)
+
+    def _journal_worker(self):
+        cmd = ["journalctl", "--user-unit=knot-deskflow.service", "-f", "-n", "0", "-o", "cat"]
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+            while not self._stop_event.is_set():
+                line = proc.stdout.readline()
+                if not line:
+                    break
+                # Connection / Disconnection
+                m_conn = re.search(r'client "([^"]+)" has connected', line)
+                if m_conn:
+                    cname = m_conn.group(1).lower()
+                    if "deck" in cname or "handheld" in cname:
+                        self.set_deck_connected(True)
+                    else:
+                        self.set_laptop_connected(True)
+
+                m_dis = re.search(r'client "([^"]+)" (?:has disconnected|is dead)', line)
+                if m_dis:
+                    cname = m_dis.group(1).lower()
+                    if "deck" in cname or "handheld" in cname:
+                        self.set_deck_connected(False)
+                    else:
+                        self.set_laptop_connected(False)
+
+                # Cursor crossover triggers & active screen tracking
+                m_switch = re.search(r'switch from "([^"]+)" to "([^"]+)"', line)
+                if m_switch:
+                    src, dst = m_switch.group(1), m_switch.group(2)
+                    self._active_screen = dst
+                    if "deck" in dst.lower() or "deck" in src.lower() or "handheld" in dst.lower():
+                        self.deckCrossover.emit()
+                    else:
+                        self.laptopCrossover.emit()
+                elif 'started server' in line or 'resetting server' in line:
+                    self._active_screen = socket.gethostname()
+        except Exception as e:
+            sys.stderr.write(f"[knot-stripd] Journal reader error: {e}\n")
+
+def main():
+    app = QGuiApplication(sys.argv)
+    app.setApplicationName("knot-stripd")
+
+    engine_mode = "journal"
+    if "--engine=socket" in sys.argv:
+        engine_mode = "socket"
+
+    bridge = KnotEventBridge(engine_mode=engine_mode)
+
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("bridge", bridge)
+
+    comp_left = QQmlComponent(engine)
+    comp_left.setData(LEFT_QML.encode("utf-8"), QUrl())
+    win_left = comp_left.create(engine.rootContext())
+
+    comp_bottom = QQmlComponent(engine)
+    comp_bottom.setData(BOTTOM_QML.encode("utf-8"), QUrl())
+    win_bottom = comp_bottom.create(engine.rootContext())
+
+    if not win_left or not win_bottom:
+        sys.stderr.write("[knot-stripd] Failed to create overlay windows\n")
+        sys.exit(1)
+
+    bridge.start_engine()
+    sys.exit(app.exec())
+
+if __name__ == "__main__":
+    main()
