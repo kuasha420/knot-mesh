@@ -49,7 +49,16 @@ def get_peer_cert_fingerprint(host: str, port: int) -> str:
 
 
 def detect_display_specs() -> Dict[str, Any]:
-    """Detects active display specs via kscreen-doctor on KDE Plasma 6."""
+    """Detects active display specs via core/installer/display.sh or fallbacks."""
+    knot_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    display_sh = os.path.join(knot_root, "core", "installer", "display.sh")
+    if os.path.isfile(display_sh):
+        try:
+            out = subprocess.check_output(["bash", display_sh, "--json"], text=True)
+            return json.loads(out)
+        except Exception:
+            pass
+
     specs = {
         "resolution": "1920x1080",
         "refresh_rate": 60.0,
@@ -59,14 +68,17 @@ def detect_display_specs() -> Dict[str, Any]:
         return specs
 
     try:
-        out = subprocess.check_output(["kscreen-doctor", "-o"], text=True, stderr=subprocess.DEVNULL)
-        for line in out.splitlines():
+        out = subprocess.check_output(["kscreen-doctor", "-o"], text=True)
+        # Strip ANSI
+        import re
+        out_clean = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', out)
+        for line in out_clean.splitlines():
             line = line.strip()
-            if "Geometry:" in line:
-                # e.g. Geometry: 0,0 2560x1440
-                parts = line.split()
-                if len(parts) >= 3:
-                    specs["resolution"] = parts[2]
+            if "Modes:" in line:
+                m = re.search(r'([0-9]+)x([0-9]+)@([0-9.]+)\*', line)
+                if m:
+                    specs["resolution"] = f"{m.group(1)}x{m.group(2)}"
+                    specs["refresh_rate"] = float(m.group(3))
             elif "Scale:" in line:
                 parts = line.split()
                 if len(parts) >= 2:
