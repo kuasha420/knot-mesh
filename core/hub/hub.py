@@ -2619,9 +2619,20 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
 
+            user_home = os.path.expanduser("~")
+            topo_path = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/topology.json")
+            anchor_id = "desktop"
+            if os.path.exists(topo_path):
+                try:
+                    with open(topo_path, "r") as tf:
+                        tdata = json.load(tf)
+                        anchor_id = tdata.get("anchor", "desktop")
+                except Exception:
+                    pass
+
             anchor_meta = {
                 "swarm_id": active_swarm,
-                "anchor_id": "desktop",
+                "anchor_id": anchor_id,
                 "anchor_hostname": socket.gethostname(),
                 "hub_port": DEFAULT_PORT,
             }
@@ -2631,7 +2642,6 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 if session and session.get("strand_request"):
                     sreq = session["strand_request"]
                     node_id = sreq.get("node_id") or sreq.get("hostname") or "strand"
-                    user_home = os.path.expanduser("~")
                     nodes_dir = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/nodes")
                     os.makedirs(nodes_dir, exist_ok=True)
                     manifest_path = os.path.join(nodes_dir, f"{node_id}.json")
@@ -2650,6 +2660,48 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                             json.dump(manifest_data, mf, indent=2)
                     except Exception as me:
                         sys.stderr.write(f"[knot-hub] Error writing strand manifest: {me}\n")
+
+                    # Dynamic Topology & Deskflow Recompilation
+                    if placement in ("left", "right", "above", "below", "up", "down") and os.path.exists(topo_path):
+                        try:
+                            norm_p = "up" if placement == "above" else ("down" if placement == "below" else placement)
+                            opp_map = {"left": "right", "right": "left", "up": "down", "down": "up"}
+                            opp_p = opp_map.get(norm_p, "right")
+
+                            with open(topo_path, "r") as tf:
+                                topo_data = json.load(tf)
+
+                            if "screens" not in topo_data:
+                                topo_data["screens"] = [anchor_id]
+                            if node_id not in topo_data["screens"]:
+                                topo_data["screens"].append(node_id)
+                            if "layout" not in topo_data:
+                                topo_data["layout"] = {}
+                            if anchor_id not in topo_data["layout"]:
+                                topo_data["layout"][anchor_id] = {}
+                            topo_data["layout"][anchor_id][norm_p] = {"node": node_id, "span": [0, 100]}
+                            if node_id not in topo_data["layout"]:
+                                topo_data["layout"][node_id] = {}
+                            topo_data["layout"][node_id][opp_p] = {"node": anchor_id, "span": [0, 100]}
+
+                            with open(topo_path, "w") as tf:
+                                json.dump(topo_data, tf, indent=2)
+
+                            compile_script = os.path.join(REPO_ROOT, "core/modules/compile_deskflow.py")
+                            cfg_dir = os.path.join(user_home, ".config/Deskflow")
+                            os.makedirs(cfg_dir, exist_ok=True)
+                            conf_out = os.path.join(cfg_dir, "deskflow-server.conf")
+                            if os.path.isfile(compile_script):
+                                subprocess.run([
+                                    sys.executable, compile_script,
+                                    "--topology", topo_path,
+                                    "--nodes-dir", nodes_dir,
+                                    "--mode", "unlocked",
+                                    "--output", conf_out
+                                ], check=False)
+                                subprocess.run(["systemctl", "--user", "restart", "knot-deskflow.service"], check=False)
+                        except Exception as te:
+                            sys.stderr.write(f"[knot-hub] Error auto-updating topology/deskflow: {te}\n")
 
             ok, msg = enrollment_coordinator.approve_enrollment(pin, placement, anchor_meta)
             if ok:

@@ -411,6 +411,8 @@ ANCHOR_HOST="desktop.local"
 SWARM_CFG=""
 if [ -r "/etc/knot/swarms.d/${ACTIVE_SWARM}.conf" ]; then
   SWARM_CFG="/etc/knot/swarms.d/${ACTIVE_SWARM}.conf"
+elif [ -r "$HOME/.config/knot/swarms/${ACTIVE_SWARM}.conf" ]; then
+  SWARM_CFG="$HOME/.config/knot/swarms/${ACTIVE_SWARM}.conf"
 elif [ -r "$HOME/.config/knot/swarms/${ACTIVE_SWARM}/swarm.conf" ]; then
   SWARM_CFG="$HOME/.config/knot/swarms/${ACTIVE_SWARM}/swarm.conf"
 fi
@@ -459,16 +461,25 @@ else
   # ==========================================
   # STRAND WORKSTATION (CLIENT MODE)
   # ==========================================
-  echo "Node $MY_HOST is STRAND in active swarm ($ACTIVE_SWARM). Launching Deskflow Client targeting $ANCHOR_TARGET..."
+  echo "Node $MY_HOST is STRAND in active swarm ($ACTIVE_SWARM). Launching Deskflow Client targeting $ANCHOR_TARGET ($ANCHOR_HOST)..."
 
-  if [ -z "$KNOT_CLI" ]; then
-    echo "Error: knot CLI executable not found to resolve Anchor IP" >&2
-    exit 1
+  RESOLVED_IP=""
+  if [ -n "$KNOT_CLI" ]; then
+    if resolved_candidate="$("$KNOT_CLI" resolve "$ANCHOR_TARGET" 24800 2>&1)"; then
+      RESOLVED_IP="$resolved_candidate"
+    elif [ "$ANCHOR_HOST" != "$ANCHOR_TARGET" ]; then
+      if host_candidate="$("$KNOT_CLI" resolve "$ANCHOR_HOST" 24800 2>&1)"; then
+        RESOLVED_IP="$host_candidate"
+      fi
+    fi
   fi
 
-  RESOLVED_IP="$("$KNOT_CLI" resolve "$ANCHOR_TARGET" 24800)"
+  if [ -z "$RESOLVED_IP" ] && [ -n "$ANCHOR_HOST" ]; then
+    RESOLVED_IP="$ANCHOR_HOST"
+  fi
+
   if [ -z "$RESOLVED_IP" ]; then
-    echo "Could not resolve active Anchor ($ANCHOR_TARGET) IP on port 24800" >&2
+    echo "Could not resolve active Anchor ($ANCHOR_TARGET / $ANCHOR_HOST) IP on port 24800" >&2
     exit 1
   fi
 

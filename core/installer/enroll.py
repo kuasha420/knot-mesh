@@ -245,7 +245,34 @@ ALLOW_DESKFLOW_KVM="true"
 """
     with open(conf_path, "w") as f:
         f.write(conf_content)
-    print(f"[✓] Swarm profile written to {conf_path}")
+
+    # Also write directory format ~/.config/knot/swarms/<id>/swarm.conf
+    swarm_subdir = os.path.join(user_home, ".config/knot/swarms", swarm_id)
+    try:
+        os.makedirs(swarm_subdir, exist_ok=True)
+        with open(os.path.join(swarm_subdir, "swarm.conf"), "w") as f:
+            f.write(conf_content)
+    except Exception:
+        pass
+
+    # Automatically activate this newly enrolled swarm
+    state_dir = os.path.join(user_home, ".local/state/knot")
+    try:
+        os.makedirs(state_dir, exist_ok=True)
+        with open(os.path.join(state_dir, "active_swarm"), "w") as f:
+            f.write(f"{swarm_id}\n")
+    except Exception:
+        pass
+
+    run_dir = os.environ.get("KNOT_RUNTIME_DIR", "/run/knot")
+    if os.path.isdir(run_dir) and os.access(run_dir, os.W_OK):
+        try:
+            with open(os.path.join(run_dir, "active_swarm"), "w") as f:
+                f.write(f"{swarm_id}\n")
+        except Exception:
+            pass
+
+    print(f"[✓] Swarm profile written to {conf_path} (active swarm: {swarm_id})")
     return conf_path
 
 

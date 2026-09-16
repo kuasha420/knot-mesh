@@ -545,7 +545,7 @@ JOIN_HELP
     local user_systemd_dir="${HOME}/.config/systemd/user"
     mkdir -p "$user_systemd_dir"
 
-    for unit in knot-guard knot-deskflow; do
+    for unit in knot-deskflow; do
       if [ -f "$unit_dir/${unit}.service" ]; then
         ln -sf "$unit_dir/${unit}.service" "$user_systemd_dir/${unit}.service"
       fi
@@ -557,7 +557,7 @@ JOIN_HELP
       knot_log_warn "systemctl daemon-reload notice: $s_out"
     fi
 
-    for unit in knot-guard.service knot-deskflow.service; do
+    for unit in knot-deskflow.service; do
       if systemctl --user is-enabled --quiet "$unit"; then
         systemctl --user restart "$unit"
       else

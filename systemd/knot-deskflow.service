@@ -1,0 +1,18 @@
+[Unit]
+Description=Knot Dynamic Deskflow KVM Service (Anchor Server / Strand Client)
+PartOf=graphical-session.target
+After=graphical-session.target xdg-desktop-portal.service plasma-xdg-desktop-portal-kde.service
+Wants=xdg-desktop-portal.service plasma-xdg-desktop-portal-kde.service
+Requisite=graphical-session.target
+
+[Service]
+Type=simple
+Environment=WAYLAND_DISPLAY=wayland-0
+Environment=XDG_CURRENT_DESKTOP=KDE
+Environment=XDG_DESKTOP_PORTAL_APP_ID=org.deskflow.deskflow
+ExecStart=/usr/local/bin/knot-deskflow
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=graphical-session.target
