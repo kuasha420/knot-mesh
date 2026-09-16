@@ -188,12 +188,20 @@ knot_list_swarm_profiles() {
   echo "${files[*]}"
 }
 
-# Returns active swarm ID (reads /run/knot/active_swarm, state dir, or first profile)
+# Returns active swarm ID (reads environment override, /run/knot/active_swarm, state dir, or first profile)
 knot_get_active_swarm() {
+  # 0. Explicit environment override
+  if [ -n "${KNOT_ACTIVE_SWARM:-}" ]; then
+    echo "$KNOT_ACTIVE_SWARM"
+    return 0
+  fi
+
+  local run_dir="${KNOT_RUNTIME_DIR:-/run/knot}"
+
   # 1. System runtime fence file
-  if [ -r "/run/knot/active_swarm" ]; then
+  if [ -r "$run_dir/active_swarm" ]; then
     local s
-    s="$(tr -d '[:space:]' < "/run/knot/active_swarm")"
+    s="$(tr -d '[:space:]' < "$run_dir/active_swarm")"
     if [ -n "$s" ]; then
       echo "$s"
       return 0
@@ -230,12 +238,14 @@ knot_get_active_swarm() {
 # Sets active swarm ID across /run/knot and user state
 knot_set_active_swarm() {
   local swarm_id="${1:-none}"
+  local run_dir="${KNOT_RUNTIME_DIR:-/run/knot}"
   
   # 1. System runtime directory
-  if [ -d "/run/knot" ] || mkdir -p "/run/knot" 2>/dev/null; then
-    if [ -w "/run/knot" ]; then
-      echo "$swarm_id" > "/run/knot/active_swarm.tmp"
-      mv -f "/run/knot/active_swarm.tmp" "/run/knot/active_swarm"
+  if [ -d "$run_dir" ] || [ -w "$(dirname "$run_dir")" ]; then
+    mkdir -p "$run_dir"
+    if [ -w "$run_dir" ]; then
+      echo "$swarm_id" > "$run_dir/active_swarm.tmp"
+      mv -f "$run_dir/active_swarm.tmp" "$run_dir/active_swarm"
     fi
   fi
 
@@ -276,6 +286,7 @@ knot_load_swarm_profile() {
     ANCHOR_ID="desktop"
     ANCHOR_HOST="desktop.local"
     GATEWAY_MAC=""
+    GATEWAY_MACS=""
     SSID=""
     SUBNET=""
     HUB_PORT=4242
@@ -284,6 +295,43 @@ knot_load_swarm_profile() {
     # shellcheck disable=SC1090
     source "$conf"
     return 0
+  fi
+  return 1
+}
+
+knot_get_nodes_dir() {
+  local home
+  home="$(knot_detect_user_home)"
+  local active_swarm
+  active_swarm="$(knot_get_active_swarm)"
+
+  if [ -n "$active_swarm" ] && [ "$active_swarm" != "none" ]; then
+    if [ -d "$home/.config/knot/swarms/${active_swarm}/nodes" ]; then
+      echo "$home/.config/knot/swarms/${active_swarm}/nodes"
+      return 0
+    elif [ -d "/etc/knot/swarms.d/${active_swarm}/nodes" ]; then
+      echo "/etc/knot/swarms.d/${active_swarm}/nodes"
+      return 0
+    fi
+  fi
+
+  if [ -d "$KNOT_ROOT/registry/nodes" ]; then
+    echo "$KNOT_ROOT/registry/nodes"
+    return 0
+  fi
+
+  echo ""
+  return 1
+}
+
+knot_get_manifest_path() {
+  local node_id="$1"
+  local nodes_dir
+  if nodes_dir="$(knot_get_nodes_dir)"; then
+    if [ -f "$nodes_dir/${node_id}.json" ]; then
+      echo "$nodes_dir/${node_id}.json"
+      return 0
+    fi
   fi
   return 1
 }

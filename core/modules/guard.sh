@@ -36,6 +36,7 @@ SWARM_NAME="$swarm_name"
 ANCHOR_ID="desktop"
 ANCHOR_HOST="desktop.local"
 GATEWAY_MAC="${target_mac:-}"
+GATEWAY_MACS="${target_mac:-}"
 SSID="${target_ssid:-}"
 SUBNET="$subnet"
 HUB_PORT=4242
@@ -63,11 +64,17 @@ PID_FILE="$STATE_DIR/guard_debounce.pid"
 detect_priority_gateway() {
   # 1. Prioritize wired Ethernet default route
   local wired_gw=""
-  local ifaces
-  ifaces="$(ip -o link show 2>/dev/null | awk -F': ' '$2 ~ /^(en|eth)/ {print $2}')"
+  local ifaces=""
+  local link_out=""
+  if link_out="$(ip -o link show 2>&1)"; then
+    ifaces="$(echo "$link_out" | awk -F': ' '$2 ~ /^(en|eth)/ {print $2}')"
+  fi
   for iface in $ifaces; do
-    local g
-    g="$(ip -4 route show default dev "$iface" 2>/dev/null | awk '{print $3}' | head -n1)"
+    local g=""
+    local r_out=""
+    if r_out="$(ip -4 route show default dev "$iface" 2>&1)"; then
+      g="$(echo "$r_out" | awk '{print $3}' | head -n1)"
+    fi
     if [ -n "$g" ]; then
       wired_gw="$g"
       break
@@ -80,11 +87,16 @@ detect_priority_gateway() {
 
   # 2. Fall back to wireless default route
   local wireless_gw=""
-  local wifaces
-  wifaces="$(ip -o link show 2>/dev/null | awk -F': ' '$2 ~ /^(wl)/ {print $2}')"
+  local wifaces=""
+  if [ -n "$link_out" ]; then
+    wifaces="$(echo "$link_out" | awk -F': ' '$2 ~ /^(wl)/ {print $2}')"
+  fi
   for iface in $wifaces; do
-    local g
-    g="$(ip -4 route show default dev "$iface" 2>/dev/null | awk '{print $3}' | head -n1)"
+    local g=""
+    local r_out=""
+    if r_out="$(ip -4 route show default dev "$iface" 2>&1)"; then
+      g="$(echo "$r_out" | awk '{print $3}' | head -n1)"
+    fi
     if [ -n "$g" ]; then
       wireless_gw="$g"
       break
@@ -96,7 +108,10 @@ detect_priority_gateway() {
   fi
 
   # 3. Generic default route fallback
-  ip -4 route show default 2>/dev/null | awk '{print $3}' | head -n1
+  local def_route=""
+  if def_route="$(ip -4 route show default 2>&1)"; then
+    echo "$def_route" | awk '{print $3}' | head -n1
+  fi
 }
 
 detect_gateway_mac() {
@@ -108,17 +123,31 @@ detect_gateway_mac() {
   fi
 
   # Warm ARP cache if neighbor is not yet resolved
-  if ! ip neigh show "$gw" 2>/dev/null | grep -q "lladdr"; then
-    ping -c 1 -W 1 "$gw" >/dev/null 2>&1 || true
+  local neigh_out=""
+  if neigh_out="$(ip neigh show "$gw" 2>&1)"; then
+    if ! echo "$neigh_out" | grep -q "lladdr"; then
+      local ping_out=""
+      if ! ping_out="$(ping -c 1 -W 1 "$gw" 2>&1)"; then
+        logger -t knot-guard "Dispatched ARP warmup ping to $gw: $ping_out"
+      fi
+    fi
   fi
-  ip neigh show "$gw" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="lladdr") print $(i+1)}' | head -n1
+  if neigh_out="$(ip neigh show "$gw" 2>&1)"; then
+    echo "$neigh_out" | awk '{for(i=1;i<=NF;i++) if ($i=="lladdr") print $(i+1)}' | head -n1
+  fi
 }
 
 detect_active_ssid() {
-  if command -v nmcli >/dev/null 2>&1; then
-    nmcli -t -f active,ssid dev wifi 2>/dev/null | awk -F: '$1=="yes"{print $2}' | head -n1
-  elif command -v iwgetid >/dev/null 2>&1; then
-    iwgetid -r 2>/dev/null
+  if command -v nmcli >/dev/null; then
+    local nm_out=""
+    if nm_out="$(nmcli -t -f active,ssid dev wifi 2>&1)"; then
+      echo "$nm_out" | awk -F: '$1=="yes"{print $2}' | head -n1
+    fi
+  elif command -v iwgetid >/dev/null; then
+    local iw_out=""
+    if iw_out="$(iwgetid -r 2>&1)"; then
+      echo "$iw_out"
+    fi
   fi
 }
 
@@ -132,17 +161,20 @@ check_active_network() {
   if [ -d /etc/knot/swarms.d ]; then
     for conf in /etc/knot/swarms.d/*.conf; do
       [ -r "$conf" ] || continue
-      local SWARM_ID="" GATEWAY_MAC="" SSID=""
+      local SWARM_ID="" GATEWAY_MAC="" GATEWAY_MACS="" SSID=""
       # shellcheck disable=SC1090
       source "$conf"
 
-      local target_mac_lower
-      target_mac_lower="$(echo "${GATEWAY_MAC:-}" | tr '[:upper:]' '[:lower:]')"
+      local target_macs="${GATEWAY_MACS:-$GATEWAY_MAC}"
 
       # Primary match: Gateway MAC
-      if [ -n "$current_mac" ] && [ -n "$target_mac_lower" ] && [ "$current_mac" = "$target_mac_lower" ]; then
-        echo "$SWARM_ID"
-        return 0
+      if [ -n "$current_mac" ] && [ -n "$target_macs" ]; then
+        for m in $(echo "$target_macs" | tr ',' ' '); do
+          if [ "$current_mac" = "$(echo "$m" | tr '[:upper:]' '[:lower:]')" ]; then
+            echo "$SWARM_ID"
+            return 0
+          fi
+        done
       fi
 
       # Secondary match: Wi-Fi SSID
@@ -167,17 +199,26 @@ reconcile_state() {
 
     # Ensure OpenSSH is active for mesh operations
     if ! systemctl is-active --quiet sshd; then
-      systemctl start sshd || logger -t knot-guard "Failed to start sshd"
+      local sshd_err=""
+      if ! sshd_err="$(systemctl start sshd 2>&1)"; then
+        logger -t knot-guard "Failed to start sshd: $sshd_err"
+      fi
     fi
 
     # Trigger autologin check if Anchor is reachable
     if [ -x /usr/local/bin/knot ]; then
-      /usr/local/bin/knot autologin check >/dev/null 2>&1 || true
+      local auto_out=""
+      if ! auto_out="$(/usr/local/bin/knot autologin check 2>&1)"; then
+        logger -t knot-guard "Autologin check notice: $auto_out"
+      fi
     fi
 
     # Trigger Deskflow client reload to target active Anchor
     if [ -x /usr/local/bin/knot-deskflow-client ]; then
-      /usr/local/bin/knot-deskflow-client reload >/dev/null 2>&1 || true
+      local df_out=""
+      if ! df_out="$(/usr/local/bin/knot-deskflow-client reload 2>&1)"; then
+        logger -t knot-guard "Deskflow client reload notice: $df_out"
+      fi
     fi
   else
     echo "none" > "$ACTIVE_SWARM_FILE"
@@ -186,12 +227,18 @@ reconcile_state() {
     # Graceful Standalone Mode:
     # 1. sshd remains RUNNING (key-only with UFW rate limiting)
     if ! systemctl is-active --quiet sshd; then
-      systemctl start sshd || logger -t knot-guard "Failed to ensure sshd in standalone mode"
+      local sshd_err=""
+      if ! sshd_err="$(systemctl start sshd 2>&1)"; then
+        logger -t knot-guard "Failed to ensure sshd in standalone mode: $sshd_err"
+      fi
     fi
 
     # 2. Stop Deskflow client to isolate input across untrusted networks
     if [ -x /usr/local/bin/knot-deskflow-client ]; then
-      /usr/local/bin/knot-deskflow-client stop >/dev/null 2>&1 || true
+      local stop_out=""
+      if ! stop_out="$(/usr/local/bin/knot-deskflow-client stop 2>&1)"; then
+        logger -t knot-guard "Deskflow client stop notice: $stop_out"
+      fi
     fi
   fi
 }
@@ -214,10 +261,16 @@ if [ "${1:-}" = "--immediate" ]; then
 fi
 
 # Debounce hysteresis engine: 4-second delay before steady-state reconciliation
-if [ -f "$PID_FILE" ]; then
-  old_pid="$(cat "$PID_FILE" 2>/dev/null || echo "")"
-  if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
-    kill "$old_pid" 2>/dev/null || true
+if [ -f "$PID_FILE" ] && [ -r "$PID_FILE" ]; then
+  old_pid="$(< "$PID_FILE")"
+  if [ -n "$old_pid" ]; then
+    local check_probe=""
+    if check_probe="$(kill -0 "$old_pid" 2>&1)"; then
+      local kill_probe=""
+      if ! kill_probe="$(kill "$old_pid" 2>&1)"; then
+        logger -t knot-guard "Notice terminating previous debounce pid $old_pid: $kill_probe"
+      fi
+    fi
   fi
 fi
 

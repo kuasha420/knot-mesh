@@ -27,7 +27,16 @@ TMP_TEST_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_TEST_DIR"' EXIT
 
 export HOME="$TMP_TEST_DIR/home"
-mkdir -p "$HOME"
+export KNOT_RUNTIME_DIR="$TMP_TEST_DIR/run"
+mkdir -p "$HOME" "$KNOT_RUNTIME_DIR" "$TMP_TEST_DIR/bin"
+
+# Mock systemctl to protect host services
+cat << 'SYS_EOF' > "$TMP_TEST_DIR/bin/systemctl"
+#!/usr/bin/env bash
+exit 0
+SYS_EOF
+chmod +x "$TMP_TEST_DIR/bin/systemctl"
+export PATH="$TMP_TEST_DIR/bin:$PATH"
 
 # Run knot-installer init in isolated test environment
 "$INSTALLER" init --name "Lab Workspace" --id "lab" --anchor-id "lab-anchor" --headless

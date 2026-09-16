@@ -13,7 +13,8 @@ TMP_TEST_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_TEST_DIR"' EXIT
 
 export HOME="$TMP_TEST_DIR/home"
-mkdir -p "$HOME/.config/Deskflow" "$HOME/.local/state/knot" "$HOME/.config/knot/swarms/testswarm/nodes"
+export KNOT_RUNTIME_DIR="$TMP_TEST_DIR/run"
+mkdir -p "$HOME/.config/Deskflow" "$HOME/.local/state/knot" "$HOME/.config/knot/swarms/testswarm/nodes" "$KNOT_RUNTIME_DIR"
 
 # Setup test topology
 cat << 'TOPO_EOF' > "$HOME/.config/knot/swarms/testswarm/topology.json"
