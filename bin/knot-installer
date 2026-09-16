@@ -543,7 +543,14 @@ cmd_uninstall() {
   fi
 
   echo -e "${C_CYAN}[•] Cleaning runtime state...${C_RESET}"
-  rm -rf /run/knot
+  local run_dir="${KNOT_RUNTIME_DIR:-/run/knot}"
+  if [ -d "$run_dir" ]; then
+    if [ -w "$run_dir" ] || [ -w "$(dirname "$run_dir")" ]; then
+      rm -rf "$run_dir"
+    elif command -v sudo >/dev/null && sudo -n true 2>&1; then
+      sudo rm -rf "$run_dir"
+    fi
+  fi
 
   echo -e "${C_GREEN}[✓] Knot Mesh uninstalled cleanly from this node.${C_RESET}\n"
 }

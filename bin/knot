@@ -109,79 +109,90 @@ cmd_resolve() {
 }
 
 cmd_status() {
-  echo -e "${C_BOLD}--- Knot Mesh Status ---${C_RESET}"
+  local active_swarm
+  active_swarm="$(knot_get_active_swarm)"
+  echo -e "${C_BOLD}--- Knot Mesh Status (${active_swarm:-standalone}) ---${C_RESET}"
   printf "%-12s %-10s %-6s %-16s %-8s %-8s %-20s\n" "NODE" "USER" "PORT" "LAST IP" "MESH" "PING" "KVM STATUS"
   printf "%-12s %-10s %-6s %-16s %-8s %-8s %-20s\n" "----" "----" "----" "-------" "----" "----" "----------"
+
+  local nodes_dir=""
+  if ! nodes_dir="$(knot_get_nodes_dir)"; then
+    nodes_dir=""
+  fi
 
   local my_host
   my_host="$(knot_detect_hostname)"
   local anchor_host="desktop"
-  for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
-    [ -e "$manifest" ] || continue
-    if grep -q '"id":[[:space:]]*"desktop"' "$manifest"; then
-      anchor_host="$(grep -o '"hostname":[[:space:]]*"[^"]*"' "$manifest" | cut -d'"' -f4)"
-    fi
-  done
+  if [ -n "$nodes_dir" ] && [ -d "$nodes_dir" ]; then
+    for manifest in "$nodes_dir/"*.json; do
+      [ -e "$manifest" ] || continue
+      if grep -q '"id":[[:space:]]*"desktop"' "$manifest"; then
+        anchor_host="$(grep -o '"hostname":[[:space:]]*"[^"]*"' "$manifest" | cut -d'"' -f4)"
+      fi
+    done
+  fi
 
   local established_kvm_ips=""
   if [ "$my_host" = "$anchor_host" ]; then
-    local ss_out
-    if ss_out="$(ss -H -tn state established sport = :24800)"; then
+    local ss_out=""
+    if ss_out="$(ss -H -tn state established sport = :24800 2>&1)"; then
       established_kvm_ips="$(echo "$ss_out" | awk '{print $4}' | cut -d: -f1)"
     fi
   else
-    local ssh_ss_out
-    if ssh_ss_out="$(ssh -o BatchMode=yes -o ConnectTimeout=2 desktop "ss -H -tn state established sport = :24800")"; then
+    local ssh_ss_out=""
+    if ssh_ss_out="$(ssh -o BatchMode=yes -o ConnectTimeout=2 desktop "ss -H -tn state established sport = :24800" 2>&1)"; then
       established_kvm_ips="$(echo "$ssh_ss_out" | awk '{print $4}' | cut -d: -f1)"
     fi
   fi
 
-  for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
-    [ -e "$manifest" ] || continue
-    local id user ip_hint port host
-    id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-    user="$(awk -F'"' '/"user":/ {print $4}' "$manifest")"
-    host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
-    ip_hint="$(awk -F'"' '/"ip_hint":/ {print $4}' "$manifest")"
-    port="$(awk -F: '/"port":/ {gsub(/[^0-9]/, "", $2); print $2}' "$manifest")"
-    if [ -z "$port" ]; then port="22"; fi
+  if [ -n "$nodes_dir" ] && [ -d "$nodes_dir" ]; then
+    for manifest in "$nodes_dir/"*.json; do
+      [ -e "$manifest" ] || continue
+      local id user ip_hint port host
+      id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+      user="$(awk -F'"' '/"user":/ {print $4}' "$manifest")"
+      host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+      ip_hint="$(awk -F'"' '/"ip_hint":/ {print $4}' "$manifest")"
+      port="$(awk -F: '/"port":/ {gsub(/[^0-9]/, "", $2); print $2}' "$manifest")"
+      if [ -z "$port" ]; then port="22"; fi
 
-    local resolved_ip=""
-    if ! resolved_ip="$("$KNOT_ROOT/core/resolver.sh" "$id" "$port")"; then
-      resolved_ip=""
-    fi
-
-    if [ -n "$resolved_ip" ]; then
-      local ping_time="ok"
-      local ping_out
-      if ping_out="$(ping -c 1 -W 1 "$resolved_ip")"; then
-        local rtt
-        rtt="$(echo "$ping_out" | awk -F'/' '/rtt/ {print $5}')"
-        if [ -n "$rtt" ]; then
-          ping_time="${rtt%.*}ms"
-        fi
+      local resolved_ip=""
+      if ! resolved_ip="$("$KNOT_ROOT/core/resolver.sh" "$id" "$port")"; then
+        resolved_ip=""
       fi
 
-      local kvm_status="${C_YELLOW}DISCONNECTED${C_RESET}"
-      if [ "$id" = "desktop" ] || [ "$host" = "$anchor_host" ]; then
-        local count=0
-        if [ -n "$established_kvm_ips" ]; then
-          count="$(echo "$established_kvm_ips" | grep -v '^$' | wc -l)"
+      if [ -n "$resolved_ip" ]; then
+        local ping_time="ok"
+        local ping_out=""
+        if ping_out="$(ping -c 1 -W 1 "$resolved_ip" 2>&1)"; then
+          local rtt
+          rtt="$(echo "$ping_out" | awk -F'/' '/rtt/ {print $5}')"
+          if [ -n "$rtt" ]; then
+            ping_time="${rtt%.*}ms"
+          fi
         fi
-        kvm_status="${C_GREEN}SERVER ($count connected)${C_RESET}"
-      else
-        if [ -n "$established_kvm_ips" ] && echo "$established_kvm_ips" | grep -q "$resolved_ip"; then
-          kvm_status="${C_GREEN}CONNECTED${C_RESET}"
+
+        local kvm_status="${C_YELLOW}DISCONNECTED${C_RESET}"
+        if [ "$id" = "desktop" ] || [ "$host" = "$anchor_host" ]; then
+          local count=0
+          if [ -n "$established_kvm_ips" ]; then
+            count="$(echo "$established_kvm_ips" | grep -v '^$' | wc -l)"
+          fi
+          kvm_status="${C_GREEN}SERVER ($count connected)${C_RESET}"
         else
-          kvm_status="${C_YELLOW}DISCONNECTED${C_RESET}"
+          if [ -n "$established_kvm_ips" ] && echo "$established_kvm_ips" | grep -q "$resolved_ip"; then
+            kvm_status="${C_GREEN}CONNECTED${C_RESET}"
+          else
+            kvm_status="${C_YELLOW}DISCONNECTED${C_RESET}"
+          fi
         fi
-      fi
 
-      printf "%-12s %-10s %-6s %-16s ${C_GREEN}%-8s${C_RESET} %-8s %-20b\n" "$id" "$user" "$port" "$resolved_ip" "ONLINE" "$ping_time" "$kvm_status"
-    else
-      printf "%-12s %-10s %-6s %-16s ${C_RED}%-8s${C_RESET} %-8s %-20b\n" "$id" "$user" "$port" "${ip_hint:-(unknown)}" "OFFLINE" "-" "${C_RED}OFFLINE${C_RESET}"
-    fi
-  done
+        printf "%-12s %-10s %-6s %-16s ${C_GREEN}%-8s${C_RESET} %-8s %-20b\n" "$id" "$user" "$port" "$resolved_ip" "ONLINE" "$ping_time" "$kvm_status"
+      else
+        printf "%-12s %-10s %-6s %-16s ${C_RED}%-8s${C_RESET} %-8s %-20b\n" "$id" "$user" "$port" "${ip_hint:-(unknown)}" "OFFLINE" "-" "${C_RED}OFFLINE${C_RESET}"
+      fi
+    done
+  fi
 }
 
 

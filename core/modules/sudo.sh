@@ -33,7 +33,7 @@ resolve_active_swarm() {
   fi
   if [ -x /usr/local/bin/knot-guard ]; then
     local probed=""
-    if probed="$(/usr/local/bin/knot-guard --check-active 2>/dev/null)"; then
+    if probed="$(/usr/local/bin/knot-guard --check-active 2>&1)"; then
       if [ -n "$probed" ] && [ "$probed" != "none" ]; then
         echo "$probed"
         return 0
@@ -106,7 +106,7 @@ is_trusted_ssh_session() {
 
             # Mathematical CIDR verification
             if [ -n "$subnet" ]; then
-              if python3 -c "import ipaddress, sys; sys.exit(0 if ipaddress.ip_address(sys.argv[1]) in ipaddress.ip_network(sys.argv[2], strict=False) else 1)" "$client_ip" "$subnet" 2>/dev/null; then
+              if python3 -c "import ipaddress, sys; sys.exit(0 if ipaddress.ip_address(sys.argv[1]) in ipaddress.ip_network(sys.argv[2], strict=False) else 1)" "$client_ip" "$subnet" 2>&1; then
                 return 0
               fi
             fi

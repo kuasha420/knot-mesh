@@ -206,7 +206,13 @@ NOTIFY_EOF
       chmod 600 "$tls_dir/deskflow.pem"
     else
       knot_log_info "Fetching Deskflow mesh TLS certificate from Anchor..."
-      scp -o BatchMode=yes -o ConnectTimeout=5 "desktop:.config/Deskflow/tls/deskflow.pem" "$tls_dir/deskflow.pem"
+      local scp_out=""
+      if ! scp_out="$(scp -o BatchMode=yes -o ConnectTimeout=3 "desktop:.config/Deskflow/tls/deskflow.pem" "$tls_dir/deskflow.pem" 2>&1)"; then
+        knot_log_warn "Anchor desktop is currently offline or unreachable: $scp_out"
+        knot_log_info "Generating initial local TLS certificate (will synchronize with Anchor when online)..."
+        openssl req -x509 -nodes -days 3650 -subj "/CN=Deskflow" -newkey rsa:2048 \
+          -keyout "$tls_dir/deskflow.pem" -out "$tls_dir/deskflow.pem"
+      fi
       chmod 600 "$tls_dir/deskflow.pem"
     fi
   fi
@@ -335,8 +341,9 @@ if [ -z "$KNOT_CLI" ]; then
 fi
 
 ACTIVE_SWARM="none"
-if [ -r "/run/knot/active_swarm" ]; then
-  ACTIVE_SWARM="$(tr -d '[:space:]' < /run/knot/active_swarm)"
+RUN_DIR="${KNOT_RUNTIME_DIR:-/run/knot}"
+if [ -r "$RUN_DIR/active_swarm" ]; then
+  ACTIVE_SWARM="$(tr -d '[:space:]' < "$RUN_DIR/active_swarm")"
 elif [ -r "$HOME/.local/state/knot/active_swarm" ]; then
   ACTIVE_SWARM="$(tr -d '[:space:]' < "$HOME/.local/state/knot/active_swarm")"
 fi
@@ -402,12 +409,36 @@ if [ -z "$MY_HOST" ] && command -v hostname >/dev/null; then
   MY_HOST="$(hostname)"
 fi
 
+CLIENT_NAME="$MY_HOST"
+NODES_DIR=""
+if [ -d "$HOME/.config/knot/swarms/${ACTIVE_SWARM}/nodes" ]; then
+  NODES_DIR="$HOME/.config/knot/swarms/${ACTIVE_SWARM}/nodes"
+elif [ -d "/etc/knot/swarms.d/${ACTIVE_SWARM}/nodes" ]; then
+  NODES_DIR="/etc/knot/swarms.d/${ACTIVE_SWARM}/nodes"
+fi
+
+if [ -n "$NODES_DIR" ]; then
+  for mf in "$NODES_DIR/"*.json; do
+    [ -r "$mf" ] || continue
+    m_host="$(awk -F'"' '/"hostname":/ {print $4}' "$mf")"
+    m_id="$(awk -F'"' '/"id":/ {print $4}' "$mf")"
+    m_user="$(awk -F'"' '/"user":/ {print $4}' "$mf")"
+    if [ "$m_host" = "$MY_HOST" ] || [ "$m_id" = "$MY_HOST" ]; then
+      CLIENT_NAME="${m_host:-$MY_HOST}"
+      break
+    fi
+    if [ "$m_user" = "${USER:-}" ] && [ "$m_id" != "$ANCHOR_TARGET" ]; then
+      CLIENT_NAME="${m_host:-$m_id}"
+    fi
+  done
+fi
+
 CONF_DIR="$HOME/.config/Deskflow"
 mkdir -p "$CONF_DIR"
 
 cat << CONF_EOF > "$CONF_DIR/Deskflow.conf"
 [core]
-computerName=${MY_HOST:-localhost}
+computerName=${CLIENT_NAME:-localhost}
 
 [client]
 remoteHost=$RESOLVED_IP
@@ -443,7 +474,7 @@ Environment=XDG_CURRENT_DESKTOP=KDE
 Environment=XDG_DESKTOP_PORTAL_APP_ID=org.deskflow.deskflow
 ExecStart=/usr/local/bin/knot-deskflow-client
 Restart=on-failure
-RestartSec=3
+RestartSec=10
 
 [Install]
 WantedBy=graphical-session.target
