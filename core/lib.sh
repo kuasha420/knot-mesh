@@ -27,6 +27,10 @@ knot_detect_user() {
 }
 
 knot_detect_user_home() {
+  if [ -n "${HOME:-}" ]; then
+    echo "$HOME"
+    return 0
+  fi
   local u
   u="$(knot_detect_user)"
   eval echo "~${u}"
@@ -118,9 +122,6 @@ knot_detect_hostname() {
   if command -v uname >/dev/null; then
     h="$(uname -n)"
   fi
-  if [ -z "$h" ] && command -v hostname >/dev/null; then
-    h="$(hostname)"
-  fi
   if [ -z "$h" ] && command -v hostnamectl >/dev/null; then
     local out=""
     if out="$(hostnamectl --static)"; then
@@ -129,6 +130,9 @@ knot_detect_hostname() {
   fi
   if [ -z "$h" ] && [ -r /etc/hostname ]; then
     h="$(tr -d '[:space:]' < /etc/hostname)"
+  fi
+  if [ -z "$h" ] && command -v hostname >/dev/null; then
+    h="$(hostname)"
   fi
   if [ -n "$h" ]; then
     echo "$h"
@@ -140,19 +144,22 @@ knot_detect_hostname() {
 knot_detect_firewalls() {
   local found=()
   if command -v ufw >/dev/null; then
-    if sudo -n ufw status | grep -q "Status: active"; then
-      found+=("ufw")
+    local ufw_status
+    if ufw_status="$(sudo -n ufw status 2>/dev/null)"; then
+      if echo "$ufw_status" | grep -q "Status: active"; then
+        found+=("ufw")
+      fi
     fi
   fi
-  if command -v systemctl >/dev/null; then
-    if systemctl is-active --quiet firewalld; then
+  if command -v firewall-cmd >/dev/null; then
+    if sudo -n firewall-cmd --state >/dev/null 2>&1; then
       found+=("firewalld")
     fi
   fi
   if [ ${#found[@]} -eq 0 ]; then
-    if command -v nft >/dev/null && sudo -n nft list ruleset | grep -q "table"; then
+    if command -v nft >/dev/null && sudo -n nft list ruleset 2>/dev/null | grep -q "table"; then
       found+=("nftables")
-    elif command -v iptables >/dev/null && sudo -n iptables -L -n | grep -q "Chain"; then
+    elif command -v iptables >/dev/null && sudo -n iptables -L -n 2>/dev/null | grep -q "Chain"; then
       found+=("iptables")
     else
       found+=("none")
@@ -161,7 +168,7 @@ knot_detect_firewalls() {
   echo "${found[*]}"
 }
 
-# Returns array of existing swarm config file paths
+# Returns list of existing swarm config file paths
 knot_list_swarm_profiles() {
   local files=()
   if [ -d "/etc/knot/swarms.d" ]; then
@@ -181,8 +188,19 @@ knot_list_swarm_profiles() {
   echo "${files[*]}"
 }
 
-# Returns active swarm ID (defaults to "home")
+# Returns active swarm ID (reads /run/knot/active_swarm, state dir, or first profile)
 knot_get_active_swarm() {
+  # 1. System runtime fence file
+  if [ -r "/run/knot/active_swarm" ]; then
+    local s
+    s="$(tr -d '[:space:]' < "/run/knot/active_swarm")"
+    if [ -n "$s" ]; then
+      echo "$s"
+      return 0
+    fi
+  fi
+
+  # 2. User state directory
   local user_home
   user_home="$(knot_detect_user_home)"
   local state_file="$user_home/.local/state/knot/active_swarm"
@@ -194,17 +212,40 @@ knot_get_active_swarm() {
       return 0
     fi
   fi
-  echo "home"
+
+  # 3. Fallback to first available profile
+  if [ -d "/etc/knot/swarms.d" ]; then
+    for f in /etc/knot/swarms.d/*.conf; do
+      [ -e "$f" ] || continue
+      local base
+      base="$(basename "$f" .conf)"
+      echo "$base"
+      return 0
+    done
+  fi
+
+  echo "none"
 }
 
-# Sets active swarm ID
+# Sets active swarm ID across /run/knot and user state
 knot_set_active_swarm() {
-  local swarm_id="${1:-home}"
+  local swarm_id="${1:-none}"
+  
+  # 1. System runtime directory
+  if [ -d "/run/knot" ] || mkdir -p "/run/knot" 2>/dev/null; then
+    if [ -w "/run/knot" ]; then
+      echo "$swarm_id" > "/run/knot/active_swarm.tmp"
+      mv -f "/run/knot/active_swarm.tmp" "/run/knot/active_swarm"
+    fi
+  fi
+
+  # 2. User state directory
   local user_home
   user_home="$(knot_detect_user_home)"
   local state_dir="$user_home/.local/state/knot"
   mkdir -p "$state_dir"
-  echo "$swarm_id" > "$state_dir/active_swarm"
+  echo "$swarm_id" > "$state_dir/active_swarm.tmp"
+  mv -f "$state_dir/active_swarm.tmp" "$state_dir/active_swarm"
 }
 
 # Loads a specific swarm profile into current shell environment
@@ -212,6 +253,10 @@ knot_load_swarm_profile() {
   local target_id="${1:-}"
   if [ -z "$target_id" ]; then
     target_id="$(knot_get_active_swarm)"
+  fi
+
+  if [ -z "$target_id" ] || [ "$target_id" = "none" ]; then
+    return 1
   fi
 
   local conf=""
@@ -229,11 +274,13 @@ knot_load_swarm_profile() {
     SWARM_ID="$target_id"
     SWARM_NAME="$target_id"
     ANCHOR_ID="desktop"
+    ANCHOR_HOST="desktop.local"
     GATEWAY_MAC=""
     SSID=""
     SUBNET=""
     HUB_PORT=4242
     ALLOW_NOPASSWD_SUDO="true"
+    ALLOW_DESKFLOW_KVM="true"
     # shellcheck disable=SC1090
     source "$conf"
     return 0
