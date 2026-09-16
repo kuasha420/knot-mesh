@@ -12,8 +12,10 @@ import json
 import mimetypes
 import os
 import re
+import secrets
 import shutil
 import sqlite3
+import ssl
 import subprocess
 import sys
 import threading
@@ -357,6 +359,90 @@ def capture_node_screen(node_id: str, force: bool = False, quality: str = "low")
         return _generate_screen_placeholder_svg(node_id, f"Display Offline ({type(e).__name__})"), "image/svg+xml"
     finally:
         lock.release()
+
+
+class EnrollmentCoordinator:
+    """Manages ephemeral cryptographic 6-digit OTP pairing and synchronous CLI rendezvous."""
+
+    def __init__(self):
+        self.sessions: dict[str, dict] = {}
+        self.lock = threading.Lock()
+
+    def create_invite(self, expires_in: int = 600) -> dict:
+        pin = f"{secrets.randbelow(900000) + 100000}"
+        from core.hub.tls import ensure_hub_tls
+        tls_info = ensure_hub_tls()
+        fp_short = tls_info["fingerprint_short"]
+        token = f"{pin}.{fp_short}"
+
+        session = {
+            "pin": pin,
+            "token": token,
+            "fingerprint": tls_info["fingerprint"],
+            "fingerprint_short": fp_short,
+            "created_at": time.time(),
+            "expires_at": time.time() + expires_in,
+            "attempts": 0,
+            "max_attempts": 5,
+            "status": "waiting_join",
+            "strand_request": None,
+            "rendezvous_event": threading.Event(),
+            "approval_event": threading.Event(),
+            "approval_result": None
+        }
+        with self.lock:
+            self.sessions[pin] = session
+        return session
+
+    def join_request(self, pin: str, strand_payload: dict) -> tuple[bool, str, Optional[dict]]:
+        with self.lock:
+            if pin not in self.sessions:
+                return False, "Invalid or expired PIN", None
+            session = self.sessions[pin]
+            if time.time() > session["expires_at"]:
+                del self.sessions[pin]
+                return False, "PIN has expired", None
+            if session["attempts"] >= session["max_attempts"]:
+                del self.sessions[pin]
+                return False, "Too many failed attempts; PIN locked", None
+            
+            session["strand_request"] = strand_payload
+            session["status"] = "waiting_approval"
+            session["rendezvous_event"].set()
+
+        # Wait for Anchor approval (up to 120 seconds)
+        approved = session["approval_event"].wait(timeout=120.0)
+        if not approved:
+            return False, "Join request timed out waiting for Anchor approval", None
+        return True, "Approved", session["approval_result"]
+
+    def wait_rendezvous(self, pin: str, timeout: float = 120.0) -> Optional[dict]:
+        with self.lock:
+            if pin not in self.sessions:
+                return None
+            session = self.sessions[pin]
+        event = session["rendezvous_event"]
+        if event.wait(timeout=timeout):
+            return session["strand_request"]
+        return None
+
+    def approve_enrollment(self, pin: str, placement: str, anchor_meta: dict) -> tuple[bool, str]:
+        with self.lock:
+            if pin not in self.sessions:
+                return False, "Session not found or expired"
+            session = self.sessions[pin]
+            session["placement"] = placement
+            session["approval_result"] = {
+                "status": "accepted",
+                "placement": placement,
+                **anchor_meta
+            }
+            session["status"] = "approved"
+            session["approval_event"].set()
+            return True, "Approved"
+
+
+enrollment_coordinator = EnrollmentCoordinator()
 
 
 class Database:
@@ -2029,7 +2115,95 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             self._send_error("Invalid JSON body", 400)
             return
 
-        if path == "/tasks/post":
+        if path == "/swarm/enroll/invite":
+            expires_in = int(body.get("expires_in", 600))
+            session = enrollment_coordinator.create_invite(expires_in=expires_in)
+            self._send_json({
+                "pin": session["pin"],
+                "token": session["token"],
+                "fingerprint": session["fingerprint"],
+                "fingerprint_short": session["fingerprint_short"],
+                "expires_in": expires_in
+            }, 201)
+
+        elif path == "/swarm/enroll/rendezvous/wait":
+            pin = body.get("pin", "").strip()
+            if not pin:
+                self._send_error("Field 'pin' is required", 400)
+                return
+            timeout = float(body.get("timeout", 120.0))
+            strand_req = enrollment_coordinator.wait_rendezvous(pin, timeout=timeout)
+            if strand_req:
+                self._send_json({"status": "connected", "strand": strand_req}, 200)
+            else:
+                self._send_json({"status": "timeout"}, 408)
+
+        elif path == "/swarm/enroll/join":
+            pin = body.get("pin", "").strip()
+            if not pin:
+                self._send_error("Field 'pin' is required", 400)
+                return
+            ok, msg, result = enrollment_coordinator.join_request(pin, body)
+            if ok:
+                self._send_json(result, 200)
+            else:
+                self._send_error(msg, 403)
+
+        elif path == "/swarm/enroll/approve":
+            pin = body.get("pin", "").strip()
+            placement = body.get("placement", "left").strip()
+            if not pin:
+                self._send_error("Field 'pin' is required", 400)
+                return
+
+            active_swarm = "home"
+            active_f = "/run/knot/active_swarm"
+            if os.path.exists(active_f):
+                try:
+                    with open(active_f, "r") as f:
+                        active_swarm = f.read().strip() or "home"
+                except Exception:
+                    pass
+
+            anchor_meta = {
+                "swarm_id": active_swarm,
+                "anchor_id": "desktop",
+                "anchor_hostname": socket.gethostname(),
+                "hub_port": DEFAULT_PORT,
+            }
+
+            with enrollment_coordinator.lock:
+                session = enrollment_coordinator.sessions.get(pin)
+                if session and session.get("strand_request"):
+                    sreq = session["strand_request"]
+                    node_id = sreq.get("node_id") or sreq.get("hostname") or "strand"
+                    user_home = os.path.expanduser("~")
+                    nodes_dir = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/nodes")
+                    os.makedirs(nodes_dir, exist_ok=True)
+                    manifest_path = os.path.join(nodes_dir, f"{node_id}.json")
+                    manifest_data = {
+                        "id": node_id,
+                        "hostname": sreq.get("hostname", node_id),
+                        "role": sreq.get("role", "strand"),
+                        "user": sreq.get("user", "psl"),
+                        "port": sreq.get("port", 22),
+                        "pubkey": sreq.get("pubkey", ""),
+                        "display": sreq.get("display", {}),
+                        "capabilities": sreq.get("capabilities", ["strand"])
+                    }
+                    try:
+                        with open(manifest_path, "w") as mf:
+                            json.dump(manifest_data, mf, indent=2)
+                    except Exception as me:
+                        sys.stderr.write(f"[knot-hub] Error writing strand manifest: {me}\n")
+
+            ok, msg = enrollment_coordinator.approve_enrollment(pin, placement, anchor_meta)
+            if ok:
+                self._send_json({"status": "approved", "placement": placement}, 200)
+            else:
+                self._send_error(msg, 400)
+
+        elif path == "/tasks/post":
             title = body.get("title", "").strip() or "Autonomous Swarm Task"
             prompt = body.get("prompt", "").strip()
             if not prompt:
@@ -2411,9 +2585,28 @@ def main():
     HubRequestHandler.db = db
 
     server = ThreadingHTTPServer(("0.0.0.0", port), HubRequestHandler)
-    print(f"[*] Knot Swarm Blackboard Hub listening on 0.0.0.0:{port}")
+
+    # Wrap with TLS if not explicitly disabled
+    is_tls = False
+    if not os.environ.get("KNOT_HUB_DISABLE_TLS"):
+        try:
+            from core.hub.tls import ensure_hub_tls
+            tls_info = ensure_hub_tls()
+            cert_path = tls_info["cert_path"]
+            key_path = tls_info["key_path"]
+            if os.path.exists(cert_path) and os.path.exists(key_path):
+                ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                ssl_ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
+                server.socket = ssl_ctx.wrap_socket(server.socket, server_side=True)
+                is_tls = True
+                print(f"[*] TLS encryption active (SHA256: {tls_info['fingerprint_short']}...)")
+        except Exception as te:
+            print(f"[!] Warning: TLS initialization failed ({te}), falling back to plain HTTP", file=sys.stderr)
+
+    protocol = "https" if is_tls else "http"
+    print(f"[*] Knot Swarm Blackboard Hub listening on {protocol}://0.0.0.0:{port}")
     print(f"[*] Database: {db_path} (WAL mode active)")
-    print(f"[*] Web Cockpit available at: http://0.0.0.0:{port}/kafe")
+    print(f"[*] Web Cockpit available at: {protocol}://0.0.0.0:{port}/kafe")
 
     stop_event = threading.Event()
     reaper_thread = threading.Thread(target=lease_reaper_loop, args=(db, stop_event), daemon=True)
