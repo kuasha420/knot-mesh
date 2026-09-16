@@ -91,32 +91,12 @@ const INITIAL_DEFAULT_NODES: MeshNode[] = [
 
 const INITIAL_DEFAULT_QUOTAS: NodeQuotaMatrix[] = [
   {
-    node_id: 'desktop',
-    account: { name: 'Fahim', email: 'itsfahim.net@gmail.com', subscription: 'Google AI Pro' },
+    node_id: 'anchor',
+    account: { name: 'Mesh Operator', email: 'operator@mesh.local', subscription: 'Knot Pro' },
     groups: {
       gemini: {
-        five_hour: { current: 0.74, limit: 1.0, pct: 74, status: 'OK', next_reset_in: 'in 22m' },
-        weekly: { current: 0.95, limit: 1.0, pct: 95, status: 'OK', next_reset_in: 'in 5d 14h' },
-      },
-    },
-  },
-  {
-    node_id: 'laptop',
-    account: { name: 'MASUD PERVEZ', email: 'rocklucifer113@gmail.com', subscription: 'Google AI Pro' },
-    groups: {
-      gemini: {
-        five_hour: { current: 0.24, limit: 1.0, pct: 24, status: 'LOW', next_reset_in: 'in 2h 18m' },
-        weekly: { current: 0.87, limit: 1.0, pct: 87, status: 'OK', next_reset_in: 'in 6d 21h' },
-      },
-    },
-  },
-  {
-    node_id: 'steamdeck',
-    account: { name: 'Arafat Zahan', email: 'therealdaddyarafat@gmail.com', subscription: 'Google AI Pro' },
-    groups: {
-      gemini: {
-        five_hour: { current: 0.66, limit: 1.0, pct: 66, status: 'OK', next_reset_in: 'in 1h 42m' },
-        weekly: { current: 0.74, limit: 1.0, pct: 74, status: 'OK', next_reset_in: 'in 1d 21h' },
+        five_hour: { current: 1.0, limit: 1.0, pct: 100, status: 'OK', next_reset_in: 'Ready' },
+        weekly: { current: 1.0, limit: 1.0, pct: 100, status: 'OK', next_reset_in: 'Ready' },
       },
     },
   },
