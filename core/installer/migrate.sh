@@ -60,6 +60,7 @@ migrate_detect_role() {
   local detected_id=""
   local detected_role=""
   local anchor_id="desktop"
+  local user_matched_id=""
 
   local topo_file="$legacy_dir/registry/topology.json"
   if [ -r "$topo_file" ]; then
@@ -102,7 +103,20 @@ print(" ".join(macs))
           break 2
         fi
       done
+
+      # Fallback match by username
+      local nuser
+      nuser="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("user", ""))' "$mf")"
+      local my_user
+      my_user="$(knot_detect_user)"
+      if [ -n "$nuser" ] && [ "$nuser" = "$my_user" ] && [ -z "$detected_id" ]; then
+        user_matched_id="$nid"
+      fi
     done
+  fi
+
+  if [ -z "$detected_id" ] && [ -n "${user_matched_id:-}" ]; then
+    detected_id="$user_matched_id"
   fi
 
   if [ -z "$detected_id" ]; then
