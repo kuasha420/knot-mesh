@@ -91,18 +91,28 @@ is_trusted_ssh_session() {
       local p="$pid"
       for check_pid in "$$" "$PPID" "$p"; do
         if [ -r "/proc/$check_pid/environ" ]; then
-          local ssh_conn=""
+          local client_ip=""
           if grep -zq '^SSH_CONNECTION=' "/proc/$check_pid/environ"; then
-            ssh_conn="$(grep -z '^SSH_CONNECTION=' "/proc/$check_pid/environ" | tr -d '\0')"
+            client_ip="$(grep -z '^SSH_CONNECTION=' "/proc/$check_pid/environ" | tr -d '\0' | awk '{print $1}' | cut -d= -f2)"
+          elif grep -zq '^SSH_CLIENT=' "/proc/$check_pid/environ"; then
+            client_ip="$(grep -z '^SSH_CLIENT=' "/proc/$check_pid/environ" | tr -d '\0' | awk '{print $1}' | cut -d= -f2)"
           fi
-          if [ -n "$ssh_conn" ]; then
-            local client_ip
-            client_ip="$(echo "$ssh_conn" | awk '{print $1}' | cut -d= -f2)"
-            if [ -n "$subnet_prefix" ] && [[ "$client_ip" == ${subnet_prefix}* ]]; then
+
+          if [ -n "$client_ip" ]; then
+            # Loopback connections always trusted
+            if [[ "$client_ip" == 127.* ]] || [ "$client_ip" = "::1" ]; then
               return 0
             fi
-            # Also allow loopback proxy
-            if [[ "$client_ip" == 127.* ]] || [ "$client_ip" = "::1" ]; then
+
+            # Mathematical CIDR verification
+            if [ -n "$subnet" ]; then
+              if python3 -c "import ipaddress, sys; sys.exit(0 if ipaddress.ip_address(sys.argv[1]) in ipaddress.ip_network(sys.argv[2], strict=False) else 1)" "$client_ip" "$subnet" 2>/dev/null; then
+                return 0
+              fi
+            fi
+
+            # Fallback simple prefix check
+            if [ -n "$subnet_prefix" ] && [[ "$client_ip" == ${subnet_prefix}* ]]; then
               return 0
             fi
           fi
