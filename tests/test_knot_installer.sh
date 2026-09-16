@@ -25,6 +25,7 @@ echo "  -> Top-level and subcommand help outputs: OK"
 echo "=== [Test 3] Subcommand: init (Anchor Swarm Profile Initialization) ==="
 TMP_TEST_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_TEST_DIR"' EXIT
+export KNOT_TEST_MODE=1
 
 export HOME="$TMP_TEST_DIR/home"
 export KNOT_RUNTIME_DIR="$TMP_TEST_DIR/run"

@@ -21,6 +21,8 @@ guard_configure() {
 
   local swarm_id="${3:-home}"
   local swarm_name="${4:-Home Swarm}"
+  local anchor_id="${5:-desktop}"
+  local anchor_host="${6:-desktop.local}"
   local subnet
   subnet="$(knot_detect_subnet)"
 
@@ -33,8 +35,8 @@ guard_configure() {
     cat << SWARM_EOF | sudo tee "$swarm_conf" >/dev/null
 SWARM_ID="$swarm_id"
 SWARM_NAME="$swarm_name"
-ANCHOR_ID="desktop"
-ANCHOR_HOST="desktop.local"
+ANCHOR_ID="$anchor_id"
+ANCHOR_HOST="$anchor_host"
 GATEWAY_MAC="${target_mac:-}"
 GATEWAY_MACS="${target_mac:-}"
 SSID="${target_ssid:-}"
@@ -157,44 +159,191 @@ check_active_network() {
   local current_ssid
   current_ssid="$(detect_active_ssid)"
 
-  # 1. Inspect all swarm profiles in /etc/knot/swarms.d/*.conf
+  local conf_files=()
   if [ -d /etc/knot/swarms.d ]; then
-    for conf in /etc/knot/swarms.d/*.conf; do
-      [ -r "$conf" ] || continue
-      local SWARM_ID="" GATEWAY_MAC="" GATEWAY_MACS="" SSID=""
-      # shellcheck disable=SC1090
-      source "$conf"
+    for f in /etc/knot/swarms.d/*.conf; do
+      [ -r "$f" ] && conf_files+=("$f")
+    done
+  fi
+  for f in /home/*/.config/knot/swarms/*/swarm.conf; do
+    [ -r "$f" ] && conf_files+=("$f")
+  done
 
-      local target_macs="${GATEWAY_MACS:-$GATEWAY_MAC}"
+  for conf in "${conf_files[@]}"; do
+    local SWARM_ID="" GATEWAY_MAC="" GATEWAY_MACS="" SSID=""
+    # shellcheck disable=SC1090
+    source "$conf"
 
-      # Primary match: Gateway MAC
-      if [ -n "$current_mac" ] && [ -n "$target_macs" ]; then
-        for m in $(echo "$target_macs" | tr ',' ' '); do
-          if [ "$current_mac" = "$(echo "$m" | tr '[:upper:]' '[:lower:]')" ]; then
-            echo "$SWARM_ID"
-            return 0
-          fi
-        done
+    local target_macs="${GATEWAY_MACS:-$GATEWAY_MAC}"
+
+    # Primary match: Gateway MAC
+    if [ -n "$current_mac" ] && [ -n "$target_macs" ]; then
+      for m in $(echo "$target_macs" | tr ',' ' '); do
+        if [ "$current_mac" = "$(echo "$m" | tr '[:upper:]' '[:lower:]')" ]; then
+          echo "$SWARM_ID"
+          return 0
+        fi
+      done
+    fi
+
+    # Secondary match: Wi-Fi SSID
+    if [ -n "$current_ssid" ] && [ -n "${SSID:-}" ] && [ "$current_ssid" = "$SSID" ]; then
+      echo "$SWARM_ID"
+      return 0
+    fi
+  done
+
+  echo "none"
+  return 0
+}
+
+sync_active_swarm() {
+  local target_swarm="$1"
+  echo "$target_swarm" > "$ACTIVE_SWARM_FILE"
+
+  for udir in /home/*; do
+    [ -d "$udir" ] || continue
+    local sdir="$udir/.local/state/knot"
+    if [ -d "$sdir" ]; then
+      local uname
+      uname="$(basename "$udir")"
+      if [ "$(id -u)" -eq 0 ]; then
+        echo "$target_swarm" > "$sdir/active_swarm.tmp"
+        chown "$uname":"$uname" "$sdir/active_swarm.tmp"
+        mv -f "$sdir/active_swarm.tmp" "$sdir/active_swarm"
+      elif [ "${USER:-}" = "$uname" ]; then
+        echo "$target_swarm" > "$sdir/active_swarm.tmp"
+        mv -f "$sdir/active_swarm.tmp" "$sdir/active_swarm"
       fi
+    fi
+  done
+}
 
-      # Secondary match: Wi-Fi SSID
-      if [ -n "$current_ssid" ] && [ -n "${SSID:-}" ] && [ "$current_ssid" = "$SSID" ]; then
-        echo "$SWARM_ID"
-        return 0
+is_local_anchor() {
+  local s_id="$1"
+  local my_host=""
+  if [ -r /etc/hostname ]; then
+    my_host="$(tr -d '[:space:]' < /etc/hostname)"
+  elif command -v hostname >/dev/null; then
+    my_host="$(hostname)"
+  fi
+
+  local swarm_conf=""
+  if [ -r "/etc/knot/swarms.d/${s_id}.conf" ]; then
+    swarm_conf="/etc/knot/swarms.d/${s_id}.conf"
+  else
+    for u_conf in /home/*/.config/knot/swarms/${s_id}/swarm.conf; do
+      if [ -r "$u_conf" ]; then
+        swarm_conf="$u_conf"
+        break
       fi
     done
   fi
 
-  echo "none"
+  local anchor_id="" anchor_host=""
+  if [ -n "$swarm_conf" ] && [ -r "$swarm_conf" ]; then
+    anchor_id="$(awk -F= '/^ANCHOR_ID=/ {print $2}' "$swarm_conf" | tr -d '"'\'' ')"
+    anchor_host="$(awk -F= '/^ANCHOR_HOST=/ {print $2}' "$swarm_conf" | tr -d '"'\'' ')"
+  fi
+
+  if [ -n "$anchor_host" ] && [ "$my_host" = "$anchor_host" ]; then
+    return 0
+  fi
+  if [ -n "$anchor_id" ] && [ "$my_host" = "$anchor_id" ]; then
+    return 0
+  fi
+
+  local nodes_dirs=""
+  if [ -d "/etc/knot/swarms.d/${s_id}/nodes" ]; then
+    nodes_dirs="/etc/knot/swarms.d/${s_id}/nodes"
+  fi
+  for u_ndir in /home/*/.config/knot/swarms/${s_id}/nodes; do
+    if [ -d "$u_ndir" ]; then
+      nodes_dirs="$nodes_dirs $u_ndir"
+    fi
+  done
+
+  for ndir in $nodes_dirs; do
+    if [ -d "$ndir" ] && [ -n "$anchor_id" ] && [ -r "$ndir/${anchor_id}.json" ]; then
+      local m_host=""
+      m_host="$(awk -F'"' '/"hostname":/ {print $4}' "$ndir/${anchor_id}.json")"
+      if [ "$m_host" = "$my_host" ]; then
+        return 0
+      fi
+      if grep -q "\"$my_host\"" "$ndir/${anchor_id}.json"; then
+        return 0
+      fi
+    fi
+  done
+
   return 1
+}
+
+run_user_service_cmd() {
+  local uid="$1"
+  local uname="$2"
+  shift 2
+  local cmd_str="$*"
+  local cmd_out=""
+  if [ "$(id -u)" -eq "$uid" ]; then
+    if ! cmd_out="$("$@" 2>&1)"; then
+      logger -t knot-guard -- "Notice executing $cmd_str for $uname: $cmd_out"
+    fi
+  else
+    if ! cmd_out="$(sudo -u "$uname" XDG_RUNTIME_DIR="/run/user/$uid" "$@" 2>&1)"; then
+      logger -t knot-guard -- "Notice executing $cmd_str for $uname: $cmd_out"
+    fi
+  fi
+}
+
+dispatch_user_services() {
+  local role="$1" # "anchor", "strand", or "standalone"
+
+  local uids=""
+  for udir in /run/user/*; do
+    [ -d "$udir" ] || continue
+    local u
+    u="$(basename "$udir")"
+    if [ "$u" -ge 1000 ]; then
+      uids="$uids $u"
+    fi
+  done
+
+  local cur_u
+  cur_u="$(id -u)"
+  if [ "$cur_u" -ge 1000 ]; then
+    if ! echo "$uids" | grep -qw "$cur_u"; then
+      uids="$uids $cur_u"
+    fi
+  fi
+
+  for u in $uids; do
+    local uname=""
+    if uname="$(id -nu "$u" 2>&1)"; then
+      case "$role" in
+        anchor)
+          run_user_service_cmd "$u" "$uname" systemctl --user start knot-hub.service
+          run_user_service_cmd "$u" "$uname" systemctl --user restart knot-deskflow.service
+          ;;
+        strand)
+          run_user_service_cmd "$u" "$uname" systemctl --user stop knot-hub.service
+          run_user_service_cmd "$u" "$uname" systemctl --user restart knot-deskflow.service
+          ;;
+        standalone)
+          run_user_service_cmd "$u" "$uname" systemctl --user stop knot-hub.service
+          run_user_service_cmd "$u" "$uname" systemctl --user stop knot-deskflow.service
+          ;;
+      esac
+    fi
+  done
 }
 
 reconcile_state() {
   local active_swarm
-  active_swarm="$(check_active_network || echo "none")"
+  active_swarm="$(check_active_network)"
 
   if [ "$active_swarm" != "none" ]; then
-    echo "$active_swarm" > "$ACTIVE_SWARM_FILE"
+    sync_active_swarm "$active_swarm"
     logger -t knot-guard "Verified swarm network fence: [$active_swarm]."
 
     # Ensure OpenSSH is active for mesh operations
@@ -213,15 +362,16 @@ reconcile_state() {
       fi
     fi
 
-    # Trigger Deskflow client reload to target active Anchor
-    if [ -x /usr/local/bin/knot-deskflow-client ]; then
-      local df_out=""
-      if ! df_out="$(/usr/local/bin/knot-deskflow-client reload 2>&1)"; then
-        logger -t knot-guard "Deskflow client reload notice: $df_out"
-      fi
+    # Dynamic role orchestration (Anchor Server vs Strand Client)
+    if is_local_anchor "$active_swarm"; then
+      logger -t knot-guard "Node is ANCHOR for swarm [$active_swarm]. Orchestrating Hub & Deskflow Server."
+      dispatch_user_services "anchor"
+    else
+      logger -t knot-guard "Node is STRAND for swarm [$active_swarm]. Orchestrating Deskflow Client."
+      dispatch_user_services "strand"
     fi
   else
-    echo "none" > "$ACTIVE_SWARM_FILE"
+    sync_active_swarm "none"
     logger -t knot-guard "Outside trusted swarm network fence. Transitioning to Graceful Standalone mode."
 
     # Graceful Standalone Mode:
@@ -233,19 +383,14 @@ reconcile_state() {
       fi
     fi
 
-    # 2. Stop Deskflow client to isolate input across untrusted networks
-    if [ -x /usr/local/bin/knot-deskflow-client ]; then
-      local stop_out=""
-      if ! stop_out="$(/usr/local/bin/knot-deskflow-client stop 2>&1)"; then
-        logger -t knot-guard "Deskflow client stop notice: $stop_out"
-      fi
-    fi
+    # 2. Stop Deskflow & Hub across all sessions
+    dispatch_user_services "standalone"
   fi
 }
 
 # Subcommands: --check-active or status
 if [ "${1:-}" = "--check-active" ] || [ "${1:-}" = "status" ]; then
-  active="$(check_active_network || echo "none")"
+  active="$(check_active_network)"
   echo "$active"
   if [ "$active" != "none" ]; then
     exit 0
@@ -261,23 +406,28 @@ if [ "${1:-}" = "--immediate" ]; then
 fi
 
 # Debounce hysteresis engine: 4-second delay before steady-state reconciliation
-if [ -f "$PID_FILE" ] && [ -r "$PID_FILE" ]; then
-  old_pid="$(< "$PID_FILE")"
-  if [ -n "$old_pid" ]; then
-    local check_probe=""
-    if check_probe="$(kill -0 "$old_pid" 2>&1)"; then
-      local kill_probe=""
-      if ! kill_probe="$(kill "$old_pid" 2>&1)"; then
-        logger -t knot-guard "Notice terminating previous debounce pid $old_pid: $kill_probe"
+debounce_and_reconcile() {
+  if [ -f "$PID_FILE" ] && [ -r "$PID_FILE" ]; then
+    local old_pid
+    old_pid="$(< "$PID_FILE")"
+    if [ -n "$old_pid" ]; then
+      local check_probe=""
+      if check_probe="$(kill -0 "$old_pid" 2>&1)"; then
+        local kill_probe=""
+        if ! kill_probe="$(kill "$old_pid" 2>&1)"; then
+          logger -t knot-guard "Notice terminating previous debounce pid $old_pid: $kill_probe"
+        fi
       fi
     fi
   fi
-fi
 
-echo $$ > "$PID_FILE"
-sleep 4
-rm -f "$PID_FILE"
-reconcile_state
+  echo $$ > "$PID_FILE"
+  sleep 4
+  rm -f "$PID_FILE"
+  reconcile_state
+}
+
+debounce_and_reconcile
 SCRIPT_EOF
   sudo chmod 755 /usr/local/bin/knot-guard
 

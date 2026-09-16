@@ -128,6 +128,25 @@ if [ -r "$LEASE_FILE" ]; then
   fi
 fi
 
+# --- TIER 0.5: Local Host Check ---
+if [ -z "$RESOLVED_IP" ]; then
+  MY_HOST="$(knot_detect_hostname)"
+  IS_LOCAL=0
+  if [ "$TARGET_NODE" = "$MY_HOST" ] || [ "$TARGET_NODE" = "localhost" ]; then
+    IS_LOCAL=1
+  elif [ -n "$MANIFEST" ] && [ -r "$MANIFEST" ]; then
+    M_HOST="$(awk -F'"' '/"hostname":/ {print $4}' "$MANIFEST")"
+    if [ "$M_HOST" = "$MY_HOST" ]; then
+      IS_LOCAL=1
+    elif grep -q "\"$MY_HOST\"" "$MANIFEST"; then
+      IS_LOCAL=1
+    fi
+  fi
+  if [ "$IS_LOCAL" -eq 1 ] && is_port_open "127.0.0.1" "$PORT"; then
+    RESOLVED_IP="127.0.0.1"
+  fi
+fi
+
 # --- TIER 1: mDNS / Zeroconf ---
 if [ -z "$RESOLVED_IP" ] && [ -n "$MANIFEST" ]; then
   MDNS_HOST="$(awk -F'"' '/"mdns":/ {print $4}' "$MANIFEST")"

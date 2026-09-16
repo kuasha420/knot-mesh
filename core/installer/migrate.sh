@@ -252,7 +252,7 @@ CONF_EOF
   else
     mkdir -p "$target_swarm_dir/nodes"
     echo "$profile_content" > "$target_swarm_dir/swarm.conf"
-    if [ -w "/etc" ] || [ "$(id -u)" -eq 0 ] || (command -v sudo >/dev/null && sudo -n true); then
+    if [ -z "${KNOT_TEST_MODE:-}" ] && { [ -w "/etc" ] || [ "$(id -u)" -eq 0 ] || (command -v sudo >/dev/null && sudo -n true); }; then
       sudo mkdir -p "/etc/knot/swarms.d"
       echo "$profile_content" | sudo tee "$sys_conf_path" >/dev/null
     fi

@@ -61,6 +61,9 @@ cmd_init() {
   local hub_port="4242"
   local anchor_id="desktop"
   local is_headless=0
+  local gateway_mac=""
+  local ssid=""
+  local subnet=""
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -84,6 +87,18 @@ cmd_init() {
         is_headless=1
         shift
         ;;
+      --gateway-mac)
+        gateway_mac="$2"
+        shift 2
+        ;;
+      --ssid)
+        ssid="$2"
+        shift 2
+        ;;
+      --subnet)
+        subnet="$2"
+        shift 2
+        ;;
       -h|--help)
         cat << INIT_HELP
 ${C_BOLD}Usage:${C_RESET} knot-installer init [OPTIONS]
@@ -95,6 +110,9 @@ ${C_BOLD}Options:${C_RESET}
     --id <id>            Normalized swarm profile ID (defaults to slug of name)
     --port <port>        Hub TLS listener port (default: 4242)
     --anchor-id <id>     Node ID for this Anchor workstation (default: "desktop")
+    --gateway-mac <mac>  Default gateway MAC to fence this swarm (defaults to active gateway)
+    --ssid <ssid>        Wi-Fi network SSID to fence this swarm (defaults to active SSID)
+    --subnet <cidr>      Network subnet CIDR for PAM/sudo trust (defaults to active subnet)
     --headless           Configure Anchor as a headless compute node without display
 INIT_HELP
         exit 0
@@ -148,6 +166,16 @@ INIT_HELP
   local user_swarm_dir="$home/.config/knot/swarms/${swarm_id}"
   mkdir -p "$user_swarm_dir/nodes"
 
+  if [ -z "$gateway_mac" ]; then
+    gateway_mac="$(knot_detect_gateway_mac)"
+  fi
+  if [ -z "$ssid" ]; then
+    ssid="$(knot_detect_active_ssid)"
+  fi
+  if [ -z "$subnet" ]; then
+    subnet="$(knot_detect_subnet)"
+  fi
+
   local can_write_etc=0
   if [ -w "/etc" ] || [ "$(id -u)" -eq 0 ]; then
     can_write_etc=1
@@ -155,7 +183,7 @@ INIT_HELP
     can_write_etc=1
   fi
 
-  if [ "$can_write_etc" -eq 1 ]; then
+  if [ -z "${KNOT_TEST_MODE:-}" ] && [ "$can_write_etc" -eq 1 ]; then
     sudo mkdir -p "$conf_dir"
     cat << SWARM_CONF | sudo tee "$conf_dir/${swarm_id}.conf" >/dev/null
 # Knot Swarm Profile: ${swarm_id}
@@ -164,6 +192,9 @@ SWARM_NAME="${swarm_name}"
 ANCHOR_ID="${anchor_id}"
 ANCHOR_HOST="${host}"
 HUB_PORT=${hub_port}
+GATEWAY_MACS="${gateway_mac}"
+SSID="${ssid}"
+SUBNET="${subnet}"
 ALLOW_NOPASSWD_SUDO="true"
 ALLOW_DESKFLOW_KVM="true"
 SWARM_CONF
@@ -177,18 +208,27 @@ SWARM_NAME="${swarm_name}"
 ANCHOR_ID="${anchor_id}"
 ANCHOR_HOST="${host}"
 HUB_PORT=${hub_port}
+GATEWAY_MACS="${gateway_mac}"
+SSID="${ssid}"
+SUBNET="${subnet}"
 ALLOW_NOPASSWD_SUDO="true"
 ALLOW_DESKFLOW_KVM="true"
 USER_SWARM_CONF
 
   # 4. Generate Anchor node manifest
+  local lan_ip
+  lan_ip="$(knot_detect_lan_ip)"
   cat << NODE_EOF > "$user_swarm_dir/nodes/${anchor_id}.json"
 {
   "id": "${anchor_id}",
   "hostname": "${host}",
+  "user": "${USER:-psl}",
   "role": "anchor",
+  "ip_hint": "${lan_ip}",
+  "port": $(knot_detect_sshd_port),
   "arch": "$(uname -m)",
   "os": "Arch Linux / KDE Plasma 6 Wayland",
+  "aliases": ["devbox", "ally", "rog-ally", "psl-0000"],
   "display": ${display_json},
   "network": {
     "ssh_port": $(knot_detect_sshd_port)

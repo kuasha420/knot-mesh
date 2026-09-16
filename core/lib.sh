@@ -97,6 +97,37 @@ knot_detect_subnet() {
   fi
 }
 
+knot_detect_lan_ip() {
+  local gw=""
+  local gw_out=""
+  if gw_out="$(ip -4 route show default 2>&1)"; then
+    gw="$(echo "$gw_out" | awk '{print $3}' | head -n1)"
+  fi
+  if [ -n "$gw" ]; then
+    local src_out=""
+    if src_out="$(ip route get "$gw" 2>&1)"; then
+      local ip_found
+      ip_found="$(echo "$src_out" | awk '{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1)}' | head -n1)"
+      if [ -n "$ip_found" ]; then
+        echo "$ip_found"
+        return 0
+      fi
+    fi
+  fi
+
+  local fallback_out=""
+  if fallback_out="$(ip -4 addr show scope global 2>&1)"; then
+    local fb_ip
+    fb_ip="$(echo "$fallback_out" | awk '$1 == "inet" {print $2; exit}' | cut -d/ -f1)"
+    if [ -n "$fb_ip" ]; then
+      echo "$fb_ip"
+      return 0
+    fi
+  fi
+
+  echo "127.0.0.1"
+}
+
 knot_detect_network_interfaces() {
   local ifaces
   ifaces="$(ip -o link show | awk -F': ' '{print $2}' | grep -v -E '^(lo|docker|virbr|veth|br-|waydroid)')"

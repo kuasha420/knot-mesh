@@ -26,6 +26,12 @@ from urllib.parse import urlparse, parse_qs
 
 from datetime import datetime, timezone
 
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+HUB_DIR = os.path.abspath(os.path.dirname(__file__))
+for _p in (REPO_ROOT, HUB_DIR):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 WEB_DIST_DIR = os.path.abspath(
     os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "web", "dist")
 )
@@ -2590,7 +2596,10 @@ def main():
     is_tls = False
     if not os.environ.get("KNOT_HUB_DISABLE_TLS"):
         try:
-            from core.hub.tls import ensure_hub_tls
+            try:
+                from core.hub.tls import ensure_hub_tls
+            except ImportError:
+                from tls import ensure_hub_tls
             tls_info = ensure_hub_tls()
             cert_path = tls_info["cert_path"]
             key_path = tls_info["key_path"]

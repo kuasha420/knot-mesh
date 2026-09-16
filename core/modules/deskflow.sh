@@ -238,50 +238,21 @@ NOTIFY_EOF
     fi
   fi
 
-  if [ "$my_host" = "$anchor_host" ]; then
-    # Compile and install the InputCapture persistence shim if not already present
-    if [ -f "$KNOT_ROOT/core/shim/input_capture_shim.c" ] && [ ! -f /usr/local/lib/knot/libinputcapture-persist.so ]; then
-      sudo mkdir -p /usr/local/lib/knot
-      if ! sudo gcc -Wall -Wextra -O2 -shared -fPIC \
-        "$KNOT_ROOT/core/shim/input_capture_shim.c" \
-        $(pkg-config --cflags --libs libportal) -ldl \
-        -o /usr/local/lib/knot/libinputcapture-persist.so; then
-        knot_log_err "Failed to compile libinputcapture-persist.so"
-        return 1
-      fi
+  # 6. Ensure InputCapture persistence shim is compiled
+  if [ -f "$KNOT_ROOT/core/shim/input_capture_shim.c" ] && [ ! -f /usr/local/lib/knot/libinputcapture-persist.so ]; then
+    sudo mkdir -p /usr/local/lib/knot
+    if ! sudo gcc -Wall -Wextra -O2 -shared -fPIC \
+      "$KNOT_ROOT/core/shim/input_capture_shim.c" \
+      $(pkg-config --cflags --libs libportal) -ldl \
+      -o /usr/local/lib/knot/libinputcapture-persist.so; then
+      knot_log_warn "Failed to compile libinputcapture-persist.so"
     fi
+  fi
 
-    # Server INI settings
-    cat << INI_EOF > "$cfg_dir/Deskflow.conf"
-[core]
-computerName=$my_host
-INI_EOF
-
-    knot_log_info "Deploying Deskflow SERVER service on Anchor ($my_host)..."
-    cat << SERVICE_EOF > "$systemd_dir/knot-deskflow.service"
-[Unit]
-Description=Knot Deskflow Server (Anchor KVM)
-PartOf=graphical-session.target
-After=graphical-session.target
-Requisite=graphical-session.target
-
-[Service]
-Type=simple
-Environment=WAYLAND_DISPLAY=wayland-0
-Environment=XDG_CURRENT_DESKTOP=KDE
-Environment=LD_PRELOAD=/usr/local/lib/knot/libinputcapture-persist.so
-ExecStart=/usr/bin/deskflow-core server --new-instance -s %h/.config/Deskflow/Deskflow.conf
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=graphical-session.target
-SERVICE_EOF
-
-    # Configure KDE Plasma Global Shortcut for Host Cursor Lock
-    local app_dir="$home/.local/share/applications"
-    mkdir -p "$app_dir"
-    cat << DESKTOP_EOF > "$app_dir/knot-kvm-lock.desktop"
+  # 7. Configure KDE Plasma Global Shortcut for Host Cursor Lock
+  local app_dir="$home/.local/share/applications"
+  mkdir -p "$app_dir"
+  cat << DESKTOP_EOF > "$app_dir/knot-kvm-lock.desktop"
 [Desktop Entry]
 Type=Application
 Name=Knot KVM Lock Toggle
@@ -293,23 +264,24 @@ Categories=Utility;
 X-KDE-GlobalAccel-CommandShortcut=true
 DESKTOP_EOF
 
-    if command -v kwriteconfig6 >/dev/null; then
-      kwriteconfig6 --file kglobalshortcutsrc --group "services" --group "knot-kvm-lock.desktop" --key "_launch" "ScrollLock,none,Knot KVM Lock Toggle"
-    fi
-  else
-    knot_log_info "Deploying Dynamic Deskflow CLIENT runner on Strand ($my_host)..."
-    cat << 'RUNNER_EOF' | sudo tee /usr/local/bin/knot-deskflow-client >/dev/null
+  if command -v kwriteconfig6 >/dev/null; then
+    kwriteconfig6 --file kglobalshortcutsrc --group "services" --group "knot-kvm-lock.desktop" --key "_launch" "ScrollLock,none,Knot KVM Lock Toggle"
+  fi
+
+  # 8. Deploy Unified Dual-Role Deskflow Runner (Anchor Server / Strand Client)
+  knot_log_info "Deploying Unified Dual-Role Deskflow runner..."
+  cat << 'RUNNER_EOF' | sudo tee /usr/local/bin/knot-deskflow >/dev/null
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Dynamic Knot Deskflow Client Runner
-# Connects to the Anchor workstation of the currently active swarm.
+# Unified Knot Deskflow KVM Runner (Dual-Role: Anchor Server / Strand Client)
+# Automatically adapts between Server and Client mode based on the active swarm.
 
 ACTION="${1:-run}"
 
 if [ "$ACTION" = "stop" ]; then
-  if pgrep -f "deskflow-core client" >/dev/null; then
-    pkill -f "deskflow-core client"
+  if pgrep -f "deskflow-core" >/dev/null; then
+    pkill -f "deskflow-core"
   fi
   if command -v systemctl >/dev/null && systemctl --user is-active --quiet knot-deskflow.service; then
     systemctl --user stop knot-deskflow.service
@@ -335,11 +307,6 @@ elif [ -x "$HOME/knot/bin/knot" ]; then
   KNOT_CLI="$HOME/knot/bin/knot"
 fi
 
-if [ -z "$KNOT_CLI" ]; then
-  echo "Error: knot CLI executable not found in PATH or standard locations" >&2
-  exit 1
-fi
-
 ACTIVE_SWARM="none"
 RUN_DIR="${KNOT_RUNTIME_DIR:-/run/knot}"
 if [ -r "$RUN_DIR/active_swarm" ]; then
@@ -349,27 +316,8 @@ elif [ -r "$HOME/.local/state/knot/active_swarm" ]; then
 fi
 
 if [ "$ACTIVE_SWARM" = "none" ] || [ -z "$ACTIVE_SWARM" ]; then
-  echo "Active swarm is none (graceful standalone mode). Knot deskflow client stopping."
+  echo "Active swarm is none (graceful standalone mode). Knot deskflow stopping."
   exit 0
-fi
-
-ANCHOR_TARGET="desktop"
-if [ -r "/etc/knot/swarms.d/${ACTIVE_SWARM}.conf" ]; then
-  ANCHOR_CFG="$(awk -F= '/^ANCHOR_ID=/ {print $2}' "/etc/knot/swarms.d/${ACTIVE_SWARM}.conf" | tr -d '"')"
-  if [ -n "$ANCHOR_CFG" ]; then
-    ANCHOR_TARGET="$ANCHOR_CFG"
-  fi
-elif [ -r "$HOME/.config/knot/swarms/${ACTIVE_SWARM}/swarm.conf" ]; then
-  ANCHOR_CFG="$(awk -F= '/^ANCHOR_ID=/ {print $2}' "$HOME/.config/knot/swarms/${ACTIVE_SWARM}/swarm.conf" | tr -d '"')"
-  if [ -n "$ANCHOR_CFG" ]; then
-    ANCHOR_TARGET="$ANCHOR_CFG"
-  fi
-fi
-
-RESOLVED_IP="$("$KNOT_CLI" resolve "$ANCHOR_TARGET" 24800)"
-if [ -z "$RESOLVED_IP" ]; then
-  echo "Could not resolve active Anchor ($ANCHOR_TARGET) IP on port 24800" >&2
-  exit 1
 fi
 
 # Self-healing preflight: Ensure RemoteDesktop portal interface is available
@@ -409,40 +357,8 @@ if [ -z "$MY_HOST" ] && command -v hostname >/dev/null; then
   MY_HOST="$(hostname)"
 fi
 
-CLIENT_NAME="$MY_HOST"
-NODES_DIR=""
-if [ -d "$HOME/.config/knot/swarms/${ACTIVE_SWARM}/nodes" ]; then
-  NODES_DIR="$HOME/.config/knot/swarms/${ACTIVE_SWARM}/nodes"
-elif [ -d "/etc/knot/swarms.d/${ACTIVE_SWARM}/nodes" ]; then
-  NODES_DIR="/etc/knot/swarms.d/${ACTIVE_SWARM}/nodes"
-fi
-
-if [ -n "$NODES_DIR" ]; then
-  for mf in "$NODES_DIR/"*.json; do
-    [ -r "$mf" ] || continue
-    m_host="$(awk -F'"' '/"hostname":/ {print $4}' "$mf")"
-    m_id="$(awk -F'"' '/"id":/ {print $4}' "$mf")"
-    m_user="$(awk -F'"' '/"user":/ {print $4}' "$mf")"
-    if [ "$m_host" = "$MY_HOST" ] || [ "$m_id" = "$MY_HOST" ]; then
-      CLIENT_NAME="${m_host:-$MY_HOST}"
-      break
-    fi
-    if [ "$m_user" = "${USER:-}" ] && [ "$m_id" != "$ANCHOR_TARGET" ]; then
-      CLIENT_NAME="${m_host:-$m_id}"
-    fi
-  done
-fi
-
 CONF_DIR="$HOME/.config/Deskflow"
 mkdir -p "$CONF_DIR"
-
-cat << CONF_EOF > "$CONF_DIR/Deskflow.conf"
-[core]
-computerName=${CLIENT_NAME:-localhost}
-
-[client]
-remoteHost=$RESOLVED_IP
-CONF_EOF
 
 DESKFLOW_BIN="/usr/bin/deskflow-core"
 if command -v deskflow-core >/dev/null; then
@@ -454,14 +370,107 @@ if [ ! -x "$DESKFLOW_BIN" ]; then
   exit 1
 fi
 
-exec "$DESKFLOW_BIN" client --new-instance -s "$CONF_DIR/Deskflow.conf"
-RUNNER_EOF
-    sudo chmod 755 /usr/local/bin/knot-deskflow-client
+ANCHOR_TARGET="desktop"
+ANCHOR_HOST="desktop.local"
+SWARM_CFG=""
+if [ -r "/etc/knot/swarms.d/${ACTIVE_SWARM}.conf" ]; then
+  SWARM_CFG="/etc/knot/swarms.d/${ACTIVE_SWARM}.conf"
+elif [ -r "$HOME/.config/knot/swarms/${ACTIVE_SWARM}/swarm.conf" ]; then
+  SWARM_CFG="$HOME/.config/knot/swarms/${ACTIVE_SWARM}/swarm.conf"
+fi
 
-    knot_log_info "Deploying Dynamic Deskflow CLIENT service on Strand ($my_host)..."
-    cat << SERVICE_EOF > "$systemd_dir/knot-deskflow.service"
+if [ -n "$SWARM_CFG" ] && [ -r "$SWARM_CFG" ]; then
+  ANCHOR_ID_CFG="$(awk -F= '/^ANCHOR_ID=/ {print $2}' "$SWARM_CFG" | tr -d '"'\'' ')"
+  ANCHOR_HOST_CFG="$(awk -F= '/^ANCHOR_HOST=/ {print $2}' "$SWARM_CFG" | tr -d '"'\'' ')"
+  [ -n "$ANCHOR_ID_CFG" ] && ANCHOR_TARGET="$ANCHOR_ID_CFG"
+  [ -n "$ANCHOR_HOST_CFG" ] && ANCHOR_HOST="$ANCHOR_HOST_CFG"
+fi
+
+IS_ANCHOR=0
+if [ "$MY_HOST" = "$ANCHOR_HOST" ] || [ "$MY_HOST" = "$ANCHOR_TARGET" ]; then
+  IS_ANCHOR=1
+fi
+
+NODES_DIR=""
+if [ -d "$HOME/.config/knot/swarms/${ACTIVE_SWARM}/nodes" ]; then
+  NODES_DIR="$HOME/.config/knot/swarms/${ACTIVE_SWARM}/nodes"
+elif [ -d "/etc/knot/swarms.d/${ACTIVE_SWARM}/nodes" ]; then
+  NODES_DIR="/etc/knot/swarms.d/${ACTIVE_SWARM}/nodes"
+fi
+
+if [ "$IS_ANCHOR" -eq 1 ]; then
+  # ==========================================
+  # ANCHOR WORKSTATION (SERVER MODE)
+  # ==========================================
+  echo "Node $MY_HOST is ANCHOR in active swarm ($ACTIVE_SWARM). Launching Deskflow Server..."
+
+  cat << CONF_EOF > "$CONF_DIR/Deskflow.conf"
+[core]
+computerName=${MY_HOST:-localhost}
+
+[server]
+externalConfig=true
+externalConfigFile=$CONF_DIR/deskflow-server.conf
+CONF_EOF
+
+  SHIM_SO="/usr/local/lib/knot/libinputcapture-persist.so"
+  if [ -f "$SHIM_SO" ]; then
+    export LD_PRELOAD="$SHIM_SO"
+  fi
+
+  exec "$DESKFLOW_BIN" server --new-instance -s "$CONF_DIR/Deskflow.conf"
+else
+  # ==========================================
+  # STRAND WORKSTATION (CLIENT MODE)
+  # ==========================================
+  echo "Node $MY_HOST is STRAND in active swarm ($ACTIVE_SWARM). Launching Deskflow Client targeting $ANCHOR_TARGET..."
+
+  if [ -z "$KNOT_CLI" ]; then
+    echo "Error: knot CLI executable not found to resolve Anchor IP" >&2
+    exit 1
+  fi
+
+  RESOLVED_IP="$("$KNOT_CLI" resolve "$ANCHOR_TARGET" 24800)"
+  if [ -z "$RESOLVED_IP" ]; then
+    echo "Could not resolve active Anchor ($ANCHOR_TARGET) IP on port 24800" >&2
+    exit 1
+  fi
+
+  CLIENT_NAME="$MY_HOST"
+  if [ -n "$NODES_DIR" ]; then
+    for mf in "$NODES_DIR/"*.json; do
+      [ -r "$mf" ] || continue
+      m_host="$(awk -F'"' '/"hostname":/ {print $4}' "$mf")"
+      m_id="$(awk -F'"' '/"id":/ {print $4}' "$mf")"
+      m_user="$(awk -F'"' '/"user":/ {print $4}' "$mf")"
+      if [ "$m_host" = "$MY_HOST" ] || [ "$m_id" = "$MY_HOST" ]; then
+        CLIENT_NAME="${m_host:-$MY_HOST}"
+        break
+      fi
+      if [ "$m_user" = "${USER:-}" ] && [ "$m_id" != "$ANCHOR_TARGET" ]; then
+        CLIENT_NAME="${m_host:-$m_id}"
+      fi
+    done
+  fi
+
+  cat << CONF_EOF > "$CONF_DIR/Deskflow.conf"
+[core]
+computerName=${CLIENT_NAME:-localhost}
+
+[client]
+remoteHost=$RESOLVED_IP
+CONF_EOF
+
+  exec "$DESKFLOW_BIN" client --new-instance -s "$CONF_DIR/Deskflow.conf"
+fi
+RUNNER_EOF
+  sudo chmod 755 /usr/local/bin/knot-deskflow
+  sudo ln -sf /usr/local/bin/knot-deskflow /usr/local/bin/knot-deskflow-client
+
+  knot_log_info "Deploying Unified Knot Deskflow systemd service..."
+  cat << SERVICE_EOF > "$systemd_dir/knot-deskflow.service"
 [Unit]
-Description=Knot Dynamic Deskflow Client (Strand KVM)
+Description=Knot Dynamic Deskflow KVM Service (Anchor Server / Strand Client)
 PartOf=graphical-session.target
 After=graphical-session.target xdg-desktop-portal.service plasma-xdg-desktop-portal-kde.service
 Wants=xdg-desktop-portal.service plasma-xdg-desktop-portal-kde.service
@@ -472,14 +481,13 @@ Type=simple
 Environment=WAYLAND_DISPLAY=wayland-0
 Environment=XDG_CURRENT_DESKTOP=KDE
 Environment=XDG_DESKTOP_PORTAL_APP_ID=org.deskflow.deskflow
-ExecStart=/usr/local/bin/knot-deskflow-client
+ExecStart=/usr/local/bin/knot-deskflow
 Restart=on-failure
 RestartSec=10
 
 [Install]
 WantedBy=graphical-session.target
 SERVICE_EOF
-  fi
 
   systemctl --user daemon-reload
   systemctl --user enable knot-deskflow.service

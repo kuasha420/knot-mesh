@@ -17,6 +17,7 @@ echo "  -> Zero error swallowing: OK"
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
+export KNOT_TEST_MODE=1
 
 LEGACY_DIR="$TMP_DIR/legacy_knot"
 mkdir -p "$LEGACY_DIR/registry/nodes"

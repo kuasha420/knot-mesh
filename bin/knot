@@ -122,25 +122,31 @@ cmd_status() {
 
   local my_host
   my_host="$(knot_detect_hostname)"
+  local anchor_id="desktop"
   local anchor_host="desktop"
-  if [ -n "$nodes_dir" ] && [ -d "$nodes_dir" ]; then
+  if knot_load_swarm_profile "$active_swarm"; then
+    anchor_id="${ANCHOR_ID:-desktop}"
+    anchor_host="${ANCHOR_HOST:-desktop}"
+  elif [ -n "$nodes_dir" ] && [ -d "$nodes_dir" ]; then
     for manifest in "$nodes_dir/"*.json; do
       [ -e "$manifest" ] || continue
-      if grep -q '"id":[[:space:]]*"desktop"' "$manifest"; then
-        anchor_host="$(grep -o '"hostname":[[:space:]]*"[^"]*"' "$manifest" | cut -d'"' -f4)"
+      if grep -q '"role":[[:space:]]*"anchor"' "$manifest"; then
+        anchor_id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+        anchor_host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+        break
       fi
     done
   fi
 
   local established_kvm_ips=""
-  if [ "$my_host" = "$anchor_host" ]; then
+  if [ "$my_host" = "$anchor_host" ] || [ "$my_host" = "$anchor_id" ]; then
     local ss_out=""
     if ss_out="$(ss -H -tn state established sport = :24800 2>&1)"; then
       established_kvm_ips="$(echo "$ss_out" | awk '{print $4}' | cut -d: -f1)"
     fi
   else
     local ssh_ss_out=""
-    if ssh_ss_out="$(ssh -o BatchMode=yes -o ConnectTimeout=2 desktop "ss -H -tn state established sport = :24800" 2>&1)"; then
+    if ssh_ss_out="$(ssh -o BatchMode=yes -o ConnectTimeout=2 "$anchor_id" "ss -H -tn state established sport = :24800" 2>&1)"; then
       established_kvm_ips="$(echo "$ssh_ss_out" | awk '{print $4}' | cut -d: -f1)"
     fi
   fi
@@ -173,7 +179,7 @@ cmd_status() {
         fi
 
         local kvm_status="${C_YELLOW}DISCONNECTED${C_RESET}"
-        if [ "$id" = "desktop" ] || [ "$host" = "$anchor_host" ]; then
+        if [ "$id" = "$anchor_id" ] || [ "$host" = "$anchor_host" ]; then
           local count=0
           if [ -n "$established_kvm_ips" ]; then
             count="$(echo "$established_kvm_ips" | grep -v '^$' | wc -l)"
