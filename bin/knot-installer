@@ -1,0 +1,591 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Knot Mesh Unified Installer & Onboarding CLI (bin/knot-installer)
+# Manages swarm initialization, peer invitations, rendezvous pairing, and teardown.
+
+KNOT_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+if [ -f "$KNOT_ROOT/core/lib.sh" ]; then
+  # shellcheck source=../core/lib.sh
+  source "$KNOT_ROOT/core/lib.sh"
+fi
+
+# Color constants
+C_RESET=$'\033[0m'
+C_BOLD=$'\033[1m'
+C_GREEN=$'\033[1;32m'
+C_CYAN=$'\033[1;36m'
+C_YELLOW=$'\033[1;33m'
+C_RED=$'\033[1;31m'
+C_DIM=$'\033[2m'
+
+print_banner() {
+  cat << BANNER_EOF
+${C_CYAN}${C_BOLD}
+  ██╗  ██╗███╗   ██╗ ██████╗ ████████╗   ███╗   ███╗███████╗███████╗██╗  ██╗
+  ██║ ██╔╝████╗  ██║██╔═══██╗╚══██╔══╝   ████╗ ████║██╔════╝██╔════╝██║  ██║
+  █████═╝ ██╔██╗ ██║██║   ██║   ██║█████╗██╔████╔██║█████╗  ███████╗███████║
+  ██╔═██╗ ██║╚██╗██║██║   ██║   ██║╚════╝██║╚██╔╝██║██╔══╝  ╚════██║██╔══██║
+  ██║ ╚██╗██║ ╚████║╚██████╔╝   ██║      ██║ ╚═╝ ██║███████╗███████║██║  ██║
+  ╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝    ╚═╝      ╚═╝     ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝
+${C_RESET}${C_DIM}         Distributed Workspace Mesh for Arch Linux / KDE Plasma 6 Wayland${C_RESET}
+BANNER_EOF
+}
+
+usage() {
+  print_banner
+  cat << USAGE_EOF
+
+${C_BOLD}USAGE:${C_RESET}
+    knot-installer <command> [arguments...]
+
+${C_BOLD}COMMANDS:${C_RESET}
+    ${C_GREEN}init${C_RESET}      Initialize this workstation as a Knot Mesh Anchor (Hub & KVM Server)
+    ${C_GREEN}invite${C_RESET}    Generate a pairing token and coordinate Strand enrollment rendezvous
+    ${C_GREEN}join${C_RESET}      Enroll this machine as a Strand in an existing Knot Mesh swarm
+    ${C_GREEN}doctor${C_RESET}    Run comprehensive health and diagnostic checks across the mesh
+    ${C_GREEN}uninstall${C_RESET} Cleanly stop services, unbind mesh symlinks, and remove state
+
+${C_BOLD}OPTIONS:${C_RESET}
+    -h, --help       Show this help message
+    -v, --version    Show Knot Mesh version
+
+Run 'knot-installer <command> --help' for detailed options on a specific command.
+USAGE_EOF
+}
+
+cmd_init() {
+  local swarm_name="default"
+  local swarm_id=""
+  local hub_port="4242"
+  local anchor_id="desktop"
+  local is_headless=0
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --name)
+        swarm_name="$2"
+        shift 2
+        ;;
+      --id)
+        swarm_id="$2"
+        shift 2
+        ;;
+      --port)
+        hub_port="$2"
+        shift 2
+        ;;
+      --anchor-id)
+        anchor_id="$2"
+        shift 2
+        ;;
+      --headless)
+        is_headless=1
+        shift
+        ;;
+      -h|--help)
+        cat << INIT_HELP
+${C_BOLD}Usage:${C_RESET} knot-installer init [OPTIONS]
+
+Initialize this workstation as an Anchor for a new Knot Mesh swarm.
+
+${C_BOLD}Options:${C_RESET}
+    --name <name>        Human-readable swarm name (default: "default")
+    --id <id>            Normalized swarm profile ID (defaults to slug of name)
+    --port <port>        Hub TLS listener port (default: 4242)
+    --anchor-id <id>     Node ID for this Anchor workstation (default: "desktop")
+    --headless           Configure Anchor as a headless compute node without display
+INIT_HELP
+        exit 0
+        ;;
+      *)
+        echo -e "${C_RED}Error:${C_RESET} Unknown option '$1'" >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  if [ -z "$swarm_id" ]; then
+    swarm_id="$(echo "$swarm_name" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-//;s/-$//')"
+  fi
+
+  echo -e "\n${C_CYAN}[•] Initializing Knot Mesh Anchor workstation for swarm: ${C_BOLD}${swarm_name}${C_RESET} (${swarm_id})..."
+
+  local user
+  user="$(knot_detect_user)"
+  local host
+  host="$(knot_detect_hostname)"
+  local home
+  home="$(knot_detect_user_home)"
+
+  # 1. Setup persistent Anchor TLS Certificate Authority
+  echo -e "${C_CYAN}[•] Generating persistent Anchor TLS Certificate Authority...${C_RESET}"
+  local tls_py="$KNOT_ROOT/core/hub/tls.py"
+  local tls_info
+  tls_info="$(python3 "$tls_py")"
+  echo "$tls_info" | while IFS= read -r line; do
+    echo -e "    ${C_DIM}$line${C_RESET}"
+  done
+
+  # 2. Extract Display Specs via display.sh
+  local display_json="{}"
+  if [ "$is_headless" -eq 1 ]; then
+    display_json="null"
+    echo -e "${C_CYAN}[•] Display mode: Headless Anchor (no display mapping)${C_RESET}"
+  else
+    local display_sh="$KNOT_ROOT/core/installer/display.sh"
+    if [ -x "$display_sh" ]; then
+      echo -e "${C_CYAN}[•] Probing active Wayland display configuration via kscreen-doctor...${C_RESET}"
+      display_json="$("$display_sh" --json)"
+    else
+      display_json='{"resolution": "2560x1440", "refresh_rate": 60.0, "scale": 1.0}'
+    fi
+  fi
+
+  # 3. Create swarm profile directories
+  local conf_dir="/etc/knot/swarms.d"
+  local user_swarm_dir="$home/.config/knot/swarms/${swarm_id}"
+  mkdir -p "$user_swarm_dir/nodes"
+
+  local can_write_etc=0
+  if [ -w "/etc" ] || [ "$(id -u)" -eq 0 ]; then
+    can_write_etc=1
+  elif command -v sudo >/dev/null && sudo -n true; then
+    can_write_etc=1
+  fi
+
+  if [ "$can_write_etc" -eq 1 ]; then
+    sudo mkdir -p "$conf_dir"
+    cat << SWARM_CONF | sudo tee "$conf_dir/${swarm_id}.conf" >/dev/null
+# Knot Swarm Profile: ${swarm_id}
+SWARM_ID="${swarm_id}"
+SWARM_NAME="${swarm_name}"
+ANCHOR_ID="${anchor_id}"
+ANCHOR_HOST="${host}"
+HUB_PORT=${hub_port}
+ALLOW_NOPASSWD_SUDO="true"
+ALLOW_DESKFLOW_KVM="true"
+SWARM_CONF
+    sudo chmod 644 "$conf_dir/${swarm_id}.conf"
+  fi
+
+  # Write user swarm config
+  cat << USER_SWARM_CONF > "$user_swarm_dir/swarm.conf"
+SWARM_ID="${swarm_id}"
+SWARM_NAME="${swarm_name}"
+ANCHOR_ID="${anchor_id}"
+ANCHOR_HOST="${host}"
+HUB_PORT=${hub_port}
+ALLOW_NOPASSWD_SUDO="true"
+ALLOW_DESKFLOW_KVM="true"
+USER_SWARM_CONF
+
+  # 4. Generate Anchor node manifest
+  cat << NODE_EOF > "$user_swarm_dir/nodes/${anchor_id}.json"
+{
+  "id": "${anchor_id}",
+  "hostname": "${host}",
+  "role": "anchor",
+  "arch": "$(uname -m)",
+  "os": "Arch Linux / KDE Plasma 6 Wayland",
+  "display": ${display_json},
+  "network": {
+    "ssh_port": $(knot_detect_sshd_port)
+  }
+}
+NODE_EOF
+
+  # 5. Generate initial declarative topology.json
+  cat << TOPO_EOF > "$user_swarm_dir/topology.json"
+{
+  "anchor": "${anchor_id}",
+  "screens": ["${anchor_id}"],
+  "layout": {
+    "${anchor_id}": {}
+  },
+  "locked": false
+}
+TOPO_EOF
+
+  # 6. Set active swarm
+  knot_set_active_swarm "$swarm_id"
+  echo -e "${C_GREEN}[✓] Active swarm set to: ${swarm_id}${C_RESET}"
+
+  # 7. Compile initial Deskflow layout
+  if [ -f "$KNOT_ROOT/core/modules/deskflow.sh" ]; then
+    # shellcheck source=../core/modules/deskflow.sh
+    source "$KNOT_ROOT/core/modules/deskflow.sh"
+    deskflow_compile_server_config "unlocked"
+    echo -e "${C_GREEN}[✓] Deskflow server configuration compiled.${C_RESET}"
+  fi
+
+  # Summary banner
+  echo -e "\n${C_GREEN}${C_BOLD}======================================================================${C_RESET}"
+  echo -e "${C_GREEN}${C_BOLD}           KNOT MESH ANCHOR WORKSTATION INITIALIZED                   ${C_RESET}"
+  echo -e "${C_GREEN}${C_BOLD}======================================================================${C_RESET}"
+  echo -e "  ${C_BOLD}Swarm Name:${C_RESET}     ${swarm_name} (${swarm_id})"
+  echo -e "  ${C_BOLD}Anchor Node:${C_RESET}    ${anchor_id} (${host})"
+  echo -e "  ${C_BOLD}Hub TLS Port:${C_RESET}   ${hub_port}"
+  echo -e "  ${C_BOLD}Profile Path:${C_RESET}   $user_swarm_dir/swarm.conf"
+  echo -e "\n${C_CYAN}Next Step:${C_RESET}"
+  echo -e "  Run '${C_BOLD}knot-installer invite${C_RESET}' on this machine to pair laptops and handhelds.\n"
+}
+
+cmd_invite() {
+  local ttl=300
+  local port=4242
+  local host="127.0.0.1"
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --ttl)
+        ttl="$2"
+        shift 2
+        ;;
+      --port)
+        port="$2"
+        shift 2
+        ;;
+      --host)
+        host="$2"
+        shift 2
+        ;;
+      -h|--help)
+        cat << INVITE_HELP
+${C_BOLD}Usage:${C_RESET} knot-installer invite [OPTIONS]
+
+Generate a secure pairing token and enter rendezvous mode to onboard a Strand.
+
+${C_BOLD}Options:${C_RESET}
+    --ttl <seconds>      Pairing token validity duration (default: 300)
+    --port <port>        Anchor Hub TLS port (default: 4242)
+    --host <host>        Anchor Hub address (default: 127.0.0.1)
+INVITE_HELP
+        exit 0
+        ;;
+      *)
+        echo -e "${C_RED}Error:${C_RESET} Unknown option '$1'" >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  echo -e "\n${C_CYAN}[•] Requesting enrollment invitation from Knot Hub (https://${host}:${port})...${C_RESET}"
+
+  local invite_payload
+  invite_payload="$(python3 -c '
+import urllib.request, ssl, json, sys
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+
+req = urllib.request.Request(
+    "https://'"${host}:${port}"'/swarm/enroll/invite",
+    data=json.dumps({"expires_in": '"$ttl"'}).encode("utf-8"),
+    headers={"Content-Type": "application/json"}
+)
+try:
+    with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+        print(resp.read().decode("utf-8"))
+except Exception as e:
+    sys.stderr.write(f"Failed contacting Knot Hub: {e}\n")
+    sys.exit(1)
+')"
+
+  local pin token fp_short
+  pin="$(echo "$invite_payload" | python3 -c 'import json, sys; print(json.load(sys.stdin)["pin"])')"
+  token="$(echo "$invite_payload" | python3 -c 'import json, sys; print(json.load(sys.stdin)["token"])')"
+  fp_short="$(echo "$invite_payload" | python3 -c 'import json, sys; print(json.load(sys.stdin)["fingerprint_short"])')"
+
+  # Find external routable IP for user display
+  local anchor_ip="127.0.0.1"
+  if command -v ip >/dev/null; then
+    local route_out=""
+    if route_out="$(ip route get 1.1.1.1 2>&1)"; then
+      local parsed_ip
+      parsed_ip="$(echo "$route_out" | awk '{print $7; exit}')"
+      if [ -n "$parsed_ip" ]; then
+        anchor_ip="$parsed_ip"
+      fi
+    fi
+  fi
+
+  echo -e "\n${C_GREEN}${C_BOLD}======================================================================${C_RESET}"
+  echo -e "${C_GREEN}${C_BOLD}              KNOT MESH — STRAND ENROLLMENT INVITATION                 ${C_RESET}"
+  echo -e "${C_GREEN}${C_BOLD}======================================================================${C_RESET}"
+  echo -e "  ${C_BOLD}Pairing PIN:${C_RESET}    ${C_YELLOW}${pin}${C_RESET}"
+  echo -e "  ${C_BOLD}Join Token:${C_RESET}     ${C_CYAN}${token}${C_RESET}"
+  echo -e "  ${C_BOLD}Expires In:${C_RESET}     ${ttl} seconds"
+  echo -e "\n  ${C_BOLD}Run on Strand machine (laptop/handheld):${C_RESET}"
+  echo -e "    ${C_GREEN}knot-installer join ${anchor_ip}:${port} ${token}${C_RESET}"
+  echo -e "${C_GREEN}${C_BOLD}======================================================================${C_RESET}"
+  echo -e "${C_CYAN}Waiting for Strand rendezvous connection (timeout: ${ttl}s)...${C_RESET}"
+
+  # Rendezvous wait call
+  local rendezvous_res
+  if ! rendezvous_res="$(python3 -c '
+import urllib.request, ssl, json, sys
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+
+req = urllib.request.Request(
+    "https://'"${host}:${port}"'/swarm/enroll/rendezvous/wait",
+    data=json.dumps({"pin": "'"$pin"'", "timeout": '"$ttl"'.0}).encode("utf-8"),
+    headers={"Content-Type": "application/json"}
+)
+try:
+    with urllib.request.urlopen(req, context=ctx, timeout='"$((ttl + 5))"') as resp:
+        print(resp.read().decode("utf-8"))
+except Exception as e:
+    sys.stderr.write(f"Rendezvous error: {e}\n")
+    sys.exit(1)
+')"; then
+    echo -e "${C_RED}[✗] Strand rendezvous timed out or failed.${C_RESET}"
+    exit 1
+  fi
+
+  local status
+  status="$(echo "$rendezvous_res" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("status", "error"))')"
+  if [ "$status" != "connected" ]; then
+    echo -e "${C_RED}[✗] Rendezvous failed: status is '$status'${C_RESET}"
+    exit 1
+  fi
+
+  local strand_id strand_host
+  strand_id="$(echo "$rendezvous_res" | python3 -c 'import json, sys; print(json.load(sys.stdin)["strand"].get("id", "strand"))')"
+  strand_host="$(echo "$rendezvous_res" | python3 -c 'import json, sys; print(json.load(sys.stdin)["strand"].get("hostname", "unknown"))')"
+
+  echo -e "\n${C_GREEN}[✓] Strand connected: ${C_BOLD}${strand_id}${C_RESET} (${strand_host})"
+
+  # Interactive placement prompt
+  local placement="left"
+  if [ -t 0 ]; then
+    echo -e "\n${C_BOLD}Where is '${strand_id}' positioned relative to this Anchor?${C_RESET}"
+    echo "  [1] Left (default)"
+    echo "  [2] Right"
+    echo "  [3] Above / Up"
+    echo "  [4] Below / Down"
+    echo "  [5] Headless (No KVM screen)"
+    read -r -p "Select placement [1-5 or Left/Right/Above/Below/Headless] (1): " p_input
+    case "${p_input,,}" in
+      2|right|r) placement="right" ;;
+      3|above|up|a|u) placement="above" ;;
+      4|below|down|b|d) placement="below" ;;
+      5|headless|h) placement="headless" ;;
+      *) placement="left" ;;
+    esac
+  else
+    echo -e "${C_CYAN}[•] Non-interactive session: defaulting placement to 'left'.${C_RESET}"
+  fi
+
+  echo -e "${C_CYAN}[•] Approving enrollment with placement: ${C_BOLD}${placement}${C_RESET}..."
+
+  python3 -c '
+import urllib.request, ssl, json, sys
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+
+req = urllib.request.Request(
+    "https://'"${host}:${port}"'/swarm/enroll/approve",
+    data=json.dumps({"pin": "'"$pin"'", "placement": "'"$placement"'"}).encode("utf-8"),
+    headers={"Content-Type": "application/json"}
+)
+try:
+    with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
+        res = json.load(resp)
+        print(f"Approval successful: {res}")
+except Exception as e:
+    sys.stderr.write(f"Approval failed: {e}\n")
+    sys.exit(1)
+'
+
+  echo -e "${C_GREEN}${C_BOLD}[✓] Strand '${strand_id}' successfully enrolled in the swarm!${C_RESET}\n"
+}
+
+cmd_join() {
+  local endpoint=""
+  local token=""
+  local node_id=""
+  local role="strand"
+  local width=""
+  local height=""
+  local scale=""
+
+  if [ $# -lt 2 ]; then
+    cat << JOIN_HELP
+${C_BOLD}Usage:${C_RESET} knot-installer join <anchor_endpoint> <token> [OPTIONS]
+
+Enroll this device into a Knot Mesh swarm.
+
+${C_BOLD}Arguments:${C_RESET}
+    <anchor_endpoint>    Anchor IP or hostname[:port] (e.g. 192.168.1.50:4242)
+    <token>              Pairing token in format <PIN>.<FINGERPRINT>
+
+${C_BOLD}Options:${C_RESET}
+    --id <id>            Custom node ID (defaults to local hostname)
+    --role <role>        Node role: strand or headless (default: strand)
+    --width <pixels>     Override screen width
+    --height <pixels>    Override screen height
+    --scale <factor>     Override display scale factor (e.g. 1.25)
+JOIN_HELP
+    exit 1
+  fi
+
+  endpoint="$1"
+  token="$2"
+  shift 2
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --id)
+        node_id="$2"
+        shift 2
+        ;;
+      --role)
+        role="$2"
+        shift 2
+        ;;
+      --width)
+        width="$2"
+        shift 2
+        ;;
+      --height)
+        height="$2"
+        shift 2
+        ;;
+      --scale)
+        scale="$2"
+        shift 2
+        ;;
+      *)
+        echo -e "${C_RED}Error:${C_RESET} Unknown option '$1'" >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  echo -e "\n${C_CYAN}[•] Enrolling node into Knot Mesh at ${endpoint}...${C_RESET}"
+  local enroll_py="$KNOT_ROOT/core/installer/enroll.py"
+
+  local cmd=(python3 "$enroll_py" --anchor "$endpoint" --token "$token" --role "$role")
+  if [ -n "$node_id" ]; then cmd+=(--id "$node_id"); fi
+  if [ -n "$width" ]; then cmd+=(--width "$width"); fi
+  if [ -n "$height" ]; then cmd+=(--height "$height"); fi
+  if [ -n "$scale" ]; then cmd+=(--scale "$scale"); fi
+
+  "${cmd[@]}"
+
+  # Post-enrollment setup
+  echo -e "${C_CYAN}[•] Finalizing local service configurations...${C_RESET}"
+  if command -v systemctl >/dev/null; then
+    if systemctl --user is-active --quiet knot-deskflow.service; then
+      systemctl --user restart knot-deskflow.service
+    fi
+    if systemctl --user is-active --quiet knot-guard.service; then
+      systemctl --user restart knot-guard.service
+    fi
+  fi
+
+  echo -e "${C_GREEN}${C_BOLD}[✓] Onboarding complete! This device is now an active Strand in the mesh.${C_RESET}\n"
+}
+
+cmd_doctor() {
+  echo -e "\n${C_CYAN}[•] Running Knot Mesh diagnostics...${C_RESET}\n"
+  if [ -f "$KNOT_ROOT/core/modules/doctor.sh" ]; then
+    bash "$KNOT_ROOT/core/modules/doctor.sh" "$@"
+  else
+    echo -e "${C_YELLOW}[!] Doctor module not found at core/modules/doctor.sh${C_RESET}"
+    exit 1
+  fi
+}
+
+cmd_uninstall() {
+  local auto_yes=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -y|--yes)
+        auto_yes=1
+        shift
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  if [ "$auto_yes" -eq 0 ]; then
+    echo -e "${C_YELLOW}${C_BOLD}WARNING: This will stop Knot Mesh services and remove runtime state.${C_RESET}"
+    read -r -p "Are you sure you want to proceed? [y/N] " confirm
+    if [[ ! "${confirm,,}" =~ ^y ]]; then
+      echo "Aborted."
+      exit 0
+    fi
+  fi
+
+  echo -e "${C_CYAN}[•] Stopping Knot Mesh user services...${C_RESET}"
+  if command -v systemctl >/dev/null; then
+    for unit in knot-deskflow knot-guard knot-hub knot-agent knot-autounlock; do
+      if systemctl --user is-active --quiet "${unit}.service"; then
+        systemctl --user stop "${unit}.service"
+        echo -e "    Stopped ${unit}.service"
+      fi
+      if systemctl --user is-enabled --quiet "${unit}.service"; then
+        systemctl --user disable "${unit}.service"
+        echo -e "    Disabled ${unit}.service"
+      fi
+    done
+  fi
+
+  echo -e "${C_CYAN}[•] Cleaning runtime state...${C_RESET}"
+  rm -rf /run/knot
+
+  echo -e "${C_GREEN}[✓] Knot Mesh uninstalled cleanly from this node.${C_RESET}\n"
+}
+
+main() {
+  if [ $# -eq 0 ]; then
+    usage
+    exit 0
+  fi
+
+  case "$1" in
+    init)
+      shift
+      cmd_init "$@"
+      ;;
+    invite)
+      shift
+      cmd_invite "$@"
+      ;;
+    join)
+      shift
+      cmd_join "$@"
+      ;;
+    doctor)
+      shift
+      cmd_doctor "$@"
+      ;;
+    uninstall)
+      shift
+      cmd_uninstall "$@"
+      ;;
+    -v|--version|version)
+      echo "knot-mesh version 1.0.0-rc1"
+      ;;
+    -h|--help|help)
+      usage
+      ;;
+    *)
+      echo -e "${C_RED}Error:${C_RESET} Unknown command '$1'" >&2
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
