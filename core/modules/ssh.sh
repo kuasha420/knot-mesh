@@ -173,9 +173,18 @@ ssh_sync_client_config() {
     done
   fi
 
-  # 2. Contextual default aliases from base registry ($KNOT_ROOT/registry/nodes/)
-  if [ -d "$KNOT_ROOT/registry/nodes" ]; then
-    for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
+  # 2. Contextual aliases dynamically generated for the active swarm
+  local active_swarm=""
+  active_swarm="$(knot_get_active_swarm)"
+  local active_nodes_dir=""
+  if [ -n "$active_swarm" ] && [ "$active_swarm" != "none" ] && [ -d "$home/.config/knot/swarms/${active_swarm}/nodes" ]; then
+    active_nodes_dir="$home/.config/knot/swarms/${active_swarm}/nodes"
+  elif [ -d "$KNOT_ROOT/registry/nodes" ]; then
+    active_nodes_dir="$KNOT_ROOT/registry/nodes"
+  fi
+
+  if [ -n "$active_nodes_dir" ] && [ -d "$active_nodes_dir" ]; then
+    for manifest in "$active_nodes_dir/"*.json; do
       [ -e "$manifest" ] || continue
       local node_id remote_user hostname_val port
       node_id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
@@ -191,7 +200,11 @@ ssh_sync_client_config() {
         fi
         knot_config+="    User $remote_user"$'\n'
         knot_config+="    Port $port"$'\n'
-        knot_config+="    ProxyCommand $knot_cli $node_id $port --proxy"$'\n'
+        if [ -n "$active_swarm" ] && [ "$active_swarm" != "none" ]; then
+          knot_config+="    ProxyCommand $knot_cli ${node_id}.${active_swarm} $port --proxy"$'\n'
+        else
+          knot_config+="    ProxyCommand $knot_cli $node_id $port --proxy"$'\n'
+        fi
         knot_config+="    IdentityFile ~/.ssh/id_ed25519"$'\n'
         knot_config+="    IdentitiesOnly yes"$'\n'
         knot_config+="    StrictHostKeyChecking accept-new"$'\n'
