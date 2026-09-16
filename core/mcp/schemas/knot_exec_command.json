@@ -1,0 +1,27 @@
+{
+  "name": "knot_exec_command",
+  "description": "Execute shell commands directly across the Knot Swarm mesh (desktop, laptop, steamdeck, or --all) via fast SSH transport with zero LLM token consumption on the target node. Ideal for remote environment inspection, hardware queries, file checks, service status, and benchmark execution.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "target": {
+        "type": "string",
+        "description": "Target mesh node ('desktop', 'laptop', 'steamdeck', or '--all').",
+        "default": "desktop"
+      },
+      "command": {
+        "type": "string",
+        "description": "The bash shell command to execute on the target node."
+      },
+      "timeout": {
+        "type": "integer",
+        "description": "Command execution timeout in seconds (default: 30).",
+        "default": 30
+      }
+    },
+    "required": [
+      "target",
+      "command"
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+[Unit]
+Description=Knot Swarm Blackboard Hub Daemon
+After=network.target default.target
+
+[Service]
+Type=simple
+ExecStart=%h/Dev/knot/core/hub/hub.py
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

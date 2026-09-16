@@ -1,0 +1,1 @@
+{"name":"knot_chat_list_conversations","description":"List Swarm Konversations channels/conversations, optionally filtered by native project ID.","parameters":{"properties":{"project_id":{"description":"Optional project UUID or name to filter channels.","type":"string"}},"type":"object"}}

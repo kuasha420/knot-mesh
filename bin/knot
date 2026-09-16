@@ -1,0 +1,748 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Knot - Multi-Device Mesh Orchestrator CLI
+
+KNOT_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+source "$KNOT_ROOT/core/lib.sh"
+source "$KNOT_ROOT/core/gitops.sh"
+source "$KNOT_ROOT/core/modules/ssh.sh"
+source "$KNOT_ROOT/core/modules/firewall.sh"
+source "$KNOT_ROOT/core/modules/sudo.sh"
+source "$KNOT_ROOT/core/modules/guard.sh"
+source "$KNOT_ROOT/core/modules/mdns.sh"
+source "$KNOT_ROOT/core/modules/deskflow.sh"
+source "$KNOT_ROOT/core/modules/autounlock.sh"
+source "$KNOT_ROOT/core/modules/autologin.sh"
+source "$KNOT_ROOT/core/modules/kdeconnect.sh"
+source "$KNOT_ROOT/core/modules/doctor.sh"
+source "$KNOT_ROOT/core/modules/antigravity.sh"
+source "$KNOT_ROOT/core/modules/hub.sh"
+source "$KNOT_ROOT/core/modules/memory.sh"
+source "$KNOT_ROOT/core/modules/shutdown.sh"
+
+cmd_onboard() {
+  local node_id="${1:-}"
+  if [ -z "$node_id" ]; then
+    local default_host
+    default_host="$(knot_detect_hostname)"
+    node_id="$default_host"
+  fi
+
+  knot_log_info "Onboarding node '$node_id' into Knot mesh..."
+
+  ssh_ensure_local_key
+  firewall_configure
+  sudo_configure
+  ssh_harden_server
+  guard_configure
+  mdns_configure
+  autologin_ensure_dm
+  antigravity_onboard
+
+  local user
+  user="$(knot_detect_user)"
+  local host
+  host="$(knot_detect_hostname)"
+  local home
+  home="$(knot_detect_user_home)"
+  local pubkey
+  pubkey="$(cat "$home/.ssh/id_ed25519.pub" | tr -d '\n')"
+  local subnet
+  subnet="$(knot_detect_subnet)"
+  local gw_mac
+  local ssh_port
+  ssh_port="$(knot_detect_sshd_port)"
+  local ip_hint=""
+  local ip_out
+  if ip_out="$(ip -4 -o addr show)"; then
+    ip_hint="$(echo "$ip_out" | grep -v ' 127\.' | grep -v 'docker' | grep -v 'virbr' | grep -v 'waydroid' | awk '{print $4}' | cut -d/ -f1 | head -n1)"
+  fi
+
+  mkdir -p "$KNOT_ROOT/registry/nodes"
+  local manifest="$KNOT_ROOT/registry/nodes/${node_id}.json"
+
+  local iface_json=""
+  local first=1
+  while IFS='|' read -r iface type mac ip; do
+    [ -n "$iface" ] || continue
+    if [ $first -eq 0 ]; then iface_json+=", "; fi
+    iface_json+="\"$iface\": {\"type\": \"$type\", \"mac\": \"$mac\", \"ip\": \"$ip\"}"
+    first=0
+  done < <(knot_detect_network_interfaces)
+
+  cat << JSON_EOF > "$manifest"
+{
+  "id": "$node_id",
+  "hostname": "$host",
+  "user": "$user",
+  "port": $ssh_port,
+  "mdns": "${host}.local",
+  "ip_hint": "$ip_hint",
+  "subnet": "$subnet",
+  "gateway_mac": "$gw_mac",
+  "interfaces": { $iface_json },
+  "pubkey": "$pubkey"
+}
+JSON_EOF
+
+  knot_log_ok "Node manifest registered at registry/nodes/${node_id}.json"
+
+  gitops_commit "node" "onboard" "enroll $node_id into knot mesh" "registry/nodes/${node_id}.json"
+
+  cmd_sync
+
+  knot_log_ok "Node '$node_id' successfully onboarded into Knot!"
+}
+
+cmd_sync() {
+  knot_log_info "Synchronizing Knot mesh across local system..."
+  ssh_sync_authorized_keys
+  ssh_sync_client_config
+  deskflow_configure
+  kdeconnect_sync_mesh
+  knot_log_ok "Knot mesh synchronization complete."
+}
+
+cmd_resolve() {
+  exec "$KNOT_ROOT/core/resolver.sh" "$@"
+}
+
+cmd_status() {
+  echo -e "${C_BOLD}--- Knot Mesh Status ---${C_RESET}"
+  printf "%-12s %-10s %-6s %-16s %-8s %-8s %-20s\n" "NODE" "USER" "PORT" "LAST IP" "MESH" "PING" "KVM STATUS"
+  printf "%-12s %-10s %-6s %-16s %-8s %-8s %-20s\n" "----" "----" "----" "-------" "----" "----" "----------"
+
+  local my_host
+  my_host="$(knot_detect_hostname)"
+  local anchor_host="desktop"
+  for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
+    [ -e "$manifest" ] || continue
+    if grep -q '"id":[[:space:]]*"desktop"' "$manifest"; then
+      anchor_host="$(grep -o '"hostname":[[:space:]]*"[^"]*"' "$manifest" | cut -d'"' -f4)"
+    fi
+  done
+
+  local established_kvm_ips=""
+  if [ "$my_host" = "$anchor_host" ]; then
+    local ss_out
+    if ss_out="$(ss -H -tn state established sport = :24800)"; then
+      established_kvm_ips="$(echo "$ss_out" | awk '{print $4}' | cut -d: -f1)"
+    fi
+  else
+    local ssh_ss_out
+    if ssh_ss_out="$(ssh -o BatchMode=yes -o ConnectTimeout=2 desktop "ss -H -tn state established sport = :24800")"; then
+      established_kvm_ips="$(echo "$ssh_ss_out" | awk '{print $4}' | cut -d: -f1)"
+    fi
+  fi
+
+  for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
+    [ -e "$manifest" ] || continue
+    local id user ip_hint port host
+    id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+    user="$(awk -F'"' '/"user":/ {print $4}' "$manifest")"
+    host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+    ip_hint="$(awk -F'"' '/"ip_hint":/ {print $4}' "$manifest")"
+    port="$(awk -F: '/"port":/ {gsub(/[^0-9]/, "", $2); print $2}' "$manifest")"
+    if [ -z "$port" ]; then port="22"; fi
+
+    local resolved_ip=""
+    if ! resolved_ip="$("$KNOT_ROOT/core/resolver.sh" "$id" "$port")"; then
+      resolved_ip=""
+    fi
+
+    if [ -n "$resolved_ip" ]; then
+      local ping_time="ok"
+      local ping_out
+      if ping_out="$(ping -c 1 -W 1 "$resolved_ip")"; then
+        local rtt
+        rtt="$(echo "$ping_out" | awk -F'/' '/rtt/ {print $5}')"
+        if [ -n "$rtt" ]; then
+          ping_time="${rtt%.*}ms"
+        fi
+      fi
+
+      local kvm_status="${C_YELLOW}DISCONNECTED${C_RESET}"
+      if [ "$id" = "desktop" ] || [ "$host" = "$anchor_host" ]; then
+        local count=0
+        if [ -n "$established_kvm_ips" ]; then
+          count="$(echo "$established_kvm_ips" | grep -v '^$' | wc -l)"
+        fi
+        kvm_status="${C_GREEN}SERVER ($count connected)${C_RESET}"
+      else
+        if [ -n "$established_kvm_ips" ] && echo "$established_kvm_ips" | grep -q "$resolved_ip"; then
+          kvm_status="${C_GREEN}CONNECTED${C_RESET}"
+        else
+          kvm_status="${C_YELLOW}DISCONNECTED${C_RESET}"
+        fi
+      fi
+
+      printf "%-12s %-10s %-6s %-16s ${C_GREEN}%-8s${C_RESET} %-8s %-20b\n" "$id" "$user" "$port" "$resolved_ip" "ONLINE" "$ping_time" "$kvm_status"
+    else
+      printf "%-12s %-10s %-6s %-16s ${C_RED}%-8s${C_RESET} %-8s %-20b\n" "$id" "$user" "$port" "${ip_hint:-(unknown)}" "OFFLINE" "-" "${C_RED}OFFLINE${C_RESET}"
+    fi
+  done
+}
+
+
+cmd_exec() {
+  local target="${1:-}"
+  [ $# -gt 0 ] && shift
+  local cmd="$*"
+
+  if [ -z "$target" ] || [ -z "$cmd" ]; then
+    knot_log_err "Usage: knot exec <node_id|--all> <command>"
+    exit 1
+  fi
+
+  if [ "$target" = "--all" ]; then
+    for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
+      [ -e "$manifest" ] || continue
+      local id
+      id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+      echo -e "\n${C_CYAN}=== [$id] ===${C_RESET}"
+      ssh -o BatchMode=yes -o ConnectTimeout=3 "$id" "$cmd" || knot_log_warn "Command failed on $id"
+    done
+  else
+    ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$cmd"
+  fi
+}
+
+cmd_kvm() {
+  local action="${1:-status}"
+  [ $# -gt 0 ] && shift
+
+  case "$action" in
+    restart)
+      knot_log_info "Restarting Deskflow KVM across the Knot mesh..."
+      local my_host
+      my_host="$(knot_detect_hostname)"
+      local anchor_host="desktop"
+      for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
+        [ -e "$manifest" ] || continue
+        if grep -q '"id":[[:space:]]*"desktop"' "$manifest"; then
+          anchor_host="$(grep -o '"hostname":[[:space:]]*"[^"]*"' "$manifest" | cut -d'"' -f4)"
+        fi
+      done
+
+      # 1. Restart Server first
+      if [ "$my_host" = "$anchor_host" ]; then
+        knot_log_info "Restarting KVM Server locally on Anchor ($anchor_host)..."
+        systemctl --user restart knot-deskflow
+      else
+        knot_log_info "Restarting KVM Server remotely on Anchor ($anchor_host)..."
+        ssh -o BatchMode=yes -o ConnectTimeout=5 desktop "systemctl --user restart knot-deskflow"
+      fi
+
+      sleep 1.5
+
+      # 2. Restart Client Strands
+      for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
+        [ -e "$manifest" ] || continue
+        local id host
+        id="$(grep -o '"id":[[:space:]]*"[^"]*"' "$manifest" | cut -d'"' -f4)"
+        host="$(grep -o '"hostname":[[:space:]]*"[^"]*"' "$manifest" | cut -d'"' -f4)"
+        if [ "$id" != "desktop" ] && [ "$host" != "$anchor_host" ]; then
+          knot_log_info "Restarting KVM Client on $id ($host)..."
+          if [ "$my_host" = "$host" ]; then
+            systemctl --user restart knot-deskflow
+          else
+            ssh -o BatchMode=yes -o ConnectTimeout=5 "$id" "systemctl --user restart knot-deskflow" || knot_log_warn "Failed to restart KVM on $id"
+          fi
+        fi
+      done
+
+      sleep 1
+      knot_log_ok "Deskflow KVM successfully restarted across the mesh."
+      ;;
+    lock)
+      source "$KNOT_ROOT/core/modules/deskflow.sh"
+      deskflow_set_lock "locked"
+      ;;
+    unlock)
+      source "$KNOT_ROOT/core/modules/deskflow.sh"
+      deskflow_set_lock "unlocked"
+      ;;
+    lock-toggle|toggle-lock)
+      source "$KNOT_ROOT/core/modules/deskflow.sh"
+      deskflow_set_lock "toggle"
+      ;;
+    status)
+      source "$KNOT_ROOT/core/modules/deskflow.sh"
+      local lock_status
+      lock_status="$(deskflow_get_lock)"
+      if [ "$lock_status" = "locked" ]; then
+        knot_log_warn "KVM Cursor Lock: LOCKED (host confined to desktop)"
+      else
+        knot_log_ok "KVM Cursor Lock: UNLOCKED (multi-screen crossover active)"
+      fi
+
+      local my_host
+      my_host="$(knot_detect_hostname)"
+      local established=""
+      if [ "$my_host" = "$anchor_host" ]; then
+        local ss_out
+        if ss_out="$(ss -H -tn state established sport = :24800)"; then
+          established="$(echo "$ss_out" | awk '{print $4}' | cut -d: -f1)"
+        fi
+      else
+        local ssh_ss_out
+        if ssh_ss_out="$(ssh -o BatchMode=yes -o ConnectTimeout=2 desktop "ss -H -tn state established sport = :24800")"; then
+          established="$(echo "$ssh_ss_out" | awk '{print $4}' | cut -d: -f1)"
+        fi
+      fi
+      local count=0
+      if [ -n "$established" ]; then
+        count="$(echo "$established" | grep -v '^$' | wc -l)"
+      fi
+      knot_log_info "Established KVM Sockets on Anchor: $count client(s) connected"
+      for ip in $established; do
+        echo -e "  -> $ip connected"
+      done
+
+      knot_log_info "Deskflow KVM service status across the mesh:"
+      cmd_exec --all "systemctl --user show knot-deskflow -p ActiveState,SubState --value | tr '\n' ' '; echo"
+      knot_log_info "KVM Auto-Unlock daemon status across the mesh:"
+      cmd_exec --all "systemctl --user show knot-autounlock -p ActiveState,SubState --value | tr '\n' ' '; echo"
+      ;;
+    *)
+      echo "Usage: knot kvm <restart|status|lock|unlock|lock-toggle>"
+      ;;
+  esac
+}
+
+cmd_doctor() {
+  doctor_diagnose "$@"
+}
+
+cmd_repair() {
+  doctor_repair "$@"
+}
+
+cmd_swarm() {
+  local action="${1:-status}"
+  if [ $# -gt 0 ]; then shift; fi
+
+  case "$action" in
+    status)
+      antigravity_swarm_status
+      ;;
+    quota)
+      antigravity_swarm_quota "$@"
+      ;;
+    test)
+      antigravity_swarm_test "$@"
+      ;;
+    exec)
+      if [ $# -lt 2 ]; then
+        knot_log_err "Usage: knot swarm exec <node> \"<prompt>\" [extra_flags]"
+        exit 1
+      fi
+      local target="$1"
+      local prompt="$2"
+      shift 2
+      antigravity_exec_node "$target" "$prompt" "$@"
+      ;;
+    auth)
+      antigravity_swarm_auth "$@"
+      ;;
+    *)
+      echo "Usage: knot swarm <status|quota [node|--all]|auth [node|--gui]|test [node|--all]|exec <node> \"<prompt>\">"
+      exit 1
+      ;;
+  esac
+}
+
+
+cmd_kdeconnect() {
+  local action="${1:-status}"
+  [ $# -gt 0 ] && shift
+
+  case "$action" in
+    sync)
+      if [ "${1:-}" = "--all" ]; then
+        knot_log_info "Synchronizing KDE Connect & enforcing clipboard sharing across the entire mesh..."
+        cmd_exec --all "knot kdeconnect sync"
+      else
+        kdeconnect_sync_mesh
+      fi
+      ;;
+    status)
+      knot_log_info "KDE Connect status across the mesh:"
+      cmd_exec --all "kdeconnect-cli -a"
+      ;;
+    *)
+      echo "Usage: knot kdeconnect <status|sync [--all]>"
+      ;;
+  esac
+}
+
+cmd_autologin() {
+  local action="${1:-check}"
+  [ $# -gt 0 ] && shift
+
+  case "$action" in
+    check)
+      autologin_execute_local
+      ;;
+    local)
+      autologin_execute_local
+      ;;
+    status)
+      local state
+      state="$(autologin_anchor_status)"
+      if [ "$state" = "UNLOCKED" ]; then
+        knot_log_ok "Anchor desktop state: UNLOCKED (ready for Strand login)"
+      elif [ "$state" = "LOCKED" ]; then
+        knot_log_warn "Anchor desktop state: LOCKED (Strand login gated)"
+      else
+        knot_log_err "Anchor desktop state: OFFLINE"
+      fi
+      ;;
+    reconcile)
+      autologin_reconcile_all
+      ;;
+    migrate-dm|ensure-dm)
+      autologin_ensure_dm
+      ;;
+    fix-kwallet|kwallet)
+      autologin_fix_kwallet "$@"
+      ;;
+    *)
+      autologin_trigger_remote "$action"
+      ;;
+  esac
+}
+
+cmd_screen() {
+  local action="${1:-status}"
+  [ $# -gt 0 ] && shift
+
+  case "$action" in
+    status)
+      screen_status "$@"
+      ;;
+    status-raw)
+      screen_status_raw
+      ;;
+    unlock)
+      screen_unlock "$@"
+      ;;
+    lock)
+      screen_lock "$@"
+      ;;
+    login)
+      screen_login "$@"
+      ;;
+    *)
+      echo "Usage: knot screen <status|unlock|lock|login> [node|--all]"
+      ;;
+  esac
+}
+
+cmd_shutdown() {
+  local target="local"
+  local action="poweroff"
+  local delay="now"
+  local wall_msg="Graceful shutdown scheduled via Knot Swarm"
+  local force=0
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -h|--help)
+        echo -e "${C_BOLD}knot shutdown - Graceful Swarm-wide Shutdown & Reboot${C_RESET}"
+        echo "Usage:"
+        echo "  knot shutdown [target] [options]"
+        echo ""
+        echo "Targets:"
+        echo "  local, desktop, laptop, steamdeck, or --all (default: local)"
+        echo ""
+        echo "Options:"
+        echo "  -d, --delay <time>   Delay before shutdown (e.g. '5m', '10', '60s', 'now'; default: now)"
+        echo "  -r, --reboot         Reboot instead of power off"
+        echo "  -c, --cancel         Cancel scheduled shutdown on target(s)"
+        echo "  -s, --show, status   Show scheduled shutdown status"
+        echo "  -m, --msg <text>     Custom wall message broadcast to users"
+        echo "  -f, --force, -y      Skip interactive confirmation prompt"
+        echo ""
+        echo "Examples:"
+        echo "  knot shutdown laptop --delay 5m    Schedule laptop shutdown in 5 minutes"
+        echo "  knot shutdown --all --reboot       Reboot all mesh nodes gracefully"
+        echo "  knot shutdown --all --cancel       Cancel scheduled shutdowns across swarm"
+        echo "  knot shutdown --all status         Inspect pending shutdowns across swarm"
+        return 0
+        ;;
+      -r|--reboot)
+        action="reboot"
+        shift
+        ;;
+      -c|--cancel)
+        action="cancel"
+        shift
+        ;;
+      -s|--show|status)
+        action="show"
+        shift
+        ;;
+      -d|--delay)
+        delay="$2"
+        shift 2
+        ;;
+      -m|--msg)
+        wall_msg="$2"
+        shift 2
+        ;;
+      --action)
+        action="$2"
+        shift 2
+        ;;
+      -f|--force|-y|--yes)
+        force=1
+        shift
+        ;;
+      --all)
+        target="--all"
+        shift
+        ;;
+      local|desktop|laptop|steamdeck)
+        target="$1"
+        shift
+        ;;
+      *)
+        if [[ "$1" =~ ^- ]]; then
+          knot_log_err "Unknown shutdown option: $1"
+          return 1
+        else
+          target="$1"
+          shift
+        fi
+        ;;
+    esac
+  done
+
+  # If action is poweroff or reboot, and not forced, ask confirmation
+  if [ "$action" != "cancel" ] && [ "$action" != "show" ] && [ $force -eq 0 ]; then
+    echo -e "${C_YELLOW}${C_BOLD}[!] CONFIRMATION REQUIRED:${C_RESET}"
+    echo -e "    Action: ${C_RED}${action^^}${C_RESET}"
+    echo -e "    Target: ${C_BOLD}${target}${C_RESET}"
+    echo -e "    Delay:  ${C_BOLD}${delay}${C_RESET}"
+    read -r -p "    Are you sure you want to proceed? [y/N] " confirm
+    if [[ ! "$confirm" =~ ^[yY]([eE][sS])?$ ]]; then
+      knot_log_info "Operation cancelled by user."
+      return 0
+    fi
+  fi
+
+  if [ "$target" = "--all" ]; then
+    shutdown_exec_all "$action" "$delay" "$wall_msg"
+  elif [ "$target" = "local" ]; then
+    shutdown_exec_local "$action" "$delay" "$wall_msg"
+  else
+    shutdown_exec_remote "$target" "$action" "$delay" "$wall_msg"
+  fi
+}
+
+cmd_mcp() {
+  local action="${1:-status}"
+  [ $# -gt 0 ] && shift
+
+  case "$action" in
+    sync)
+      local target="${1:-local}"
+      if [ "$target" = "--all" ] || [ "$target" = "all" ]; then
+        knot_log_info "Synchronizing Knot MCP suite across all mesh nodes..."
+        python3 "$KNOT_ROOT/core/mcp/sync.py"
+        for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
+          [ -e "$manifest" ] || continue
+          local id host
+          id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+          host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+          if [ "$host" != "$(knot_detect_hostname)" ] && [ "$id" != "desktop" ]; then
+            knot_log_info "Synchronizing MCP on remote node: $id ($host)..."
+            knot exec "$id" "python3 $KNOT_ROOT/core/mcp/sync.py" || knot_log_warn "Failed to sync MCP on $id"
+          fi
+        done
+        knot_log_ok "Mesh-wide MCP synchronization complete."
+      elif [ "$target" = "local" ] || [ "$target" = "$(knot_detect_hostname)" ]; then
+        python3 "$KNOT_ROOT/core/mcp/sync.py"
+      else
+        knot_log_info "Synchronizing MCP on $target..."
+        knot exec "$target" "python3 $KNOT_ROOT/core/mcp/sync.py"
+      fi
+      ;;
+    test)
+      python3 "$KNOT_ROOT/core/mcp/gateway.py" --test
+      ;;
+    list|status)
+      echo -e "${C_BOLD}--- Knot MCP Gateway Tools ---${C_RESET}"
+      python3 -c "
+import sys; sys.path.insert(0, '$KNOT_ROOT')
+from core.mcp.gateway import KnotMCPGateway, KnotHubClient
+gw = KnotMCPGateway(KnotHubClient())
+tools = gw._handle_tools_list({})['tools']
+for i, t in enumerate(tools, 1):
+    print(f'  {i:2d}. {t[\"name\"]:24s} - {t[\"description\"]}')
+"
+      ;;
+    *)
+      knot_log_err "Usage: knot mcp [sync [--all]|test|list]"
+      exit 1
+      ;;
+  esac
+}
+
+case "${1:-}" in
+  mcp)
+    shift
+    cmd_mcp "$@"
+    ;;
+  onboard)
+    shift
+    cmd_onboard "$@"
+    ;;
+  sync)
+    cmd_sync
+    ;;
+  resolve)
+    shift
+    cmd_resolve "$@"
+    ;;
+  status)
+    cmd_status
+    ;;
+  exec)
+    shift
+    cmd_exec "$@"
+    ;;
+  kvm)
+    shift
+    cmd_kvm "$@"
+    ;;
+  screen)
+    shift
+    cmd_screen "$@"
+    ;;
+  unlock)
+    shift
+    screen_unlock "$@"
+    ;;
+  lock)
+    shift
+    screen_lock "$@"
+    ;;
+  login)
+    shift
+    screen_login "$@"
+    ;;
+  autologin)
+    shift
+    cmd_autologin "$@"
+    ;;
+  kdeconnect)
+    shift
+    cmd_kdeconnect "$@"
+    ;;
+  swarm)
+    shift
+    cmd_swarm "$@"
+    ;;
+  quota)
+    shift
+    cmd_swarm quota "$@"
+    ;;
+  auth)
+    shift
+    cmd_swarm auth "$@"
+    ;;
+  hub)
+    shift
+    cmd_hub "$@"
+    ;;
+  agent)
+    shift
+    cmd_agent "$@"
+    ;;
+  task)
+    shift
+    cmd_task "$@"
+    ;;
+  project)
+    shift
+    cmd_project "$@"
+    ;;
+  chat)
+    shift
+    cmd_chat "$@"
+    ;;
+  artifact)
+    shift
+    cmd_artifact "$@"
+    ;;
+  sleep|power)
+    shift
+    cmd_sleep "$@"
+    ;;
+  kafe|cockpit|web)
+    shift
+    cmd_web "$@"
+    ;;
+  memory)
+    shift
+    cmd_memory "$@"
+    ;;
+  doctor)
+    shift
+    cmd_doctor "$@"
+    ;;
+  repair)
+    shift
+    cmd_repair "$@"
+    ;;
+  restart)
+    shift
+    if [ "${1:-}" = "kvm" ] || [ -z "${1:-}" ]; then
+      cmd_kvm restart
+    else
+      knot_log_err "Unknown restart target: $1"
+      exit 1
+    fi
+    ;;
+  shutdown)
+    shift
+    cmd_shutdown "$@"
+    ;;
+  reboot)
+    shift
+    cmd_shutdown --reboot "$@"
+    ;;
+  *)
+    echo -e "${C_BOLD}Knot - Multi-Device Mesh Orchestrator${C_RESET}"
+    echo "Usage:"
+    echo "  knot onboard [node_id]        Enroll current device into the mesh"
+    echo "  knot sync                     Reconcile keys, configs, and layout"
+    echo "  knot resolve <node_id> [port] Resolve active IP across 3 tiers"
+    echo "  knot status                   Show live status of all mesh nodes"
+    echo "  knot swarm [status|quota|test|exec|auth] Manage Antigravity AI agents across the mesh"
+    echo "  knot quota [node|--all]       Show real-time 5h & weekly model quota limits"
+    echo "  knot auth [node] [--gui]      Log in / re-authenticate Antigravity CLI on a node"
+    echo "  knot memory [store|recall|map|promote|relate|test] Manage Cognitive Memory Palace"
+    echo "  knot hub <start|stop|restart|status|logs> Manage Blackboard Hub daemon"
+    echo "  knot agent <start|stop|restart|status|logs> Manage Worker Agent daemon"
+    echo "  knot task <post|list|batch|get|wait|watch> Manage Linda Tuplespace tasks"
+    echo "  knot project <list|get|sync>  Manage native Antigravity multi-folder projects"
+    echo "  knot chat <channels|create|post|read> Manage Swarm Konversations channels"
+    echo "  knot sleep <status|prevent|allow> Enforce wholesale prevent-sleep on AC power"
+    echo "  knot kafe [open|dev|build]    Boot / open Knot Kommand Kafe cockpit"
+    echo "  knot web [dev|build|install]  Manage React & @assistant-ui Web Cockpit"
+    echo "  knot doctor [node|--all]      Diagnose mesh, KVM, and portal health"
+    echo "  knot repair [node|--all]      Auto-repair KVM dropout and mesh state"
+    echo "  knot shutdown [target] [opt]  Graceful swarm-wide shutdown or reboot (--all, -d, -r, -c)"
+    echo "  knot reboot [target] [opt]    Graceful swarm-wide reboot alias"
+    echo "  knot exec <target|--all> <cmd> Run commands across mesh nodes"
+    echo "  knot kvm <restart|status>     Manage software KVM across the mesh"
+    echo "  knot screen <status|unlock|lock|login> Manage screen lock/login states"
+    echo "  knot autologin [check|status|reconcile|migrate-dm] Manage auto-login"
+    echo "  knot kdeconnect <status|sync [--all]> Manage KDE Connect status, sync & clipboard"
+    exit 0
+    ;;
+esac
