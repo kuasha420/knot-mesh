@@ -28,8 +28,28 @@ doctor_check_local() {
   my_user="$(knot_detect_user)"
   local is_anchor=0
 
-  if [ -f "$KNOT_ROOT/registry/nodes/desktop.json" ] && grep -q "$my_host" "$KNOT_ROOT/registry/nodes/desktop.json"; then
+  local active_swarm
+  active_swarm="$(knot_get_active_swarm)"
+  local anchor_id="desktop"
+  local anchor_host="desktop"
+  if knot_load_swarm_profile "$active_swarm"; then
+    anchor_id="${ANCHOR_ID:-desktop}"
+    anchor_host="${ANCHOR_HOST:-desktop}"
+  fi
+
+  if [ "$my_host" = "$anchor_host" ] || [ "$my_host" = "$anchor_id" ]; then
     is_anchor=1
+  else
+    local nodes_dir
+    if nodes_dir="$(knot_get_nodes_dir)"; then
+      if [ -r "$nodes_dir/${anchor_id}.json" ]; then
+        local m_host
+        m_host="$(awk -F'"' '/"hostname":/ {print $4}' "$nodes_dir/${anchor_id}.json")"
+        if [ "$m_host" = "$my_host" ] || grep -q "\"$my_host\"" "$nodes_dir/${anchor_id}.json"; then
+          is_anchor=1
+        fi
+      fi
+    fi
   fi
 
   echo -e "\n${C_BOLD}=== Diagnostics for Node: $my_host ($([ $is_anchor -eq 1 ] && echo "Anchor/Server" || echo "Strand/Client")) ===${C_RESET}"
@@ -44,10 +64,13 @@ doctor_check_local() {
 
   # If running in non-graphical ssh, inspect user systemd environment
   if [ -z "$wayland_disp" ] && command -v systemctl >/dev/null; then
-    wayland_disp="$(systemctl --user show-environment 2>/dev/null | awk -F= '/^WAYLAND_DISPLAY=/ {print $2}')"
-  fi
-  if [ -z "$xdg_desktop" ] && command -v systemctl >/dev/null; then
-    xdg_desktop="$(systemctl --user show-environment 2>/dev/null | awk -F= '/^XDG_CURRENT_DESKTOP=/ {print $2}')"
+    local env_out=""
+    if env_out="$(systemctl --user show-environment 2>&1)"; then
+      wayland_disp="$(echo "$env_out" | awk -F= '/^WAYLAND_DISPLAY=/ {print $2}')"
+      if [ -z "$xdg_desktop" ]; then
+        xdg_desktop="$(echo "$env_out" | awk -F= '/^XDG_CURRENT_DESKTOP=/ {print $2}')"
+      fi
+    fi
   fi
 
   if [ -n "$wayland_disp" ]; then
@@ -134,10 +157,13 @@ doctor_check_local() {
 
   # 3. KVM (Deskflow) Service & Socket State
   echo -e "\n${C_BOLD}[Deskflow KVM Service & Sockets]${C_RESET}"
-  local deskflow_state deskflow_sub deskflow_restarts
-  deskflow_state="$(systemctl --user show knot-deskflow -p ActiveState --value 2>/dev/null || echo "unknown")"
-  deskflow_sub="$(systemctl --user show knot-deskflow -p SubState --value 2>/dev/null || echo "unknown")"
-  deskflow_restarts="$(systemctl --user show knot-deskflow -p NRestarts --value 2>/dev/null || echo "0")"
+  local deskflow_state="unknown" deskflow_sub="unknown" deskflow_restarts="0"
+  local show_out=""
+  if show_out="$(systemctl --user show knot-deskflow 2>&1)"; then
+    deskflow_state="$(echo "$show_out" | awk -F= '/^ActiveState=/ {print $2}')"
+    deskflow_sub="$(echo "$show_out" | awk -F= '/^SubState=/ {print $2}')"
+    deskflow_restarts="$(echo "$show_out" | awk -F= '/^NRestarts=/ {print $2}')"
+  fi
 
   if [ "$deskflow_state" = "active" ] && [ "$deskflow_sub" = "running" ]; then
     doc_ok "knot-deskflow.service is running ($deskflow_sub)"
@@ -151,27 +177,33 @@ doctor_check_local() {
 
   if [ $is_anchor -eq 1 ]; then
     # Anchor: check if listening on 24800 and list established clients
-    if ss -H -tl sport = :24800 2>/dev/null | grep -q 24800; then
+    local ss_tl_out=""
+    if ss_tl_out="$(ss -H -tl sport = :24800 2>&1)" && echo "$ss_tl_out" | grep -q 24800; then
       doc_ok "Deskflow server is listening on TCP port 24800"
     else
       doc_fail "Deskflow server is NOT listening on port 24800"
       failures=$((failures + 1))
     fi
 
-    local connected_clients
-    connected_clients="$(ss -H -tn state established sport = :24800 2>/dev/null | awk '{print $4}' | cut -d: -f1 || true)"
+    local connected_clients=""
+    local ss_tn_out=""
+    if ss_tn_out="$(ss -H -tn state established sport = :24800 2>&1)"; then
+      connected_clients="$(echo "$ss_tn_out" | awk '{print $4}' | cut -d: -f1)"
+    fi
     local client_count=0
     if [ -n "$connected_clients" ]; then
-      client_count="$(echo "$connected_clients" | wc -l)"
+      client_count="$(echo "$connected_clients" | grep -v '^$' | wc -l)"
     fi
     doc_ok "Active connected KVM strands: $client_count"
     for ip in $connected_clients; do
-      doc_info "  -> Established connection with client at $ip"
+      [ -n "$ip" ] && doc_info "  -> Established connection with client at $ip"
     done
   else
     # Strand: check if connected to anchor:24800
-    local conn_out
-    conn_out="$(ss -H -tn state established dport = :24800 2>/dev/null || true)"
+    local conn_out=""
+    if ! conn_out="$(ss -H -tn state established dport = :24800 2>&1)"; then
+      conn_out=""
+    fi
     if [ -n "$conn_out" ]; then
       local server_ip
       server_ip="$(echo "$conn_out" | awk '{print $4}' | head -n1)"
