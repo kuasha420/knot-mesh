@@ -369,6 +369,30 @@ def capture_node_screen(node_id: str, force: bool = False, quality: str = "low")
     finally:
         lock.release()
 
+def install_authorized_key(pubkey: str):
+    if not pubkey or not pubkey.strip():
+        return
+    user_home = os.path.expanduser("~")
+    ssh_dir = os.path.join(user_home, ".ssh")
+    os.makedirs(ssh_dir, mode=0o700, exist_ok=True)
+    auth_file = os.path.join(ssh_dir, "authorized_keys")
+    existing = ""
+    if os.path.exists(auth_file):
+        try:
+            with open(auth_file, "r") as f:
+                existing = f.read()
+        except Exception:
+            pass
+    if pubkey.strip() not in existing:
+        try:
+            with open(auth_file, "a") as f:
+                if existing and not existing.endswith("\n"):
+                    f.write("\n")
+                f.write(f"{pubkey.strip()}\n")
+            os.chmod(auth_file, 0o600)
+        except Exception as e:
+            sys.stderr.write(f"Failed to append to authorized_keys: {e}\n")
+
 
 class EnrollmentCoordinator:
     """Manages ephemeral cryptographic 6-digit OTP pairing and synchronous CLI rendezvous."""
@@ -2630,10 +2654,20 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
 
+            anchor_pubkey = ""
+            pub_path = os.path.join(user_home, ".ssh/id_ed25519.pub")
+            if os.path.exists(pub_path):
+                try:
+                    with open(pub_path, "r") as pf:
+                        anchor_pubkey = pf.read().strip()
+                except Exception:
+                    pass
+
             anchor_meta = {
                 "swarm_id": active_swarm,
                 "anchor_id": anchor_id,
                 "anchor_hostname": socket.gethostname(),
+                "anchor_pubkey": anchor_pubkey,
                 "hub_port": DEFAULT_PORT,
             }
 
@@ -2660,6 +2694,10 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                             json.dump(manifest_data, mf, indent=2)
                     except Exception as me:
                         sys.stderr.write(f"[knot-hub] Error writing strand manifest: {me}\n")
+
+                    strand_pubkey = manifest_data.get("pubkey", "").strip()
+                    if strand_pubkey:
+                        install_authorized_key(strand_pubkey)
 
                     # Dynamic Topology & Deskflow Recompilation
                     if placement in ("left", "right", "above", "below", "up", "down") and os.path.exists(topo_path):

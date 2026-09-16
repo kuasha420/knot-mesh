@@ -272,6 +272,58 @@ ALLOW_DESKFLOW_KVM="true"
         except Exception:
             pass
 
+    # Mutual SSH: Install Anchor public key into Strand authorized_keys
+    anchor_pubkey = enrollment_result.get("anchor_pubkey", "").strip()
+    if anchor_pubkey:
+        ssh_dir = os.path.join(user_home, ".ssh")
+        os.makedirs(ssh_dir, mode=0o700, exist_ok=True)
+        auth_file = os.path.join(ssh_dir, "authorized_keys")
+        existing_keys = ""
+        if os.path.exists(auth_file):
+            try:
+                with open(auth_file, "r") as f:
+                    existing_keys = f.read()
+            except Exception:
+                pass
+        if anchor_pubkey not in existing_keys:
+            try:
+                with open(auth_file, "a") as f:
+                    if existing_keys and not existing_keys.endswith("\n"):
+                        f.write("\n")
+                    f.write(f"{anchor_pubkey}\n")
+                os.chmod(auth_file, 0o600)
+                print(f"[✓] Anchor SSH public key installed to authorized_keys")
+            except Exception as se:
+                sys.stderr.write(f"Warning: could not write authorized_keys: {se}\n")
+
+        # Configure ~/.ssh/config entry for Anchor
+        ssh_cfg = os.path.join(ssh_dir, "config")
+        existing_cfg = ""
+        if os.path.exists(ssh_cfg):
+            try:
+                with open(ssh_cfg, "r") as f:
+                    existing_cfg = f.read()
+            except Exception:
+                pass
+        if f"Host {anchor_id}" not in existing_cfg:
+            try:
+                entry = f"""
+# Knot Mesh Anchor Entry
+Host {anchor_id} {enrollment_result.get("anchor_hostname", anchor_id)}
+    HostName {anchor_host}
+    User {os.environ.get("USER", "psl")}
+    Port 22
+    IdentityFile ~/.ssh/id_ed25519
+    StrictHostKeyChecking accept-new
+    ServerAliveInterval 15
+    ServerAliveCountMax 3
+"""
+                with open(ssh_cfg, "a") as f:
+                    f.write(entry)
+                os.chmod(ssh_cfg, 0o600)
+            except Exception:
+                pass
+
     print(f"[✓] Swarm profile written to {conf_path} (active swarm: {swarm_id})")
     return conf_path
 

@@ -306,7 +306,9 @@ DESKTOP_EOF
 
   # 8. Deploy Unified Dual-Role Deskflow Runner (Anchor Server / Strand Client)
   knot_log_info "Deploying Unified Dual-Role Deskflow runner..."
-  cat << 'RUNNER_EOF' | sudo tee /usr/local/bin/knot-deskflow >/dev/null
+  local user_bin="$home/.local/bin"
+  mkdir -p "$user_bin"
+  cat << 'RUNNER_EOF' > "$user_bin/knot-deskflow"
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -511,8 +513,12 @@ CONF_EOF
   exec "$DESKFLOW_BIN" client --new-instance -s "$CONF_DIR/Deskflow.conf"
 fi
 RUNNER_EOF
-  sudo chmod 755 /usr/local/bin/knot-deskflow
-  sudo ln -sf /usr/local/bin/knot-deskflow /usr/local/bin/knot-deskflow-client
+  chmod 755 "$user_bin/knot-deskflow"
+  ln -sf "$user_bin/knot-deskflow" "$user_bin/knot-deskflow-client"
+  if command -v sudo >/dev/null && sudo -n true 2>/dev/null; then
+    sudo cp -f "$user_bin/knot-deskflow" /usr/local/bin/knot-deskflow 2>/dev/null || true
+    sudo ln -sf /usr/local/bin/knot-deskflow /usr/local/bin/knot-deskflow-client 2>/dev/null || true
+  fi
 
   knot_log_info "Deploying Unified Knot Deskflow systemd service..."
   cat << SERVICE_EOF > "$systemd_dir/knot-deskflow.service"
@@ -528,7 +534,7 @@ Type=simple
 Environment=WAYLAND_DISPLAY=wayland-0
 Environment=XDG_CURRENT_DESKTOP=KDE
 Environment=XDG_DESKTOP_PORTAL_APP_ID=org.deskflow.deskflow
-ExecStart=/usr/local/bin/knot-deskflow
+ExecStart=%h/.local/bin/knot-deskflow
 Restart=on-failure
 RestartSec=10
 

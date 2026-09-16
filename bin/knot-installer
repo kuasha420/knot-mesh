@@ -533,42 +533,20 @@ JOIN_HELP
 
   # Post-enrollment setup
   echo -e "${C_CYAN}[•] Finalizing local service configurations...${C_RESET}"
+
+  # 1. Ensure OpenSSH daemon is enabled for Anchor remote execution
   if command -v systemctl >/dev/null; then
-    local s_out
-    if s_out="$(systemctl --user daemon-reload 2>&1)"; then
-      :
-    else
-      knot_log_warn "systemctl daemon-reload notice: $s_out"
-    fi
-
-    local unit_dir="$KNOT_ROOT/systemd"
-    local user_systemd_dir="${HOME}/.config/systemd/user"
-    mkdir -p "$user_systemd_dir"
-
-    for unit in knot-deskflow; do
-      if [ -f "$unit_dir/${unit}.service" ]; then
-        ln -sf "$unit_dir/${unit}.service" "$user_systemd_dir/${unit}.service"
+    if ! systemctl is-active --quiet sshd 2>/dev/null; then
+      if command -v sudo >/dev/null && sudo -n systemctl enable --now sshd 2>/dev/null; then
+        echo -e "  ${C_GREEN}[✓] OpenSSH daemon (sshd) enabled and started.${C_RESET}"
       fi
-    done
-
-    if s_out="$(systemctl --user daemon-reload 2>&1)"; then
-      :
-    else
-      knot_log_warn "systemctl daemon-reload notice: $s_out"
     fi
+  fi
 
-    for unit in knot-deskflow.service; do
-      if systemctl --user is-enabled --quiet "$unit"; then
-        systemctl --user restart "$unit"
-      else
-        local act_out
-        if act_out="$(systemctl --user enable --now "$unit" 2>&1)"; then
-          echo -e "    Enabled and started ${unit}"
-        else
-          knot_log_warn "Could not enable ${unit}: ${act_out}"
-        fi
-      fi
-    done
+  # 2. Deploy Deskflow KVM client runner and user service
+  if [ -f "$KNOT_ROOT/core/modules/deskflow.sh" ]; then
+    source "$KNOT_ROOT/core/modules/deskflow.sh"
+    deskflow_configure
   fi
 
   echo -e "${C_GREEN}${C_BOLD}[✓] Onboarding complete! This device is now an active Strand in the mesh.${C_RESET}\n"
