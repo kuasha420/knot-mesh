@@ -324,6 +324,37 @@ Host {anchor_id} {enrollment_result.get("anchor_hostname", anchor_id)}
             except Exception:
                 pass
 
+    # Fetch authoritative Deskflow TLS certificate directly from Anchor Hub
+    tls_dir = os.path.join(user_home, ".config/Deskflow/tls")
+    os.makedirs(tls_dir, mode=0o700, exist_ok=True)
+    pem_path = os.path.join(tls_dir, "deskflow.pem")
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        cert_url = f"https://{anchor_host}:{hub_port}/dist/deskflow.pem"
+        cert_req = Request(cert_url)
+        with urlopen(cert_req, context=ctx, timeout=10) as c_resp:
+            pem_content = c_resp.read()
+            with open(pem_path, "wb") as pf:
+                pf.write(pem_content)
+            os.chmod(pem_path, 0o600)
+
+            fp_out = subprocess.check_output(
+                ["openssl", "x509", "-in", pem_path, "-noout", "-fingerprint", "-sha256"],
+                text=True
+            )
+            raw_fp = fp_out.split("=")[1].strip().replace(":", "").lower()
+            with open(os.path.join(tls_dir, "trusted-servers"), "w") as ts:
+                ts.write(f"v2:sha256:{raw_fp}\n")
+            with open(os.path.join(tls_dir, "trusted-clients"), "w") as tc:
+                tc.write(f"v2:sha256:{raw_fp}\n")
+            os.chmod(os.path.join(tls_dir, "trusted-servers"), 0o600)
+            os.chmod(os.path.join(tls_dir, "trusted-clients"), 0o600)
+            print(f"[✓] Authoritative Deskflow TLS certificate synchronized from Anchor ({raw_fp[:16]}...)")
+    except Exception as ce:
+        sys.stderr.write(f"Notice: Could not sync Deskflow certificate from Anchor: {ce}\n")
+
     print(f"[✓] Swarm profile written to {conf_path} (active swarm: {swarm_id})")
     return conf_path
 

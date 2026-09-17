@@ -242,10 +242,23 @@ NOTIFY_EOF
       chmod 600 "$tls_dir/deskflow.pem"
     else
       knot_log_info "Fetching Deskflow mesh TLS certificate from Anchor..."
-      local scp_out=""
-      if ! scp_out="$(scp -o BatchMode=yes -o ConnectTimeout=3 "desktop:.config/Deskflow/tls/deskflow.pem" "$tls_dir/deskflow.pem" 2>&1)"; then
-        knot_log_warn "Anchor desktop is currently offline or unreachable: $scp_out"
-        knot_log_info "Generating initial local TLS certificate (will synchronize with Anchor when online)..."
+      local hub_addr="${ANCHOR_HOST}:${HUB_PORT:-4242}"
+      local fetched=0
+      if curl -kfsSL "https://${hub_addr}/dist/deskflow.pem" -o "$tls_dir/deskflow.pem" 2>/dev/null; then
+        fetched=1
+        knot_log_ok "Synchronized Deskflow TLS certificate from Anchor Hub."
+      elif [ -n "$KNOT_CLI" ]; then
+        local resolved_ip
+        if resolved_ip="$("$KNOT_CLI" resolve "$ANCHOR_TARGET" 4242 2>&1)"; then
+          if curl -kfsSL "https://${resolved_ip}:4242/dist/deskflow.pem" -o "$tls_dir/deskflow.pem" 2>/dev/null; then
+            fetched=1
+            knot_log_ok "Synchronized Deskflow TLS certificate from Anchor IP ($resolved_ip)."
+          fi
+        fi
+      fi
+
+      if [ $fetched -eq 0 ] && [ ! -f "$tls_dir/deskflow.pem" ]; then
+        knot_log_warn "Anchor Hub deskflow.pem not reachable, generating initial local TLS certificate..."
         openssl req -x509 -nodes -days 3650 -subj "/CN=Deskflow" -newkey rsa:2048 \
           -keyout "$tls_dir/deskflow.pem" -out "$tls_dir/deskflow.pem"
       fi

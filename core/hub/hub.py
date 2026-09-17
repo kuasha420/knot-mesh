@@ -2317,6 +2317,23 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 headers={"Content-Disposition": 'attachment; filename="knot-mesh.tar.gz"'}
             )
 
+        elif path == "/dist/deskflow.pem":
+            pem_path = os.path.expanduser("~/.config/Deskflow/tls/deskflow.pem")
+            if os.path.exists(pem_path):
+                try:
+                    with open(pem_path, "rb") as f:
+                        pem_data = f.read()
+                    self._send_bytes(
+                        pem_data,
+                        content_type="application/x-pem-file",
+                        status_code=200,
+                        headers={"Content-Disposition": 'attachment; filename="deskflow.pem"'}
+                    )
+                    return
+                except Exception as pe:
+                    sys.stderr.write(f"Error reading deskflow.pem: {pe}\n")
+            self._send_error("Deskflow certificate not found on Anchor", 404)
+
         elif path.startswith("/join/"):
             raw_token = path.replace("/join/", "", 1).strip()
             if not raw_token:
