@@ -14,12 +14,13 @@ autounlock_configure() {
   local my_host
   my_host="$(knot_detect_hostname)"
 
-  # 1. Ensure /usr/local/bin/knot-autounlock points to bin/knot-autounlock
+  # 1. Ensure ~/.local/bin/knot-autounlock points to bin/knot-autounlock
   local bin_src="$KNOT_ROOT/bin/knot-autounlock"
-  local bin_dst="/usr/local/bin/knot-autounlock"
-  if [ ! -L "$bin_dst" ] || [ "$(readlink -f "$bin_dst")" != "$(readlink -f "$bin_src")" ]; then
-    knot_log_info "Installing $bin_dst symlink..."
-    sudo ln -sf "$bin_src" "$bin_dst"
+  local user_bin="$home/.local/bin"
+  mkdir -p "$user_bin"
+  ln -sf "$bin_src" "$user_bin/knot-autounlock"
+  if command -v sudo >/dev/null && sudo -n true 2>/dev/null; then
+    sudo ln -sf "$bin_src" "/usr/local/bin/knot-autounlock" 2>/dev/null || true
   fi
 
   # 2. Deploy systemd user service
@@ -36,7 +37,7 @@ Requisite=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/knot-autounlock
+ExecStart=%h/.local/bin/knot-autounlock
 Restart=always
 RestartSec=2
 
