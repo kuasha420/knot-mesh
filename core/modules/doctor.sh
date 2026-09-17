@@ -752,7 +752,11 @@ doctor_repair_local() {
   # 9. Ensure Knot Tuplespace Agent is active
   local agent_svc="$KNOT_ROOT/systemd/knot-agent.service"
   local user_unit_dir="${HOME}/.config/systemd/user"
+  local bin_dir="${HOME}/.local/bin"
   if [ -f "$agent_svc" ] && command -v systemctl >/dev/null; then
+    mkdir -p "$bin_dir"
+    ln -sf "$KNOT_ROOT/bin/knot-agent" "$bin_dir/knot-agent"
+    chmod +x "$KNOT_ROOT/bin/knot-agent"
     mkdir -p "$user_unit_dir"
     ln -sf "$agent_svc" "$user_unit_dir/knot-agent.service"
     local r_out=""
@@ -841,7 +845,7 @@ doctor_repair() {
         anchor_healthy=0
         knot_log_info "Initiating repair on Anchor desktop ($anchor_host)..."
         local rep_out=""
-        if rep_out="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$anchor_id" "knot doctor --repair local" 2>&1)"; then
+        if rep_out="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$anchor_id" "export PATH=\"\$HOME/.local/bin:\$PATH\"; knot doctor --repair local" 2>&1)"; then
           knot_log_ok "Anchor repaired."
         else
           knot_log_warn "Failed to repair Anchor: $rep_out"
@@ -886,7 +890,7 @@ doctor_repair() {
       else
         knot_log_info "Initiating repair on Strand $id ($host)..."
         local s_rep=""
-        if s_rep="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$id" "knot doctor --repair local" 2>&1)"; then
+        if s_rep="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$id" "export PATH=\"\$HOME/.local/bin:\$PATH\"; knot doctor --repair local" 2>&1)"; then
           knot_log_ok "Strand $id repair completed."
         else
           knot_log_warn "Notice: Strand $id could not be contacted directly via SSH: $s_rep"
@@ -896,18 +900,17 @@ import urllib.request, json, ssl, sys
 ctx = ssl.create_default_context()
 ctx.check_hostname = False
 ctx.verify_mode = ssl.CERT_NONE
-payload = {
-    "title": "Self-Healing Repair Task for " + sys.argv[1],
-    "prompt": "knot doctor --repair local",
-    "target_plane": sys.argv[1]
-}
+data = json.dumps({
+    "prompt": "export PATH=\"$HOME/.local/bin:$PATH\"; knot doctor --repair local",
+    "target": "'"$id"'",
+    "priority": "system_maintenance"
+}).encode()
+req = urllib.request.Request("https://'"${anchor_host:-127.0.0.1}"':4242/tasks/post", data=data, headers={"Content-Type": "application/json"})
 try:
-    req = urllib.request.Request("https://127.0.0.1:4242/tasks/post", data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, context=ctx, timeout=3) as resp:
-        print("[✓] Tuplespace repair task queued for", sys.argv[1])
-except Exception as e:
+    urllib.request.urlopen(req, context=ctx, timeout=3)
+except Exception:
     pass
-' "$id"
+'
         fi
       fi
     done
@@ -926,7 +929,7 @@ except Exception as e:
     else
       knot_log_info "Initiating repair on target $target..."
       local t_out=""
-      if t_out="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "knot doctor --repair local" 2>&1)"; then
+      if t_out="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "export PATH=\"\$HOME/.local/bin:\$PATH\"; knot doctor --repair local" 2>&1)"; then
         knot_log_ok "Target $target repaired."
         "$KNOT_ROOT/bin/knot" exec "$target" "systemctl --user restart knot-deskflow.service"
       else

@@ -78,13 +78,20 @@ def fmt_token_expiry(expiry_iso: str) -> str:
         return str(expiry_iso)[:19]
 
 
+import os
+import ssl
+
+
 def main():
     target = sys.argv[1] if len(sys.argv) > 1 else "all"
-    hub_url = sys.argv[2] if len(sys.argv) > 2 else "http://127.0.0.1:4242"
+    hub_url = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("KNOT_HUB_URL", "https://127.0.0.1:4242")
+    if not hub_url.startswith("http://") and not hub_url.startswith("https://"):
+        hub_url = f"https://{hub_url}"
 
     try:
         req = urllib.request.Request(f"{hub_url}/nodes", headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=3.0) as resp:
+        ctx = ssl._create_unverified_context()
+        with urllib.request.urlopen(req, timeout=3.0, context=ctx) as resp:
             nodes = json.loads(resp.read().decode("utf-8"))
     except Exception as e:
         print(f"\033[31m[!] Failed to connect to Knot Hub at {hub_url}: {e}\033[0m", file=sys.stderr)

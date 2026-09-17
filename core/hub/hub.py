@@ -12,6 +12,7 @@ import io
 import json
 import mimetypes
 import os
+import logging
 import re
 import secrets
 import shutil
@@ -24,6 +25,8 @@ import tarfile
 import threading
 import time
 import uuid
+
+logger = logging.getLogger("knot-hub")
 from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -246,14 +249,50 @@ _screen_locks_mutex = threading.Lock()
 def get_node_manifest(node_id: str) -> dict:
     if not re.match(r"^[a-zA-Z0-9_-]+$", str(node_id)):
         return {}
-    path = os.path.join(REGISTRY_NODES_DIR, f"{node_id}.json")
-    if os.path.isfile(path):
+    active_swarm, _ = get_active_swarm_info()
+    paths = [
+        os.path.expanduser(f"~/.config/knot/swarms/{active_swarm}/nodes/{node_id}.json"),
+        os.path.join(REGISTRY_NODES_DIR, f"{node_id}.json"),
+    ]
+    manifest = {}
+    for path in paths:
+        if os.path.isfile(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    manifest = json.load(f)
+                    break
+            except Exception as e:
+                logger.warning("Error reading node manifest %s: %s", path, e)
+
+    # Check database nodes table if ip is missing
+    if not manifest.get("ip_hint") and not manifest.get("ip"):
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
+            if os.path.isfile(DEFAULT_DB_PATH):
+                with sqlite3.connect(DEFAULT_DB_PATH) as conn:
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute("SELECT ip FROM nodes WHERE id = ? OR hostname = ?", (node_id, node_id)).fetchone()
+                    if row and row["ip"]:
+                        manifest["ip_hint"] = row["ip"]
+        except Exception as e:
+            logger.warning("Error querying db for node %s IP: %s", node_id, e)
+
+    # Check cached leases
+    if not manifest.get("ip_hint") and not manifest.get("ip"):
+        cache_dir = os.path.expanduser("~/.cache/knot/leases")
+        if os.path.isdir(cache_dir):
+            for lfile in (f"{active_swarm}_{node_id}", node_id):
+                lpath = os.path.join(cache_dir, lfile)
+                if os.path.isfile(lpath):
+                    try:
+                        with open(lpath, "r") as lf:
+                            lip = lf.read().strip()
+                            if lip:
+                                manifest["ip_hint"] = lip
+                                break
+                    except Exception as e:
+                        logger.warning("Error reading lease %s: %s", lpath, e)
+
+    return manifest
 
 
 def _get_screen_lock(node_id: str) -> threading.Lock:
@@ -315,21 +354,30 @@ def capture_node_screen(node_id: str, force: bool = False, quality: str = "low")
         manifest = get_node_manifest(node_id)
         raw_png = os.path.join(SCREEN_CACHE_DIR, f"{node_id}_raw.png")
 
-        res_geom = "1280x" if is_high else "480x"
-        res_qual = "82" if is_high else "60"
+        res_geom = (1280, 720) if is_high else (480, 270)
+        res_qual = 82 if is_high else 60
 
-        if node_id == "desktop":
+        # Determine if node_id represents the local host
+        local_hostname = socket.gethostname().lower()
+        active_swarm, _ = get_active_swarm_info()
+        is_local = (
+            node_id.lower() in (local_hostname, "desktop", "localhost")
+            or manifest.get("role") == "anchor"
+            or manifest.get("ip_hint") in ("127.0.0.1", "::1")
+        )
+
+        raw_bytes = None
+        if is_local:
             env = os.environ.copy()
             env.setdefault("WAYLAND_DISPLAY", "wayland-0")
             env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
             cmd_capture = ["spectacle", "-b", "-n", "-o", raw_png]
-            res1 = subprocess.run(cmd_capture, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=4)
+            res1 = subprocess.run(cmd_capture, env=env, capture_output=True, text=True, timeout=4)
             if res1.returncode == 0 and os.path.isfile(raw_png):
-                cmd_resize = ["magick", raw_png, "-resize", res_geom, "-quality", res_qual, cache_file]
-                res2 = subprocess.run(cmd_resize, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=4)
-                if res2.returncode == 0 and os.path.isfile(cache_file) and os.path.getsize(cache_file) > 500:
-                    with open(cache_file, "rb") as f:
-                        return f.read(), "image/jpeg"
+                with open(raw_png, "rb") as f:
+                    raw_bytes = f.read()
+            elif res1.returncode != 0:
+                logger.warning("Local spectacle screen capture failed (rc=%s): %s", res1.returncode, res1.stderr.strip())
         else:
             ip = manifest.get("ip_hint") or ""
             if not ip and "interfaces" in manifest:
@@ -337,24 +385,38 @@ def capture_node_screen(node_id: str, force: bool = False, quality: str = "low")
                     if isinstance(iface, dict) and iface.get("ip"):
                         ip = iface["ip"]
                         break
-            user = manifest.get("user") or "kuasha"
+            user = manifest.get("user") or "psl"
             port = str(manifest.get("port") or 22)
 
             if ip:
                 remote_cmd = (
-                    f"WAYLAND_DISPLAY=wayland-0 spectacle -b -n -o /tmp/knot_screen_{node_id}.png 2>/dev/null && "
-                    f"magick /tmp/knot_screen_{node_id}.png -resize {res_geom} -quality {res_qual} /tmp/knot_screen_{node_id}.jpg 2>/dev/null && "
-                    f"cat /tmp/knot_screen_{node_id}.jpg"
+                    f"WAYLAND_DISPLAY=wayland-0 spectacle -b -n -o /tmp/knot_screen_{node_id}.png && "
+                    f"cat /tmp/knot_screen_{node_id}.png && rm -f /tmp/knot_screen_{node_id}.png"
                 )
                 ssh_cmd = [
-                    "ssh", "-o", "ConnectTimeout=3", "-o", "StrictHostKeyChecking=no",
+                    "ssh", "-o", "ConnectTimeout=3", "-o", "StrictHostKeyChecking=accept-new",
                     "-p", port, f"{user}@{ip}", remote_cmd
                 ]
-                res = subprocess.run(ssh_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=6)
+                res = subprocess.run(ssh_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=6)
                 if res.returncode == 0 and len(res.stdout) > 500:
-                    with open(cache_file, "wb") as f:
-                        f.write(res.stdout)
-                    return res.stdout, "image/jpeg"
+                    raw_bytes = res.stdout
+                elif res.returncode != 0:
+                    logger.warning("Remote spectacle capture failed on %s (rc=%s): %s", node_id, res.returncode, res.stderr.decode('utf-8', errors='replace').strip())
+
+        if raw_bytes and len(raw_bytes) > 500:
+            try:
+                from PIL import Image
+                import io
+                with Image.open(io.BytesIO(raw_bytes)) as img:
+                    img.thumbnail(res_geom)
+                    img.convert("RGB").save(cache_file, "JPEG", quality=res_qual)
+                with open(cache_file, "rb") as f:
+                    return f.read(), "image/jpeg"
+            except Exception as img_err:
+                logger.warning("Failed to process screenshot with PIL: %s", img_err)
+                with open(cache_file, "wb") as f:
+                    f.write(raw_bytes)
+                return raw_bytes, "image/png"
 
         if os.path.isfile(cache_file) and os.path.getsize(cache_file) > 500:
             with open(cache_file, "rb") as f:
@@ -513,19 +575,31 @@ def get_distribution_bundle() -> bytes:
 
 def get_active_swarm_info() -> tuple[str, str]:
     """Returns (swarm_id, swarm_name) based on active runtime swarm profile."""
-    active_swarm = "home"
-    active_f = "/run/knot/active_swarm"
-    if os.path.exists(active_f):
-        try:
-            with open(active_f, "r") as f:
-                content = f.read().strip()
-                if content and content != "none":
-                    active_swarm = content
-        except Exception:
-            pass
+    active_swarm = os.environ.get("KNOT_ACTIVE_SWARM", "").strip()
+    if not active_swarm:
+        for path in ("/run/knot/active_swarm", os.path.expanduser("~/.local/state/knot/active_swarm")):
+            if os.path.isfile(path):
+                try:
+                    with open(path, "r") as f:
+                        content = f.read().strip()
+                        if content and content != "none":
+                            active_swarm = content
+                            break
+                except Exception as e:
+                    logger.warning("Error reading %s: %s", path, e)
+    if not active_swarm:
+        swarms_dir = os.path.expanduser("~/.config/knot/swarms")
+        if os.path.isdir(swarms_dir):
+            for d in os.listdir(swarms_dir):
+                if os.path.isfile(os.path.join(swarms_dir, d, "topology.json")):
+                    active_swarm = d
+                    break
+    if not active_swarm:
+        active_swarm = "home"
+
     swarm_name = f"{active_swarm.capitalize()} Swarm"
-    for conf_dir in ("/etc/knot/swarms.d", os.path.expanduser("~/.config/knot/swarms")):
-        conf_file = os.path.join(conf_dir, f"{active_swarm}.conf")
+    for conf_dir in ("/etc/knot/swarms.d", os.path.expanduser("~/.config/knot/swarms"), os.path.expanduser(f"~/.config/knot/swarms/{active_swarm}")):
+        conf_file = os.path.join(conf_dir, "swarm.conf") if os.path.basename(conf_dir) == active_swarm else os.path.join(conf_dir, f"{active_swarm}.conf")
         if os.path.isfile(conf_file):
             try:
                 with open(conf_file, "r") as cf:
@@ -535,8 +609,8 @@ def get_active_swarm_info() -> tuple[str, str]:
                             if name_val:
                                 swarm_name = name_val
                                 break
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Error reading %s: %s", conf_file, e)
     return active_swarm, swarm_name
 
 
@@ -801,14 +875,17 @@ mkdir -p "$BIN_DIR"
 ln -sf "$INSTALL_DIR/bin/knot" "$BIN_DIR/knot"
 ln -sf "$INSTALL_DIR/bin/knot-installer" "$BIN_DIR/knot-installer"
 ln -sf "$INSTALL_DIR/bin/knot-autounlock" "$BIN_DIR/knot-autounlock"
-chmod +x "$INSTALL_DIR/bin/knot" "$INSTALL_DIR/bin/knot-installer" "$INSTALL_DIR/bin/knot-autounlock"
+ln -sf "$INSTALL_DIR/bin/knot-agent" "$BIN_DIR/knot-agent"
+ln -sf "$INSTALL_DIR/bin/knot-stripd" "$BIN_DIR/knot-stripd"
+chmod +x "$INSTALL_DIR/bin/knot" "$INSTALL_DIR/bin/knot-installer" "$INSTALL_DIR/bin/knot-autounlock" "$INSTALL_DIR/bin/knot-agent" "$INSTALL_DIR/bin/knot-stripd"
 chmod +x "$INSTALL_DIR/core/installer/display.sh" "$INSTALL_DIR/core/installer/enroll.py"
 
 export PATH="$BIN_DIR:$PATH"
 
 # Pre-authenticate sudo credentials if available so background system setup succeeds seamlessly
 if command -v sudo >/dev/null; then
-  if ! sudo -n true 2>&1 >/dev/null; then
+  local sudo_test_out=""
+  if ! sudo_test_out="$(sudo -n true 2>&1)"; then
     if [ -r /dev/tty ]; then
       echo -e "${{C_CYAN}}[•] Root privileges requested to configure OpenSSH and system services...${{C_RESET}}"
       sudo -v </dev/tty || echo -e "${{C_YELLOW}}[!] Notice: Sudo authentication cancelled. Continuing with user-level setup...${{C_RESET}}"
@@ -2662,14 +2739,7 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 self._send_error("Field 'pin' is required", 400)
                 return
 
-            active_swarm = "home"
-            active_f = "/run/knot/active_swarm"
-            if os.path.exists(active_f):
-                try:
-                    with open(active_f, "r") as f:
-                        active_swarm = f.read().strip() or "home"
-                except Exception:
-                    pass
+            active_swarm, _ = get_active_swarm_info()
 
             user_home = os.path.expanduser("~")
             topo_path = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/topology.json")
@@ -2679,8 +2749,8 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                     with open(topo_path, "r") as tf:
                         tdata = json.load(tf)
                         anchor_id = tdata.get("anchor", "desktop")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("Error reading topology %s: %s", topo_path, e)
 
             anchor_pubkey = ""
             pub_path = os.path.join(user_home, ".ssh/id_ed25519.pub")

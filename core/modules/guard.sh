@@ -324,14 +324,17 @@ dispatch_user_services() {
         anchor)
           run_user_service_cmd "$u" "$uname" systemctl --user start knot-hub.service
           run_user_service_cmd "$u" "$uname" systemctl --user restart knot-deskflow.service
+          run_user_service_cmd "$u" "$uname" systemctl --user start knot-stripd.service
           ;;
         strand)
           run_user_service_cmd "$u" "$uname" systemctl --user stop knot-hub.service
           run_user_service_cmd "$u" "$uname" systemctl --user restart knot-deskflow.service
+          run_user_service_cmd "$u" "$uname" systemctl --user stop knot-stripd.service
           ;;
         standalone)
           run_user_service_cmd "$u" "$uname" systemctl --user stop knot-hub.service
           run_user_service_cmd "$u" "$uname" systemctl --user stop knot-deskflow.service
+          run_user_service_cmd "$u" "$uname" systemctl --user stop knot-stripd.service
           ;;
       esac
     fi

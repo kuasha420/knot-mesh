@@ -34,14 +34,18 @@ except ImportError:
     from core.memory.palace import MemoryPalaceClient, format_tree
 
 
+import ssl
+
+
 class KnotHubClient:
     """HTTP client communicating with Knot Hub with automatic LAN/remote fallback."""
 
-    DEFAULT_URLS = ["http://127.0.0.1:4242"]
+    DEFAULT_URLS = ["https://127.0.0.1:4242", "http://127.0.0.1:4242"]
 
     def __init__(self, base_url: str | None = None):
         self._explicit_url = base_url or os.environ.get("KNOT_HUB_URL")
         self._cached_active_url: str | None = None
+        self._ssl_ctx = ssl._create_unverified_context()
 
     def resolve_url(self) -> str:
         if self._explicit_url:
@@ -52,7 +56,7 @@ class KnotHubClient:
         for candidate in self.DEFAULT_URLS:
             try:
                 req = urllib.request.Request(f"{candidate}/health", headers={"Accept": "application/json"})
-                with urllib.request.urlopen(req, timeout=1.5) as resp:
+                with urllib.request.urlopen(req, timeout=1.5, context=self._ssl_ctx) as resp:
                     if resp.status == 200:
                         self._cached_active_url = candidate
                         return candidate
@@ -81,7 +85,7 @@ class KnotHubClient:
 
             req = urllib.request.Request(full_url, data=body, headers=headers, method=method)
             try:
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                with urllib.request.urlopen(req, timeout=timeout, context=self._ssl_ctx) as resp:
                     resp_bytes = resp.read()
                     self._cached_active_url = url
                     if resp_bytes:

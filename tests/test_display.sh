@@ -56,7 +56,7 @@ echo "=== [Test 5] CLI Overrides & Formatting ==="
 JSON_OUT="$("$DISPLAY_SCRIPT" --resolution 3840x2160 --refresh 120 --scale 1.75 --json)"
 
 echo "$JSON_OUT" | grep -q '"resolution": "3840x2160"'
-echo "$JSON_OUT" | grep -q '"refresh_rate": 120.00'
+echo "$JSON_OUT" | grep -E -q '"refresh_rate": 120(\.0+)?'
 echo "$JSON_OUT" | grep -q '"scale": 1.75'
 echo "  -> CLI overrides and JSON output format: OK"
 

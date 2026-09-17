@@ -9,6 +9,9 @@ C_GREEN='\033[0;32m'
 C_YELLOW='\033[0;33m'
 C_BLUE='\033[0;34m'
 C_CYAN='\033[0;36m'
+C_PURPLE='\033[0;35m'
+C_GRAY='\033[90m'
+C_DIM='\033[2m'
 C_BOLD='\033[1m'
 
 knot_log_info() { echo -e "${C_BLUE}==>${C_RESET} ${C_BOLD}$*${C_RESET}"; }

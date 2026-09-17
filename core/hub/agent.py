@@ -11,6 +11,7 @@ import glob
 import hashlib
 import json
 import os
+import shutil
 import signal
 import socket
 import ssl
@@ -288,11 +289,21 @@ def fetch_account_info() -> dict:
     return result
 
 
+def find_agy_binary() -> str:
+    return (
+        shutil.which("agy")
+        or shutil.which("antigravity")
+        or (os.path.expanduser("~/.local/bin/agy") if os.path.exists(os.path.expanduser("~/.local/bin/agy")) else None)
+        or "/usr/bin/agy"
+    )
+
+
 def get_agy_info() -> tuple[str, str]:
     ver = "unknown"
     auth = "unknown"
+    agy_bin = find_agy_binary()
     try:
-        p = subprocess.run(["/usr/bin/agy", "--version"], capture_output=True, text=True, timeout=3)
+        p = subprocess.run([agy_bin, "--version"], capture_output=True, text=True, timeout=3)
         if p.returncode == 0 and p.stdout.strip():
             ver = p.stdout.strip().split()[-1]
     except Exception:
@@ -311,7 +322,7 @@ def get_agy_info() -> tuple[str, str]:
         # Fallback to systemd probe with headless browser prevention and 30s timeout
         try:
             cmd = ["systemd-run", "--user", "--pipe"] + get_headless_systemd_env() + [
-                "/usr/bin/agy", "-p", "ping", "--output-format", "json"
+                agy_bin, "-p", "ping", "--output-format", "json"
             ]
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if p.returncode == 0 and '"status":"SUCCESS"' in p.stdout.replace(" ", ""):
@@ -332,8 +343,9 @@ def fetch_model_quota() -> dict | None:
     if not is_online():
         return None
 
+    agy_bin = find_agy_binary()
     cmd = ["systemd-run", "--user", "--pipe"] + get_headless_systemd_env() + [
-        "/usr/bin/agy",
+        agy_bin,
         "-p", "/usage",
         "--output-format", "json"
     ]
@@ -695,12 +707,19 @@ class AgentWorker:
         if not is_online():
             return "ERROR", "Network or DNS offline on this node. Task deferred.", "", 0.0, 0
 
-        knot_dir = os.path.expanduser("~/Dev/knot")
+        knot_dir = (
+            os.environ.get("KNOT_ROOT")
+            or (os.path.expanduser("~/.local/share/knot-mesh") if os.path.isdir(os.path.expanduser("~/.local/share/knot-mesh")) else None)
+            or (os.path.expanduser("~/knot-mesh") if os.path.isdir(os.path.expanduser("~/knot-mesh")) else None)
+            or (os.path.expanduser("~/knot") if os.path.isdir(os.path.expanduser("~/knot")) else None)
+            or os.path.expanduser("~/Dev/knot")
+        )
         cmd = ["systemd-run", "--user", "--pipe"] + get_headless_systemd_env()
         if os.path.isdir(knot_dir):
             cmd.append(f"--working-directory={knot_dir}")
+        agy_bin = find_agy_binary()
         cmd.extend([
-            "/usr/bin/agy",
+            agy_bin,
             "-p", prompt,
             "--output-format", "json",
             "--dangerously-skip-permissions",

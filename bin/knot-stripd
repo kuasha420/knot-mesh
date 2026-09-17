@@ -4,44 +4,62 @@ Knot Dynamic Crossover Strip Daemon (knot-stripd)
 Dynamic Wayland crossover indicator strips for Anchor display in KDE Plasma 6.
 Renders high-visibility, tasteful border strips along active crossover zones with
 GPU-accelerated physics impulse flare animations when the cursor transitions across mesh nodes.
+Dynamically adapts to the active swarm topology (Left, Right, Top, Bottom).
 """
 
 import sys
 import os
 import re
+import json
+import glob
 import shutil
 import socket
+import select
+import signal
 import subprocess
 import threading
 import time
+from typing import Dict, List, Optional, Set
+
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtProperty, QUrl, QTimer
 from PyQt6.QtGui import QGuiApplication
-from PyQt6.QtQml import QQmlApplicationEngine, QQmlComponent
+from PyQt6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlContext
 
-LEFT_QML = """
+# Curated neon palette for high visual distinction across displays
+DEFAULT_PALETTE = [
+    "#00f0ff",  # Cyber Cyan
+    "#a855f7",  # Neon Purple
+    "#ffaa00",  # Amber Glow
+    "#10b981",  # Emerald Green
+    "#f43f5e",  # Rose Flare
+    "#3b82f6",  # Bright Blue
+]
+
+QML_TEMPLATE = """
 import QtQuick
 import QtQuick.Window
 import org.kde.layershell as LayerShell
 
 Window {
-    id: leftWin
+    id: edgeWin
     visible: true
     flags: Qt.WindowTransparentForInput | Qt.FramelessWindowHint
     color: "transparent"
 
     LayerShell.Window.layer: LayerShell.Window.LayerOverlay
-    LayerShell.Window.anchors: LayerShell.Window.AnchorLeft | LayerShell.Window.AnchorBottom
+    LayerShell.Window.anchors: __ANCHORS__
     LayerShell.Window.exclusionZone: -1
     LayerShell.Window.keyboardInteractivity: LayerShell.Window.KeyboardInteractivityNone
+    __MARGINS__
 
-    width: leftStrip.thickness
-    height: Math.round(Screen.height * 0.35)
+    width: __WIDTH__
+    height: __HEIGHT__
 
     Item {
-        id: leftStrip
+        id: stripItem
         anchors.fill: parent
         property int thickness: 5
-        opacity: (!bridge.locked && bridge.laptopConnected) ? 0.45 : 0.0
+        opacity: (!controller.locked && controller.connected) ? 0.45 : 0.0
 
         Behavior on opacity {
             NumberAnimation { duration: 250; easing.type: Easing.InOutQuad }
@@ -52,109 +70,10 @@ Window {
             anchors.fill: parent
             radius: 2
             gradient: Gradient {
-                orientation: Gradient.Vertical
+                orientation: __ORIENTATION__
                 GradientStop { position: 0.0; color: "transparent" }
-                GradientStop { position: 0.25; color: bridge.laptopColor }
-                GradientStop { position: 1.0; color: bridge.laptopColor }
-            }
-        }
-
-        // Outer glow
-        Rectangle {
-            anchors.fill: parent
-            anchors.margins: -1
-            radius: 3
-            opacity: 0.35
-            color: "transparent"
-            border.width: 1
-            border.color: bridge.laptopColor
-        }
-
-        SequentialAnimation {
-            id: leftPulseAnim
-            ParallelAnimation {
-                NumberAnimation {
-                    target: leftStrip
-                    property: "opacity"
-                    to: 0.90
-                    duration: 40
-                    easing.type: Easing.OutQuad
-                }
-                NumberAnimation {
-                    target: leftStrip
-                    property: "thickness"
-                    to: 8
-                    duration: 40
-                    easing.type: Easing.OutQuad
-                }
-            }
-            ParallelAnimation {
-                NumberAnimation {
-                    target: leftStrip
-                    property: "opacity"
-                    to: (!bridge.locked && bridge.laptopConnected) ? 0.45 : 0.0
-                    duration: 320
-                    easing.type: Easing.OutCubic
-                }
-                NumberAnimation {
-                    target: leftStrip
-                    property: "thickness"
-                    to: 5
-                    duration: 320
-                    easing.type: Easing.OutCubic
-                }
-            }
-        }
-
-        Connections {
-            target: bridge
-            function onLaptopCrossover() {
-                leftPulseAnim.restart();
-            }
-        }
-    }
-}
-"""
-
-BOTTOM_QML = """
-import QtQuick
-import QtQuick.Window
-import org.kde.layershell as LayerShell
-
-Window {
-    id: bottomWin
-    visible: true
-    flags: Qt.WindowTransparentForInput | Qt.FramelessWindowHint
-    color: "transparent"
-
-    LayerShell.Window.layer: LayerShell.Window.LayerOverlay
-    LayerShell.Window.anchors: LayerShell.Window.AnchorBottom | LayerShell.Window.AnchorLeft
-    LayerShell.Window.exclusionZone: -1
-    LayerShell.Window.keyboardInteractivity: LayerShell.Window.KeyboardInteractivityNone
-    LayerShell.Window.margins.left: Math.round(Screen.width * 0.45)
-
-    width: Math.round(Screen.width * 0.40)
-    height: bottomStrip.thickness
-
-    Item {
-        id: bottomStrip
-        anchors.fill: parent
-        property int thickness: 5
-        opacity: (!bridge.locked && bridge.deckConnected) ? 0.45 : 0.0
-
-        Behavior on opacity {
-            NumberAnimation { duration: 250; easing.type: Easing.InOutQuad }
-        }
-
-        // Inner solid core
-        Rectangle {
-            anchors.fill: parent
-            radius: 2
-            gradient: Gradient {
-                orientation: Gradient.Horizontal
-                GradientStop { position: 0.0; color: "transparent" }
-                GradientStop { position: 0.15; color: bridge.deckColor }
-                GradientStop { position: 0.85; color: bridge.deckColor }
+                GradientStop { position: 0.15; color: controller.stripColor }
+                GradientStop { position: 0.85; color: controller.stripColor }
                 GradientStop { position: 1.0; color: "transparent" }
             }
         }
@@ -167,21 +86,21 @@ Window {
             opacity: 0.35
             color: "transparent"
             border.width: 1
-            border.color: bridge.deckColor
+            border.color: controller.stripColor
         }
 
         SequentialAnimation {
-            id: bottomPulseAnim
+            id: pulseAnim
             ParallelAnimation {
                 NumberAnimation {
-                    target: bottomStrip
+                    target: stripItem
                     property: "opacity"
                     to: 0.90
                     duration: 40
                     easing.type: Easing.OutQuad
                 }
                 NumberAnimation {
-                    target: bottomStrip
+                    target: stripItem
                     property: "thickness"
                     to: 8
                     duration: 40
@@ -190,14 +109,14 @@ Window {
             }
             ParallelAnimation {
                 NumberAnimation {
-                    target: bottomStrip
+                    target: stripItem
                     property: "opacity"
-                    to: (!bridge.locked && bridge.deckConnected) ? 0.45 : 0.0
+                    to: (!controller.locked && controller.connected) ? 0.45 : 0.0
                     duration: 320
                     easing.type: Easing.OutCubic
                 }
                 NumberAnimation {
-                    target: bottomStrip
+                    target: stripItem
                     property: "thickness"
                     to: 5
                     duration: 320
@@ -207,67 +126,232 @@ Window {
         }
 
         Connections {
-            target: bridge
-            function onDeckCrossover() {
-                bottomPulseAnim.restart();
+            target: controller
+            function onCrossoverTriggered() {
+                pulseAnim.restart();
             }
         }
     }
 }
 """
 
-class KnotEventBridge(QObject):
-    laptopConnectedChanged = pyqtSignal(bool)
-    deckConnectedChanged = pyqtSignal(bool)
+class KnotEdgeController(QObject):
+    connectedChanged = pyqtSignal(bool)
     lockedChanged = pyqtSignal(bool)
-    laptopCrossover = pyqtSignal()
-    deckCrossover = pyqtSignal()
+    crossoverTriggered = pyqtSignal()
 
-    def __init__(self, engine_mode="journal", laptop_color="#00f0ff", deck_color="#ffaa00"):
-        super().__init__()
-        self._engine_mode = engine_mode
-        self._laptop_color = laptop_color
-        self._deck_color = deck_color
-        self._laptop_connected = False
-        self._deck_connected = False
+    def __init__(self, node_id: str, edge: str, color: str, span: List[int], identifiers: Set[str], ips: Set[str], parent=None):
+        super().__init__(parent)
+        self.node_id = node_id
+        self.edge = edge
+        self.color = color
+        self.span = span
+        self.identifiers = {x.lower().strip() for x in identifiers if x}
+        self.ips = {x.strip() for x in ips if x}
+        self._connected = False
         self._locked = False
-        self._active_screen = socket.gethostname()
-        self._stop_event = threading.Event()
 
-    @pyqtProperty(bool, notify=laptopConnectedChanged)
-    def laptopConnected(self):
-        return self._laptop_connected
+    @pyqtProperty(str, constant=True)
+    def nodeId(self) -> str:
+        return self.node_id
 
-    @pyqtProperty(bool, notify=deckConnectedChanged)
-    def deckConnected(self):
-        return self._deck_connected
+    @pyqtProperty(str, constant=True)
+    def stripColor(self) -> str:
+        return self.color
+
+    @pyqtProperty(bool, notify=connectedChanged)
+    def connected(self) -> bool:
+        return self._connected
 
     @pyqtProperty(bool, notify=lockedChanged)
-    def locked(self):
+    def locked(self) -> bool:
         return self._locked
 
-    @pyqtProperty(str, constant=True)
-    def laptopColor(self):
-        return self._laptop_color
-
-    @pyqtProperty(str, constant=True)
-    def deckColor(self):
-        return self._deck_color
-
-    def set_laptop_connected(self, state: bool):
-        if self._laptop_connected != state:
-            self._laptop_connected = state
-            self.laptopConnectedChanged.emit(state)
-
-    def set_deck_connected(self, state: bool):
-        if self._deck_connected != state:
-            self._deck_connected = state
-            self.deckConnectedChanged.emit(state)
+    def set_connected(self, state: bool):
+        if self._connected != state:
+            self._connected = state
+            self.connectedChanged.emit(state)
 
     def set_locked(self, state: bool):
         if self._locked != state:
             self._locked = state
             self.lockedChanged.emit(state)
+
+    def trigger_crossover(self):
+        self.crossoverTriggered.emit()
+
+    def matches_name(self, name: str) -> bool:
+        if not name:
+            return False
+        clean = name.lower().strip()
+        if clean in self.identifiers:
+            return True
+        for ident in self.identifiers:
+            if ident and (clean == ident or clean in ident or ident in clean):
+                return True
+        return False
+
+class KnotStripDaemon(QObject):
+    def __init__(self, swarm_name: Optional[str] = None, engine_mode: str = "journal"):
+        super().__init__()
+        self.engine_mode = engine_mode
+        self.swarm_name = swarm_name or self._detect_active_swarm()
+        self.controllers: List[KnotEdgeController] = []
+        self.anchor_identifiers: Set[str] = set()
+        self.local_hostname = socket.gethostname().lower()
+        self.active_screen = self.local_hostname
+        self._stop_event = threading.Event()
+        self._load_topology()
+
+    def _detect_active_swarm(self) -> str:
+        env_swarm = os.environ.get("KNOT_ACTIVE_SWARM")
+        if env_swarm:
+            return env_swarm.strip()
+
+        for path in ["/run/knot/active_swarm", os.path.expanduser("~/.local/state/knot/active_swarm")]:
+            if os.path.isfile(path):
+                try:
+                    with open(path, "r") as f:
+                        s = f.read().strip()
+                        if s:
+                            return s
+                except Exception as e:
+                    sys.stderr.write(f"[knot-stripd] Warning reading {path}: {e}\n")
+
+        swarms_dir = os.path.expanduser("~/.config/knot/swarms")
+        if os.path.isdir(swarms_dir):
+            for d in os.listdir(swarms_dir):
+                if os.path.isfile(os.path.join(swarms_dir, d, "topology.json")):
+                    return d
+        return "office"
+
+    def _load_topology(self):
+        top_path = os.path.expanduser(f"~/.config/knot/swarms/{self.swarm_name}/topology.json")
+        if not os.path.isfile(top_path):
+            sys.stderr.write(f"[knot-stripd] Topology file not found: {top_path}\n")
+            return
+
+        try:
+            with open(top_path, "r") as f:
+                top_data = json.load(f)
+        except Exception as e:
+            sys.stderr.write(f"[knot-stripd] Error reading topology {top_path}: {e}\n")
+            return
+
+        anchor_id = top_data.get("anchor", "")
+        nodes_dir = os.path.expanduser(f"~/.config/knot/swarms/{self.swarm_name}/nodes")
+        all_nodes: Dict[str, dict] = {}
+        if os.path.isdir(nodes_dir):
+            for fname in os.listdir(nodes_dir):
+                if fname.endswith(".json"):
+                    nid = fname[:-5]
+                    try:
+                        with open(os.path.join(nodes_dir, fname), "r") as nf:
+                            all_nodes[nid] = json.load(nf)
+                    except Exception as e:
+                        sys.stderr.write(f"[knot-stripd] Error loading node {fname}: {e}\n")
+
+        # Fallback to registry/nodes if empty
+        if not all_nodes:
+            reg_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "registry", "nodes"))
+            if os.path.isdir(reg_dir):
+                for fname in os.listdir(reg_dir):
+                    if fname.endswith(".json"):
+                        nid = fname[:-5]
+                        try:
+                            with open(os.path.join(reg_dir, fname), "r") as nf:
+                                all_nodes[nid] = json.load(nf)
+                        except Exception as e:
+                            sys.stderr.write(f"[knot-stripd] Error loading registry node {fname}: {e}\n")
+
+        # Resolve anchor identifiers
+        self.anchor_identifiers.add(anchor_id.lower())
+        self.anchor_identifiers.add(self.local_hostname)
+        anchor_info = all_nodes.get(anchor_id, {})
+        if anchor_info.get("hostname"):
+            self.anchor_identifiers.add(anchor_info["hostname"].lower())
+        for a in anchor_info.get("aliases", []):
+            self.anchor_identifiers.add(a.lower())
+
+        layout = top_data.get("layout", {})
+        anchor_layout = layout.get(anchor_id, {})
+
+        color_index = 0
+        palette_len = len(DEFAULT_PALETTE)
+
+        for edge_dir, edge_spec in anchor_layout.items():
+            norm_edge = edge_dir.lower().strip()
+            target_node = edge_spec.get("node", edge_spec.get("target", ""))
+            if not target_node:
+                continue
+
+            span = edge_spec.get("span", [0, 100])
+            node_data = all_nodes.get(target_node, {})
+
+            # Collect all known names & aliases for the target node
+            idents: Set[str] = {target_node.lower()}
+            if node_data.get("hostname"):
+                idents.add(node_data["hostname"].lower())
+            for a in node_data.get("aliases", []):
+                idents.add(a.lower())
+
+            # Collect known IPs
+            ips: Set[str] = set()
+            if node_data.get("ip_hint"):
+                ips.add(node_data["ip_hint"])
+            if node_data.get("ip"):
+                ips.add(node_data["ip"])
+
+            # Check cached leases
+            cache_dir = os.path.expanduser("~/.cache/knot/leases")
+            if os.path.isdir(cache_dir):
+                for lfile in os.listdir(cache_dir):
+                    if lfile == target_node or lfile.endswith(f"_{target_node}"):
+                        try:
+                            with open(os.path.join(cache_dir, lfile), "r") as lf:
+                                cached_ip = lf.read().strip()
+                                if cached_ip:
+                                    ips.add(cached_ip)
+                        except Exception as e:
+                            sys.stderr.write(f"[knot-stripd] Error reading lease {lfile}: {e}\n")
+
+            # Determine color
+            if node_data.get("strip_color"):
+                color = node_data["strip_color"]
+            elif node_data.get("color"):
+                color = node_data["color"]
+            elif "deck" in target_node.lower() or "handheld" in target_node.lower():
+                color = "#ffaa00"
+            elif "purrfect" in target_node.lower():
+                color = "#a855f7"
+            elif "devbox" in target_node.lower():
+                color = "#00f0ff"
+            else:
+                color = DEFAULT_PALETTE[color_index % palette_len]
+                color_index += 1
+
+            ctrl = KnotEdgeController(
+                node_id=target_node,
+                edge=norm_edge,
+                color=color,
+                span=span,
+                identifiers=idents,
+                ips=ips,
+                parent=self
+            )
+            self.controllers.append(ctrl)
+            sys.stderr.write(f"[knot-stripd] Registered edge '{norm_edge}' for node '{target_node}' (color: {color}, span: {span})\n")
+
+    def is_local_anchor(self, name: str) -> bool:
+        if not name:
+            return True
+        clean = name.lower().strip()
+        if clean in self.anchor_identifiers:
+            return True
+        for ident in self.anchor_identifiers:
+            if ident and (clean == ident or clean in ident or ident in clean):
+                return True
+        return False
 
     def check_lock_state(self):
         lock_file = os.path.expanduser("~/.local/state/knot/kvm_lock")
@@ -276,73 +360,49 @@ class KnotEventBridge(QObject):
             if os.path.exists(lock_file):
                 with open(lock_file, "r") as f:
                     is_locked = (f.read().strip() == "locked")
-        except Exception:
-            pass
-        self.set_locked(is_locked)
+        except Exception as e:
+            sys.stderr.write(f"[knot-stripd] Warning reading lock file: {e}\n")
 
-    def _resolve_peer_ip(self, node_id: str, default_ip: str) -> str:
-        home = os.path.expanduser("~")
-        cache_dir = os.path.join(home, ".cache/knot/leases")
-        if os.path.isdir(cache_dir):
-            for fname in os.listdir(cache_dir):
-                if fname.endswith(f"_{node_id}") or fname == node_id:
-                    try:
-                        with open(os.path.join(cache_dir, fname), "r") as f:
-                            ip = f.read().strip()
-                            if ip:
-                                return ip
-                    except Exception:
-                        pass
-        knot_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        manifest = os.path.join(knot_root, "registry/nodes", f"{node_id}.json")
-        if os.path.isfile(manifest):
-            try:
-                import json
-                with open(manifest, "r") as f:
-                    d = json.load(f)
-                    ip = d.get("ip_hint") or d.get("ip")
-                    if ip:
-                        return ip
-            except Exception:
-                pass
-        return default_ip
+        for ctrl in self.controllers:
+            ctrl.set_locked(is_locked)
 
-    def check_initial_connections(self):
+    def check_connections_via_ss(self):
         try:
             res = subprocess.run(
                 ["ss", "-t", "state", "established", "( sport = :24800 )"],
                 capture_output=True, text=True, check=True
             )
             out = res.stdout
-            laptop_ip = self._resolve_peer_ip("laptop", "")
-            deck_ip = self._resolve_peer_ip("steamdeck", "")
-            self.set_laptop_connected(bool(laptop_ip and laptop_ip in out))
-            self.set_deck_connected(bool(deck_ip and deck_ip in out))
+            for ctrl in self.controllers:
+                connected = False
+                for ip in ctrl.ips:
+                    if ip and ip in out:
+                        connected = True
+                        break
+                ctrl.set_connected(connected)
         except Exception as e:
             sys.stderr.write(f"[knot-stripd] ss check error: {e}\n")
 
     def start_engine(self):
-        self.check_initial_connections()
+        self.check_connections_via_ss()
         self.check_lock_state()
 
         self._timer_lock = QTimer()
         self._timer_lock.timeout.connect(self.check_lock_state)
         self._timer_lock.start(300)
 
-        if self._engine_mode == "journal":
+        self._timer_ss = QTimer()
+        self._timer_ss.timeout.connect(self.check_connections_via_ss)
+        self._timer_ss.start(5000)
+
+        if self.engine_mode == "journal":
             t_journal = threading.Thread(target=self._journal_worker, daemon=True)
             t_journal.start()
-        else:
-            self._timer = QTimer()
-            self._timer.timeout.connect(self.check_initial_connections)
-            self._timer.start(1000)
 
         t_kbd = threading.Thread(target=self._keyboard_worker, daemon=True)
         t_kbd.start()
 
     def _keyboard_worker(self):
-        import select
-        import time
         try:
             import evdev
             from evdev import ecodes
@@ -350,6 +410,7 @@ class KnotEventBridge(QObject):
             sys.stderr.write("[knot-stripd] evdev not available, keyboard listener disabled\n")
             return
 
+        last_toggle = 0.0
         while not self._stop_event.is_set():
             devices = []
             try:
@@ -371,7 +432,6 @@ class KnotEventBridge(QObject):
                 continue
 
             try:
-                last_toggle = 0.0
                 while not self._stop_event.is_set():
                     r, _, _ = select.select(devices, [], [], 1.0)
                     for dev in r:
@@ -381,8 +441,11 @@ class KnotEventBridge(QObject):
                                     now = time.time()
                                     if now - last_toggle > 0.4:
                                         last_toggle = now
-                                        knot_bin = shutil.which("knot") or os.path.abspath(os.path.join(os.path.dirname(__file__), "knot"))
-                                        subprocess.Popen([knot_bin, "kvm", "lock-toggle"])
+                                        if self.is_local_anchor(self.active_screen):
+                                            knot_bin = shutil.which("knot") or os.path.abspath(os.path.join(os.path.dirname(__file__), "knot"))
+                                            subprocess.Popen([knot_bin, "kvm", "lock-toggle"])
+                                        else:
+                                            sys.stderr.write(f"[knot-stripd] ScrollLock ignored; cursor on remote screen '{self.active_screen}'\n")
                         except OSError:
                             raise
             except Exception:
@@ -401,63 +464,122 @@ class KnotEventBridge(QObject):
                 line = proc.stdout.readline()
                 if not line:
                     break
-                # Connection / Disconnection
+
+                # Connection event
                 m_conn = re.search(r'client "([^"]+)" has connected', line)
                 if m_conn:
-                    cname = m_conn.group(1).lower()
-                    if "deck" in cname or "handheld" in cname:
-                        self.set_deck_connected(True)
-                    else:
-                        self.set_laptop_connected(True)
+                    cname = m_conn.group(1)
+                    for ctrl in self.controllers:
+                        if ctrl.matches_name(cname):
+                            ctrl.set_connected(True)
 
+                # Disconnection event
                 m_dis = re.search(r'client "([^"]+)" (?:has disconnected|is dead)', line)
                 if m_dis:
-                    cname = m_dis.group(1).lower()
-                    if "deck" in cname or "handheld" in cname:
-                        self.set_deck_connected(False)
-                    else:
-                        self.set_laptop_connected(False)
+                    cname = m_dis.group(1)
+                    for ctrl in self.controllers:
+                        if ctrl.matches_name(cname):
+                            ctrl.set_connected(False)
 
                 # Cursor crossover triggers & active screen tracking
                 m_switch = re.search(r'switch from "([^"]+)" to "([^"]+)"', line)
                 if m_switch:
                     src, dst = m_switch.group(1), m_switch.group(2)
-                    self._active_screen = dst
-                    if "deck" in dst.lower() or "deck" in src.lower() or "handheld" in dst.lower():
-                        self.deckCrossover.emit()
-                    else:
-                        self.laptopCrossover.emit()
+                    self.active_screen = dst
+                    for ctrl in self.controllers:
+                        if ctrl.matches_name(dst):
+                            ctrl.trigger_crossover()
+                        elif ctrl.matches_name(src) and self.is_local_anchor(dst):
+                            ctrl.trigger_crossover()
                 elif 'started server' in line or 'resetting server' in line:
-                    self._active_screen = socket.gethostname()
+                    self.active_screen = self.local_hostname
         except Exception as e:
             sys.stderr.write(f"[knot-stripd] Journal reader error: {e}\n")
+
+def generate_qml_for_edge(edge: str, span: List[int]) -> str:
+    direction = edge.lower().strip()
+    s0 = span[0] if len(span) > 0 else 0
+    s1 = span[1] if len(span) > 1 else 100
+    if s1 <= s0:
+        s0, s1 = 0, 100
+
+    pct_span = (s1 - s0) / 100.0
+    pct_start = s0 / 100.0
+
+    if direction == "left":
+        anchors = "LayerShell.Window.AnchorLeft | LayerShell.Window.AnchorTop"
+        margins = f"LayerShell.Window.margins.top: Math.round(Screen.height * {pct_start})"
+        width_expr = "stripItem.thickness"
+        height_expr = f"Math.round(Screen.height * {pct_span})"
+        orientation = "Gradient.Vertical"
+    elif direction == "right":
+        anchors = "LayerShell.Window.AnchorRight | LayerShell.Window.AnchorTop"
+        margins = f"LayerShell.Window.margins.top: Math.round(Screen.height * {pct_start})"
+        width_expr = "stripItem.thickness"
+        height_expr = f"Math.round(Screen.height * {pct_span})"
+        orientation = "Gradient.Vertical"
+    elif direction in ("down", "bottom"):
+        anchors = "LayerShell.Window.AnchorBottom | LayerShell.Window.AnchorLeft"
+        margins = f"LayerShell.Window.margins.left: Math.round(Screen.width * {pct_start})"
+        width_expr = f"Math.round(Screen.width * {pct_span})"
+        height_expr = "stripItem.thickness"
+        orientation = "Gradient.Horizontal"
+    elif direction in ("up", "top"):
+        anchors = "LayerShell.Window.AnchorTop | LayerShell.Window.AnchorLeft"
+        margins = f"LayerShell.Window.margins.left: Math.round(Screen.width * {pct_start})"
+        width_expr = f"Math.round(Screen.width * {pct_span})"
+        height_expr = "stripItem.thickness"
+        orientation = "Gradient.Horizontal"
+    else:
+        raise ValueError(f"Unknown edge direction: {edge}")
+
+    content = QML_TEMPLATE.replace("__ANCHORS__", anchors)
+    content = content.replace("__MARGINS__", margins)
+    content = content.replace("__WIDTH__", width_expr)
+    content = content.replace("__HEIGHT__", height_expr)
+    content = content.replace("__ORIENTATION__", orientation)
+    return content
 
 def main():
     app = QGuiApplication(sys.argv)
     app.setApplicationName("knot-stripd")
 
     engine_mode = "journal"
-    if "--engine=socket" in sys.argv:
-        engine_mode = "socket"
+    swarm_name = None
+    for arg in sys.argv[1:]:
+        if arg.startswith("--engine="):
+            engine_mode = arg.split("=", 1)[1]
+        elif arg.startswith("--swarm="):
+            swarm_name = arg.split("=", 1)[1]
 
-    bridge = KnotEventBridge(engine_mode=engine_mode)
+    daemon = KnotStripDaemon(swarm_name=swarm_name, engine_mode=engine_mode)
+    if not daemon.controllers:
+        sys.stderr.write("[knot-stripd] No edge controllers configured for current topology; daemon standing by\n")
 
     engine = QQmlApplicationEngine()
-    engine.rootContext().setContextProperty("bridge", bridge)
+    windows = []
 
-    comp_left = QQmlComponent(engine)
-    comp_left.setData(LEFT_QML.encode("utf-8"), QUrl())
-    win_left = comp_left.create(engine.rootContext())
+    for ctrl in daemon.controllers:
+        try:
+            qml_str = generate_qml_for_edge(ctrl.edge, ctrl.span)
+            comp = QQmlComponent(engine)
+            comp.setData(qml_str.encode("utf-8"), QUrl())
+            if comp.isError():
+                for err in comp.errors():
+                    sys.stderr.write(f"[knot-stripd] QML Error ({ctrl.edge}): {err.toString()}\n")
+                continue
 
-    comp_bottom = QQmlComponent(engine)
-    comp_bottom.setData(BOTTOM_QML.encode("utf-8"), QUrl())
-    win_bottom = comp_bottom.create(engine.rootContext())
+            ctx = QQmlContext(engine.rootContext())
+            ctx.setContextProperty("controller", ctrl)
+            win = comp.create(ctx)
+            if win:
+                windows.append((win, ctx))
+            else:
+                sys.stderr.write(f"[knot-stripd] Failed to create window for edge {ctrl.edge}\n")
+        except Exception as e:
+            sys.stderr.write(f"[knot-stripd] Error initializing edge {ctrl.edge}: {e}\n")
 
-    if not win_left or not win_bottom:
-        sys.stderr.write("[knot-stripd] Failed to create overlay windows\n")
-        sys.exit(1)
-
-    bridge.start_engine()
+    daemon.start_engine()
     sys.exit(app.exec())
 
 if __name__ == "__main__":

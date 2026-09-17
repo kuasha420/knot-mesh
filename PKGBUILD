@@ -8,6 +8,8 @@ url="https://github.com/kuasha420/knot-mesh"
 license=('MIT')
 depends=(
     'python'
+    'python-pyqt6'
+    'layer-shell-qt'
     'openssh'
     'openssl'
     'iproute2'
@@ -38,6 +40,11 @@ package() {
     # Copy mesh core, bin, and templates
     cp -r core bin templates "${destdir}/"
 
+    # Copy systemd units if present
+    if [ -d "systemd" ]; then
+        cp -r systemd "${destdir}/"
+    fi
+
     # Copy web if present
     if [ -d "web" ]; then
         cp -r web "${destdir}/"
@@ -46,6 +53,8 @@ package() {
     # Symlink executables to /usr/bin
     ln -sf "/usr/lib/knot-mesh/bin/knot" "${pkgdir}/usr/bin/knot"
     ln -sf "/usr/lib/knot-mesh/bin/knot-installer" "${pkgdir}/usr/bin/knot-installer"
+    ln -sf "/usr/lib/knot-mesh/bin/knot-agent" "${pkgdir}/usr/bin/knot-agent"
+    ln -sf "/usr/lib/knot-mesh/bin/knot-stripd" "${pkgdir}/usr/bin/knot-stripd"
 
     # Install license if present
     if [ -f "LICENSE" ]; then

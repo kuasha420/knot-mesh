@@ -212,16 +212,27 @@ cmd_exec() {
     exit 1
   fi
 
+  local remote_cmd="export PATH=\"\$HOME/.local/bin:\$PATH\"; $cmd"
+
   if [ "$target" = "--all" ]; then
-    for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
+    local nodes_dir=""
+    if ! nodes_dir="$(knot_get_nodes_dir)"; then
+      nodes_dir="$KNOT_ROOT/registry/nodes"
+    fi
+    for manifest in "$nodes_dir/"*.json; do
       [ -e "$manifest" ] || continue
       local id
       id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
       echo -e "\n${C_CYAN}=== [$id] ===${C_RESET}"
-      ssh -o BatchMode=yes -o ConnectTimeout=3 "$id" "$cmd" || knot_log_warn "Command failed on $id"
+      local e_out=""
+      if e_out="$(ssh -o BatchMode=yes -o ConnectTimeout=3 "$id" "$remote_cmd" 2>&1)"; then
+        echo "$e_out"
+      else
+        knot_log_warn "Notice: Command failed on $id: $e_out"
+      fi
     done
   else
-    ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$cmd"
+    ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$remote_cmd"
   fi
 }
 

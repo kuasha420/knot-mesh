@@ -260,6 +260,30 @@ TOPO_EOF
     echo -e "${C_GREEN}[✓] Deskflow server configuration compiled.${C_RESET}"
   fi
 
+  # 8. Deploy Anchor Services and local binary symlinks
+  local user_bin="${HOME}/.local/bin"
+  local user_unit_dir="${HOME}/.config/systemd/user"
+  mkdir -p "$user_bin" "$user_unit_dir"
+
+  for b in knot knot-installer knot-autounlock knot-agent knot-stripd; do
+    if [ -f "$KNOT_ROOT/bin/$b" ]; then
+      ln -sf "$KNOT_ROOT/bin/$b" "$user_bin/$b"
+    fi
+  done
+
+  for svc in knot-hub.service knot-agent.service knot-stripd.service; do
+    if [ -f "$KNOT_ROOT/systemd/$svc" ]; then
+      ln -sf "$KNOT_ROOT/systemd/$svc" "$user_unit_dir/$svc"
+    fi
+  done
+
+  if command -v systemctl >/dev/null; then
+    local r_out=""
+    if r_out="$(systemctl --user daemon-reload 2>&1)"; then
+      :
+    fi
+  fi
+
   # Summary banner
   echo -e "\n${C_GREEN}${C_BOLD}======================================================================${C_RESET}"
   echo -e "${C_GREEN}${C_BOLD}           KNOT MESH ANCHOR WORKSTATION INITIALIZED                   ${C_RESET}"
@@ -594,11 +618,19 @@ JOIN_HELP
     deskflow_configure
   fi
 
-  # 4. Deploy Knot Tuplespace Worker Agent user service
-  local agent_svc="$KNOT_ROOT/systemd/knot-agent.service"
+  # 4. Deploy Knot local binaries and Tuplespace Worker Agent user service
+  local user_bin="${HOME}/.local/bin"
   local user_unit_dir="${HOME}/.config/systemd/user"
+  mkdir -p "$user_bin" "$user_unit_dir"
+
+  for b in knot knot-installer knot-autounlock knot-agent knot-stripd; do
+    if [ -f "$KNOT_ROOT/bin/$b" ]; then
+      ln -sf "$KNOT_ROOT/bin/$b" "$user_bin/$b"
+    fi
+  done
+
+  local agent_svc="$KNOT_ROOT/systemd/knot-agent.service"
   if [ -f "$agent_svc" ] && command -v systemctl >/dev/null; then
-    mkdir -p "$user_unit_dir"
     ln -sf "$agent_svc" "$user_unit_dir/knot-agent.service"
     local r_out=""
     if r_out="$(systemctl --user daemon-reload 2>&1)"; then

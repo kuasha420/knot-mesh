@@ -27,19 +27,19 @@ hub_resolve_url() {
   local my_host
   my_host="$(knot_detect_hostname)"
   if [ "$my_host" = "$anchor_target" ] || [ -n "${ANCHOR_HOST:-}" ] && [ "$my_host" = "$ANCHOR_HOST" ]; then
-    echo "http://127.0.0.1:${hub_port}"
+    echo "https://127.0.0.1:${hub_port}"
     return 0
   fi
 
   local resolved_ip=""
   if resolved_ip="$("$KNOT_ROOT/core/resolver.sh" "$anchor_target" "$hub_port")"; then
     if [ -n "$resolved_ip" ]; then
-      echo "http://${resolved_ip}:${hub_port}"
+      echo "https://${resolved_ip}:${hub_port}"
       return 0
     fi
   fi
 
-  echo "http://127.0.0.1:${hub_port}"
+  echo "https://127.0.0.1:${hub_port}"
 }
 
 hub_ensure_services() {
@@ -115,7 +115,7 @@ cmd_hub() {
       hub_url="$(hub_resolve_url)"
       knot_log_info "Querying Hub Health at $hub_url/health..."
       local health_out="" rc=0
-      health_out="$(curl -s --connect-timeout 2 "$hub_url/health" 2>&1)" || rc=$?
+      health_out="$(curl -k -s --connect-timeout 2 "$hub_url/health" 2>&1)" || rc=$?
       if [ $rc -eq 0 ] && [ -n "$health_out" ]; then
         if command -v jq >/dev/null 2>&1; then
           echo "$health_out" | jq .
@@ -214,7 +214,7 @@ cmd_task() {
         '{title: $title, prompt: $prompt, target_plane: $target_plane}')"
 
       local resp="" rc=0
-      resp="$(curl -s -X POST "$hub_url/tasks/post" \
+      resp="$(curl -k -s -X POST "$hub_url/tasks/post" \
         -H "Content-Type: application/json" \
         -d "$payload" 2>&1)" || rc=$?
 
@@ -247,7 +247,7 @@ cmd_task() {
       fi
 
       local resp="" rc=0
-      resp="$(curl -s "$url" 2>&1)" || rc=$?
+      resp="$(curl -k -s "$url" 2>&1)" || rc=$?
       if [ $rc -ne 0 ] || [ -z "$resp" ]; then
         knot_log_err "Failed to reach Knot Hub at $hub_url"
         exit 1
@@ -283,7 +283,7 @@ cmd_task() {
       fi
       local batch_id="$1"
       local resp="" rc=0
-      resp="$(curl -s "$hub_url/tasks/batch/$batch_id" 2>&1)" || rc=$?
+      resp="$(curl -k -s "$hub_url/tasks/batch/$batch_id" 2>&1)" || rc=$?
       if [ $rc -eq 0 ] && [ -n "$resp" ]; then
         if command -v jq >/dev/null 2>&1; then
           echo "$resp" | jq .
@@ -303,7 +303,7 @@ cmd_task() {
       fi
       local task_id="$1"
       local resp="" rc=0
-      resp="$(curl -s "$hub_url/tasks/$task_id" 2>&1)" || rc=$?
+      resp="$(curl -k -s "$hub_url/tasks/$task_id" 2>&1)" || rc=$?
       if [ $rc -eq 0 ] && [ -n "$resp" ]; then
         if command -v jq >/dev/null 2>&1; then
           echo "$resp" | jq .
@@ -329,7 +329,7 @@ cmd_task() {
       knot_log_info "Waiting for completion of task '$task_id'..."
       while true; do
         local resp="" rc=0
-        resp="$(curl -s "$hub_url/tasks/$task_id" 2>&1)" || rc=$?
+        resp="$(curl -k -s "$hub_url/tasks/$task_id" 2>&1)" || rc=$?
         if [ $rc -eq 0 ] && [ -n "$resp" ]; then
           local status
           status="$(echo "$resp" | jq -r '.status // empty')"
@@ -379,7 +379,7 @@ cmd_task() {
 
     watch)
       knot_log_info "Connecting to real-time Blackboard stream at $hub_url/stream..."
-      curl -N -s "$hub_url/stream" | while read -r line; do
+      curl -k -N -s "$hub_url/stream" | while read -r line; do
         if [[ "$line" =~ ^event: ]]; then
           echo -e "\n${C_BOLD}${C_BLUE}>>> $line${C_RESET}"
         elif [[ "$line" =~ ^data: ]]; then
@@ -409,7 +409,7 @@ cmd_project() {
   case "$action" in
     list)
       local resp="" rc=0
-      resp="$(curl -s "$hub_url/projects" 2>&1)" || rc=$?
+      resp="$(curl -k -s "$hub_url/projects" 2>&1)" || rc=$?
       if [ $rc -ne 0 ] || [ -z "$resp" ]; then
         knot_log_err "Failed to reach Knot Hub at $hub_url"
         exit 1
@@ -434,7 +434,7 @@ cmd_project() {
       fi
       local pid="$1"
       local resp
-      resp="$(curl -s "$hub_url/projects/$pid")"
+      resp="$(curl -k -s "$hub_url/projects/$pid")"
       if command -v jq >/dev/null 2>&1; then
         echo "$resp" | jq .
       else
@@ -444,7 +444,7 @@ cmd_project() {
     sync)
       knot_log_info "Synchronizing native Antigravity projects with Hub..."
       local resp
-      resp="$(curl -s "$hub_url/projects")"
+      resp="$(curl -k -s "$hub_url/projects")"
       local count
       count="$(echo "$resp" | jq -r 'length // 0')"
       knot_log_ok "Hub registered $count native Antigravity projects."
@@ -476,7 +476,7 @@ cmd_chat() {
         url="$url?project_id=$project_id"
       fi
       local resp="" rc=0
-      resp="$(curl -s "$url" 2>&1)" || rc=$?
+      resp="$(curl -k -s "$url" 2>&1)" || rc=$?
       if [ $rc -ne 0 ] || [ -z "$resp" ]; then
         knot_log_err "Failed to reach Knot Hub at $hub_url"
         exit 1
@@ -527,7 +527,7 @@ cmd_chat() {
         '{id: $id, project_id: $p, title: $t, description: $d, created_by: $cb}')"
 
       local resp
-      resp="$(curl -s -X POST -H "Content-Type: application/json" -d "$payload" "$hub_url/chat/conversations")"
+      resp="$(curl -k -s -X POST -H "Content-Type: application/json" -d "$payload" "$hub_url/chat/conversations")"
       local created_id
       created_id="$(echo "$resp" | jq -r '.id // empty')"
       if [ -n "$created_id" ]; then
@@ -558,7 +558,7 @@ cmd_chat() {
       payload="$(jq -n --arg s "$sender" --arg c "$content" --arg ch "$conv_id" \
         '{sender: $s, content: $c, conv_id: $ch}')"
       local resp
-      resp="$(curl -s -X POST -H "Content-Type: application/json" -d "$payload" "$hub_url/chat/messages")"
+      resp="$(curl -k -s -X POST -H "Content-Type: application/json" -d "$payload" "$hub_url/chat/messages")"
       knot_log_ok "Message posted to #$conv_id as @$sender"
       ;;
     read)
@@ -571,7 +571,7 @@ cmd_chat() {
         esac
       done
       local resp
-      resp="$(curl -s "$hub_url/chat/messages?conv_id=$conv_id&limit=$limit")"
+      resp="$(curl -k -s "$hub_url/chat/messages?conv_id=$conv_id&limit=$limit")"
       echo -e "${C_BOLD}--- Swarm Konversations: #$conv_id ---${C_RESET}"
       if command -v jq >/dev/null 2>&1; then
         echo "$resp" | jq -r '.[] | "[\(.created_at | todateiso8601 | .[11:19])] @\(.sender): \(.content)"'
@@ -596,7 +596,7 @@ cmd_artifact() {
     list)
       echo -e "${C_BOLD}--- Knot 3-State Artifact Leases ---${C_RESET}"
       local resp
-      resp="$(curl -s "$hub_url/artifacts/leases")"
+      resp="$(curl -k -s "$hub_url/artifacts/leases")"
       if command -v jq >/dev/null 2>&1; then
         printf "%-28s %-20s %-12s %-10s\n" "ARTIFACT" "STATE" "HOLDER" "EXPIRES"
         printf "%-28s %-20s %-12s %-10s\n" "--------" "-----" "------" "-------"
@@ -628,7 +628,7 @@ cmd_artifact() {
       payload="$(jq -n --arg n "$name" --arg nd "$node" --argjson t "$ttl" \
         '{name: $n, node_id: $nd, ttl: $t, state: "LOCKED_SURGERY"}')"
       local resp
-      resp="$(curl -s -X POST -H "Content-Type: application/json" -d "$payload" "$hub_url/artifacts/lock")"
+      resp="$(curl -k -s -X POST -H "Content-Type: application/json" -d "$payload" "$hub_url/artifacts/lock")"
       if echo "$resp" | grep -q '"ok": true'; then
         knot_log_ok "Acquired lease on '$name' (LOCKED_SURGERY, ${ttl}s) for @$node"
       else
@@ -649,7 +649,7 @@ cmd_artifact() {
       payload="$(jq -n --arg n "$name" --arg nd "$node" --arg s "$state" \
         '{name: $n, node_id: $nd, state: $s}')"
       local resp
-      resp="$(curl -s -X POST -H "Content-Type: application/json" -d "$payload" "$hub_url/artifacts/release")"
+      resp="$(curl -k -s -X POST -H "Content-Type: application/json" -d "$payload" "$hub_url/artifacts/release")"
       if echo "$resp" | grep -q '"ok": true'; then
         knot_log_ok "Released lease on '$name' -> state: $state"
       else
@@ -721,7 +721,7 @@ cmd_sleep() {
     status)
       echo -e "${C_BOLD}--- Knot Swarm Power & Sleep Prevention Status ---${C_RESET}"
       local resp
-      if resp="$(curl -s --connect-timeout 2 "$hub_url/power/status")" && [ -n "$resp" ]; then
+      if resp="$(curl -k -s --connect-timeout 2 "$hub_url/power/status")" && [ -n "$resp" ]; then
         if command -v jq >/dev/null 2>&1; then
           local swarm_active
           swarm_active="$(echo "$resp" | jq -r '.swarm_active')"
@@ -765,7 +765,7 @@ cmd_sleep() {
       local duration_sec=$((mins * 60))
       knot_log_info "Enforcing wholesale sleep prevention across swarm for ${mins} minutes..."
       local resp
-      resp="$(curl -s -X POST "$hub_url/swarm/wake" -H "Content-Type: application/json" -d "{\"duration_sec\": $duration_sec}")"
+      resp="$(curl -k -s -X POST "$hub_url/swarm/wake" -H "Content-Type: application/json" -d "{\"duration_sec\": $duration_sec}")"
       if echo "$resp" | grep -q '"ok":true'; then
         knot_log_ok "Sleep prevention lock enforced on all nodes on AC power for ${mins} minutes."
       else
@@ -776,7 +776,7 @@ cmd_sleep() {
     allow|release)
       knot_log_info "Releasing manual swarm wake hold..."
       local resp
-      resp="$(curl -s -X POST "$hub_url/swarm/sleep-allow" -H "Content-Type: application/json" -d "{}")"
+      resp="$(curl -k -s -X POST "$hub_url/swarm/sleep-allow" -H "Content-Type: application/json" -d "{}")"
       if echo "$resp" | grep -q '"ok":true'; then
         knot_log_ok "Manual wake hold released. Swarm will sleep naturally when idle."
       else
