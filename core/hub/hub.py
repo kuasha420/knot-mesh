@@ -7,6 +7,7 @@ DAG task dependency resolution, batch fan-out / barrier joins, Swarm Konversatio
 Zero external dependencies (uses standard library Python 3).
 """
 
+import base64
 import glob
 import io
 import json
@@ -2545,6 +2546,82 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 "node_models": node_models
             })
 
+        elif path == "/topology":
+            active_swarm, swarm_name = get_active_swarm_info()
+            user_home = os.path.expanduser("~")
+            topo_path = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/topology.json")
+            nodes_dir = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/nodes")
+
+            topo = {
+                "swarm_id": active_swarm,
+                "swarm_name": swarm_name,
+                "anchor": "desktop",
+                "screens": [],
+                "layout": {},
+                "locked": False,
+                "nodes": {}
+            }
+            if os.path.exists(topo_path):
+                try:
+                    with open(topo_path, "r") as tf:
+                        loaded = json.load(tf)
+                        topo.update(loaded)
+                except Exception as e:
+                    logger.warning("Error reading topology %s: %s", topo_path, e)
+
+            # Enrich node metadata from manifests and database
+            db_nodes = {n["id"]: n for n in self.db.list_nodes()}
+            if os.path.isdir(nodes_dir):
+                for fname in sorted(os.listdir(nodes_dir)):
+                    if fname.endswith(".json"):
+                        fpath = os.path.join(nodes_dir, fname)
+                        try:
+                            with open(fpath, "r") as mf:
+                                mdata = json.load(mf)
+                                nid = mdata.get("id") or fname[:-5]
+                                db_n = db_nodes.get(nid, {})
+                                thumb_path = os.path.join(SCREEN_CACHE_DIR, f"{nid}.jpg")
+                                topo["nodes"][nid] = {
+                                    "id": nid,
+                                    "hostname": mdata.get("hostname", nid),
+                                    "role": mdata.get("role", "strand"),
+                                    "display": mdata.get("display", {}),
+                                    "user": mdata.get("user", ""),
+                                    "status": db_n.get("status", "unknown"),
+                                    "ip_hint": mdata.get("ip_hint", db_n.get("ip_hint", "")),
+                                    "has_thumbnail": os.path.exists(thumb_path)
+                                }
+                        except Exception as e:
+                            logger.warning("Error reading node manifest %s: %s", fpath, e)
+
+            # Ensure anchor node is represented
+            if topo.get("anchor") and topo["anchor"] not in topo["nodes"]:
+                topo["nodes"][topo["anchor"]] = {
+                    "id": topo["anchor"],
+                    "hostname": socket.gethostname(),
+                    "role": "anchor",
+                    "display": {},
+                    "status": "online",
+                    "has_thumbnail": os.path.exists(os.path.join(SCREEN_CACHE_DIR, f"{topo['anchor']}.jpg"))
+                }
+
+            # Enrich anchor display outputs if missing
+            anchor_nid = topo.get("anchor")
+            if anchor_nid and anchor_nid in topo["nodes"]:
+                disp = topo["nodes"][anchor_nid].get("display", {})
+                if not disp.get("outputs"):
+                    try:
+                        disp_script = os.path.join(REPO_ROOT, "core/installer/display.sh")
+                        if os.path.exists(disp_script):
+                            res = subprocess.run([disp_script, "--json"], capture_output=True, text=True, timeout=2)
+                            if res.returncode == 0:
+                                parsed_disp = json.loads(res.stdout)
+                                topo["nodes"][anchor_nid]["display"] = parsed_disp
+                    except Exception as de:
+                        logger.debug("Could not auto-populate anchor display: %s", de)
+
+            self._send_json(topo)
+
         elif path == "/quota":
             nodes = self.db.list_nodes()
             result = []
@@ -2687,14 +2764,18 @@ class HubRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
 
+        content_type = self.headers.get("Content-Type", "")
         content_length = int(self.headers.get("Content-Length", 0))
         post_data = self.rfile.read(content_length) if content_length > 0 else b"{}"
 
-        try:
-            body = json.loads(post_data.decode("utf-8")) if post_data else {}
-        except Exception:
-            self._send_error("Invalid JSON body", 400)
-            return
+        if content_type.startswith("image/") or content_type.startswith("application/octet-stream"):
+            body = {"raw_bytes": post_data}
+        else:
+            try:
+                body = json.loads(post_data.decode("utf-8")) if post_data else {}
+            except Exception:
+                self._send_error("Invalid JSON body", 400)
+                return
 
         if path == "/swarm/enroll/invite":
             expires_in = int(body.get("expires_in", 600))
@@ -3205,6 +3286,185 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             res = self.db.release_artifact(name=name, node_id=node_id, new_state=new_state)
             status_code = 200 if res.get("ok") else 400
             self._send_json(res, status_code)
+
+        elif path == "/topology":
+            active_swarm, _ = get_active_swarm_info()
+            user_home = os.path.expanduser("~")
+            topo_path = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/topology.json")
+
+            anchor = body.get("anchor")
+            screens = body.get("screens", [])
+            layout = body.get("layout", {})
+            locked = bool(body.get("locked", False))
+
+            if not anchor:
+                self._send_error("Field 'anchor' is required", 400)
+                return
+
+            topo_data = {
+                "anchor": anchor,
+                "screens": screens,
+                "layout": layout,
+                "locked": locked
+            }
+
+            os.makedirs(os.path.dirname(topo_path), exist_ok=True)
+            with open(topo_path, "w") as tf:
+                json.dump(topo_data, tf, indent=2)
+
+            nodes_dir = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/nodes")
+            compile_script = os.path.join(REPO_ROOT, "core/modules/compile_deskflow.py")
+            cfg_dir = os.path.join(user_home, ".config/Deskflow")
+            os.makedirs(cfg_dir, exist_ok=True)
+            conf_out = os.path.join(cfg_dir, "deskflow-server.conf")
+
+            recompiled = False
+            if os.path.exists(compile_script):
+                cmd = ["python3", compile_script, "--topology", topo_path, "--nodes-dir", nodes_dir, "--output", conf_out]
+                res = subprocess.run(cmd, capture_output=True, text=True)
+                if res.returncode == 0:
+                    recompiled = True
+                    subprocess.run(["systemctl", "--user", "restart", "knot-deskflow.service"], capture_output=True)
+                    subprocess.run(["systemctl", "--user", "restart", "knot-stripd.service"], capture_output=True)
+                else:
+                    logger.error("Deskflow compilation failed: %s", res.stderr)
+
+            broadcast_event("topology_updated", topo_data)
+            self._send_json({"ok": True, "recompiled": recompiled, "topology": topo_data})
+
+        elif path == "/topology/analyze-photo":
+            active_swarm, _ = get_active_swarm_info()
+            user_home = os.path.expanduser("~")
+            nodes_dir = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/nodes")
+
+            mode = body.get("mode", "auto")
+            raw_data = None
+
+            if "raw_bytes" in body:
+                raw_data = body["raw_bytes"]
+            elif "image_base64" in body:
+                b64_str = body["image_base64"]
+                if "," in b64_str:
+                    b64_str = b64_str.split(",", 1)[1]
+                try:
+                    raw_data = base64.b64decode(b64_str)
+                except Exception as be:
+                    self._send_error(f"Invalid base64 image data: {be}", 400)
+                    return
+            elif "image_path" in body:
+                p = body["image_path"].strip()
+                if os.path.isfile(p):
+                    try:
+                        with open(p, "rb") as f:
+                            raw_data = f.read()
+                    except Exception as fe:
+                        self._send_error(f"Cannot read image_path: {fe}", 400)
+                        return
+                else:
+                    self._send_error(f"image_path file not found: {p}", 404)
+                    return
+            else:
+                self._send_error("Provide 'image_base64', 'image_path', or binary image payload", 400)
+                return
+
+            # Gather swarm node context
+            node_list = []
+            if os.path.isdir(nodes_dir):
+                for fname in sorted(os.listdir(nodes_dir)):
+                    if fname.endswith(".json"):
+                        try:
+                            with open(os.path.join(nodes_dir, fname), "r") as mf:
+                                node_list.append(json.load(mf))
+                        except Exception:
+                            pass
+
+            topo_path = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/topology.json")
+            anchor_id = "rog-ally"
+            if os.path.exists(topo_path):
+                try:
+                    with open(topo_path, "r") as tf:
+                        anchor_id = json.load(tf).get("anchor", "rog-ally")
+                except Exception:
+                    pass
+
+            try:
+                from core.vision.engine import analyze_desk_photo
+                analysis = analyze_desk_photo(
+                    raw_data,
+                    mode=mode,
+                    swarm_nodes=node_list,
+                    anchor_id=anchor_id
+                )
+                self._send_json({"ok": True, "result": analysis}, 200)
+            except Exception as ve:
+                logger.exception("Photo topology analysis error: %s", ve)
+                self._send_error(f"Topology analysis failed: {ve}", 500)
+
+        elif path == "/topology/identify":
+            bg = body.get("bg", "white")
+            duration = int(body.get("duration") or body.get("duration_sec") or 15)
+            active_swarm, _ = get_active_swarm_info()
+            user_home = os.path.expanduser("~")
+            nodes_dir = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/nodes")
+
+            # 1. Broadcast display_identify SSE event to all connected Kafe web clients
+            broadcast_event("display_identify", {
+                "bg": bg,
+                "duration": duration,
+                "timestamp": time.time()
+            })
+
+            # 2. Trigger local display overlay on anchor if display is available
+            overlay_script = os.path.join(REPO_ROOT, "core/vision/display_overlay.py")
+            if os.path.exists(overlay_script) and (os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")):
+                try:
+                    subprocess.Popen([
+                        sys.executable,
+                        overlay_script,
+                        "--bg", bg,
+                        "--duration", str(duration)
+                    ])
+                except Exception as oe:
+                    logger.warning("Failed to launch local display overlay: %s", oe)
+
+            # 3. Asynchronously trigger remote strand overlays over SSH in background thread
+            def _trigger_remote_nodes():
+                if not os.path.isdir(nodes_dir):
+                    return
+                for fname in sorted(os.listdir(nodes_dir)):
+                    if fname.endswith(".json"):
+                        try:
+                            with open(os.path.join(nodes_dir, fname), "r") as mf:
+                                mdata = json.load(mf)
+                            nid = mdata.get("id") or fname[:-5]
+                            role = mdata.get("role", "strand")
+                            if role == "anchor":
+                                continue
+                            ip = mdata.get("ip_hint") or ""
+                            user = mdata.get("user") or "psl"
+                            port = str(mdata.get("port") or 22)
+                            if ip:
+                                remote_cmd = f"WAYLAND_DISPLAY=${{WAYLAND_DISPLAY:-wayland-0}} DISPLAY=${{DISPLAY:-:0}} knot topology identify --bg {bg} --duration {duration}"
+                                ssh_cmd = [
+                                    "ssh", "-o", "ConnectTimeout=3", "-o", "StrictHostKeyChecking=accept-new",
+                                    "-p", port, f"{user}@{ip}", remote_cmd
+                                ]
+                                subprocess.run(ssh_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=duration + 5)
+                        except Exception as re:
+                            logger.debug("Remote identify trigger error for %s: %s", fname, re)
+
+            threading.Thread(target=_trigger_remote_nodes, daemon=True).start()
+
+            self._send_json({"ok": True, "bg": bg, "duration": duration, "broadcast": True}, 200)
+
+        elif path == "/topology/align":
+            knot_bin = shutil.which("knot") or os.path.expanduser("~/.local/bin/knot")
+            if knot_bin and os.path.exists(knot_bin):
+                res = subprocess.run([knot_bin, "topology", "align-internal"], capture_output=True, text=True)
+            else:
+                topo_script = os.path.join(REPO_ROOT, "core/modules/topology.sh")
+                res = subprocess.run(["bash", "-c", f"source {topo_script} && topology_align_internal"], capture_output=True, text=True)
+            self._send_json({"ok": res.returncode == 0, "output": res.stdout, "error": res.stderr}, 200 if res.returncode == 0 else 500)
 
         else:
             self._send_error("Not found", 404)

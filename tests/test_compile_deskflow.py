@@ -286,5 +286,26 @@ class TestCompileDeskflow(unittest.TestCase):
         self.assertIn("left(10,90) = arch-laptop(20,80)", conf)
         self.assertIn("right(20,80) = arch-desktop(10,90)", conf)
 
+    def test_fractional_multi_target_down_links(self):
+        topo = {
+            "anchor": "desktop",
+            "screens": ["desktop", "laptop", "steamdeck"],
+            "layout": {
+                "desktop": {
+                    "left": {"node": "laptop", "span": [25, 100], "target_span": [0, 85]},
+                    "down": {"node": "steamdeck", "span": [50, 100], "target_span": [0, 100]}
+                }
+            }
+        }
+        topo_path = self.tmp_path / "topology_fractional.json"
+        with open(topo_path, "w") as f:
+            json.dump(topo, f, indent=2)
+
+        conf = compile_deskflow.compile_deskflow(str(topo_path), str(self.nodes_dir), mode="unlocked")
+        self.assertIn("left(25,100) = arch-laptop(0,85)", conf)
+        self.assertIn("right(0,85) = arch-desktop(25,100)", conf)
+        self.assertIn("down(50,100) = deck-eos(0,100)", conf)
+        self.assertIn("up(0,100) = arch-desktop(50,100)", conf)
+
 if __name__ == "__main__":
     unittest.main()

@@ -86,35 +86,49 @@ def compile_deskflow(topology_file: str, nodes_dir: str, mode: str = "unlocked")
 
     screen_hostnames: List[str] = []
     for s in candidate_screens:
-        if s in headless_nodes:
+        if s in headless_nodes or ":" in s:
             continue
         h = id_to_host.get(s, s)
         if h not in screen_hostnames:
             screen_hostnames.append(h)
 
     # Parse layout and links into unified layout dict:
-    # full_layout[source_nid][direction] = { "target": target_nid, "span": [s1, s2], "target_span": [t1, t2] }
-    full_layout: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    # full_layout[source_nid][direction] = [ { "target": target_nid, "span": [s1, s2], "target_span": [t1, t2] } ]
+    full_layout: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+
+    def _add_link(src: str, d: str, tgt: str, span: List[int], target_span: List[int]):
+        if src in headless_nodes or tgt in headless_nodes or not tgt:
+            return
+        if ":" in src or ":" in tgt:
+            return
+        if src not in full_layout:
+            full_layout[src] = {}
+        if d not in full_layout[src]:
+            full_layout[src][d] = []
+        # Check if already exists
+        for existing in full_layout[src][d]:
+            if existing["target"] == tgt and existing["span"] == span:
+                return
+        full_layout[src][d].append({
+            "target": tgt,
+            "span": span,
+            "target_span": target_span
+        })
 
     # 1. From layout dictionary
     for node_id, directions in layout.items():
         if node_id in headless_nodes:
             continue
-        if node_id not in full_layout:
-            full_layout[node_id] = {}
         for d, spec in directions.items():
             norm_d = DIR_MAP.get(d.lower())
             if not norm_d:
                 continue
-            target_node = spec.get("node")
-            if not target_node or target_node in headless_nodes:
-                continue
-            span = spec.get("span", [0, 100])
-            full_layout[node_id][norm_d] = {
-                "target": target_node,
-                "span": span,
-                "target_span": [0, 100]
-            }
+            specs = spec if isinstance(spec, list) else [spec]
+            for s in specs:
+                target_node = s.get("node")
+                span = s.get("span", [0, 100])
+                target_span = s.get("target_span", [0, 100])
+                _add_link(node_id, norm_d, target_node, span, target_span)
 
     # 2. From links list
     for link in links_list:
@@ -126,40 +140,33 @@ def compile_deskflow(topology_file: str, nodes_dir: str, mode: str = "unlocked")
         norm_d = DIR_MAP.get(d.lower())
         if not norm_d:
             continue
-        if source in headless_nodes or target in headless_nodes:
-            continue
         span = link.get("span", [0, 100])
         target_span = link.get("target_span", [0, 100])
-        if source not in full_layout:
-            full_layout[source] = {}
-        full_layout[source][norm_d] = {
-            "target": target,
-            "span": span,
-            "target_span": target_span
-        }
+        _add_link(source, norm_d, target, span, target_span)
 
     # 3. Reciprocal link generation & span coordination
     for src, dirs in list(full_layout.items()):
-        for d, info in list(dirs.items()):
-            tgt = info["target"]
-            if tgt in headless_nodes:
-                continue
-            opp_d = OPP_MAP.get(d)
-            if not opp_d:
-                continue
-            if tgt not in full_layout:
-                full_layout[tgt] = {}
-            if opp_d in full_layout[tgt]:
-                # If reciprocal link already exists, align target_spans
-                info["target_span"] = full_layout[tgt][opp_d]["span"]
-                full_layout[tgt][opp_d]["target_span"] = info["span"]
-            else:
-                # Automatically generate reciprocal link
-                full_layout[tgt][opp_d] = {
-                    "target": src,
-                    "span": info.get("target_span", [0, 100]),
-                    "target_span": info["span"]
-                }
+        for d, link_list in list(dirs.items()):
+            for info in link_list:
+                tgt = info["target"]
+                if tgt in headless_nodes:
+                    continue
+                opp_d = OPP_MAP.get(d)
+                if not opp_d:
+                    continue
+                
+                # Check if reciprocal link exists
+                has_reciprocal = False
+                if tgt in full_layout and opp_d in full_layout[tgt]:
+                    for r_info in full_layout[tgt][opp_d]:
+                        if r_info["target"] == src:
+                            info["target_span"] = r_info["span"]
+                            r_info["target_span"] = info["span"]
+                            has_reciprocal = True
+                            break
+                
+                if not has_reciprocal:
+                    _add_link(tgt, opp_d, src, info.get("target_span", [0, 100]), info["span"])
 
     # 1. Section: screens
     lines = ["section: screens"]
@@ -190,8 +197,7 @@ def compile_deskflow(topology_file: str, nodes_dir: str, mode: str = "unlocked")
 
         node_links = full_layout.get(nid, {})
         for direction in ["left", "right", "up", "down"]:
-            if direction in node_links:
-                spec = node_links[direction]
+            for spec in node_links.get(direction, []):
                 target_node = spec["target"]
                 target_host = id_to_host.get(target_node, target_node)
                 if target_host not in screen_hostnames:

@@ -240,3 +240,73 @@ export type ConnectionState = 'connecting' | 'connected' | 'disconnected';
 
 export type CockpitViewMode = 'grid' | 'chat' | 'radar' | 'dag' | 'artifacts';
 
+export interface MeshTopologyOutput {
+  name: string;
+  primary?: boolean;
+  priority?: number;
+  resolution?: string;
+  refresh_rate?: number;
+  scale?: number;
+  geometry?: string;
+}
+
+export interface MeshTopologyDisplay {
+  resolution?: string;
+  refresh_rate?: number;
+  scale?: number;
+  outputs?: MeshTopologyOutput[];
+}
+
+export interface MeshTopologyLink {
+  node: string;
+  span: [number, number];
+  target_span?: [number, number];
+}
+
+export interface MeshTopologyNode {
+  id: string;
+  hostname: string;
+  role: string;
+  display?: MeshTopologyDisplay;
+  user?: string;
+  status?: string;
+  ip_hint?: string;
+  has_thumbnail?: boolean;
+}
+
+export interface TopologyScreenDetection {
+  box_2d: [number, number, number, number]; // [ymin, xmin, ymax, xmax] 0-1000
+  device_type: 'desktop_monitor' | 'laptop' | 'handheld_pc' | string;
+  device_name: string;
+  matched_node_id: string;
+  position_relative_to_anchor: 'left' | 'right' | 'up' | 'down' | 'anchor' | 'anchor_internal' | string;
+  span: [number, number];
+  target_span?: [number, number];
+  confidence: number;
+  description?: string;
+}
+
+export interface TopologyAnalysisResult {
+  engine: 'swarm_ai' | 'offline' | string;
+  anchor_node_id: string;
+  screens: TopologyScreenDetection[];
+  proposed_layout: Record<string, Record<string, MeshTopologyLink>>;
+  reasoning: string;
+  metadata?: {
+    image_width?: number;
+    image_height?: number;
+    detection_time_ms?: number;
+    color_matches_used?: number;
+    model?: string;
+  };
+}
+
+export interface MeshTopologyState {
+  swarm_id: string;
+  swarm_name?: string;
+  anchor: string;
+  screens: string[];
+  layout: Record<string, Record<string, MeshTopologyLink>>;
+  locked: boolean;
+  nodes: Record<string, MeshTopologyNode>;
+}

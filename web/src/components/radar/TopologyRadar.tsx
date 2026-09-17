@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import {
+  Activity,
   AlertTriangle,
   CheckCircle2,
   Cpu,
   ExternalLink,
   Laptop,
+  Layers,
   Lock,
   Monitor,
   Pause,
@@ -21,6 +23,7 @@ import {
 } from 'lucide-react';
 import type { MeshNode, NodeQuotaMatrix, MeshActionType, MeshActionResult, SwarmModelsState } from '../../types/knot';
 import { groupModelsByDepth } from '../../utils/models';
+import { TopologyCanvas } from './TopologyCanvas';
 
 export interface TopologyRadarProps {
   nodes: MeshNode[];
@@ -68,6 +71,7 @@ export const TopologyRadar: React.FC<TopologyRadarProps> = ({
   onSelectNodeModel,
   isDedicatedView = false,
 }) => {
+  const [viewSubTab, setViewSubTab] = useState<'canvas' | 'telemetry'>('canvas');
   const [runningAction, setRunningAction] = useState<string | null>(null);
   const [actionResult, setActionResult] = useState<MeshActionResult | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -222,8 +226,34 @@ export const TopologyRadar: React.FC<TopologyRadarProps> = ({
         <div className="flex items-center space-x-2">
           <Radio className="w-3.5 h-3.5 text-night-cyan animate-pulse" />
           <h2 className="text-xs font-bold tracking-wider text-night-blue uppercase">
-            Topology Radar & Quota
+            Topology Radar
           </h2>
+          <div className="flex items-center gap-1 bg-night-black/60 p-0.5 rounded-lg border border-night-border/60 ml-2">
+            <button
+              type="button"
+              onClick={() => setViewSubTab('canvas')}
+              className={`px-2 py-0.5 rounded text-[10px] font-mono transition-all flex items-center gap-1 ${
+                viewSubTab === 'canvas'
+                  ? 'bg-night-cyan/20 text-night-cyan border border-night-cyan/40 shadow-xs'
+                  : 'text-night-muted hover:text-night-text'
+              }`}
+            >
+              <Layers className="w-3 h-3" />
+              Canvas
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewSubTab('telemetry')}
+              className={`px-2 py-0.5 rounded text-[10px] font-mono transition-all flex items-center gap-1 ${
+                viewSubTab === 'telemetry'
+                  ? 'bg-night-cyan/20 text-night-cyan border border-night-cyan/40 shadow-xs'
+                  : 'text-night-muted hover:text-night-text'
+              }`}
+            >
+              <Activity className="w-3 h-3" />
+              Telemetry
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-2 text-[10px] font-mono text-night-muted">
           <span className="inline-flex items-center gap-1 text-night-green">
@@ -235,8 +265,14 @@ export const TopologyRadar: React.FC<TopologyRadarProps> = ({
         </div>
       </div>
 
-      {/* Quick Action Deck */}
-      {onTriggerAction && (
+      {viewSubTab === 'canvas' ? (
+        <div className="flex-1 min-h-0 overflow-hidden p-2">
+          <TopologyCanvas nodes={nodes} onOpenScreenModal={(nid) => setExpandedScreenNode(nid)} />
+        </div>
+      ) : (
+        <>
+          {/* Quick Action Deck */}
+          {onTriggerAction && (
         <div className="flex-none px-2.5 py-1.5 border-b border-night-border/70 bg-night-panel/40">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[9px] font-mono font-bold text-night-blue uppercase tracking-wider flex items-center gap-1">
@@ -806,6 +842,8 @@ export const TopologyRadar: React.FC<TopologyRadarProps> = ({
           );
         })}
       </div>
+        </>
+      )}
 
       {/* Expanded Workstation Screen Modal with High-Res Fast Streaming */}
       {expandedScreenNode && (

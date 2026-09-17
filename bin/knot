@@ -20,6 +20,7 @@ source "$KNOT_ROOT/core/modules/antigravity.sh"
 source "$KNOT_ROOT/core/modules/hub.sh"
 source "$KNOT_ROOT/core/modules/memory.sh"
 source "$KNOT_ROOT/core/modules/shutdown.sh"
+source "$KNOT_ROOT/core/modules/topology.sh"
 
 cmd_onboard() {
   local node_id="${1:-}"
@@ -767,9 +768,14 @@ case "${1:-}" in
     shift
     cmd_shutdown --reboot "$@"
     ;;
+  topology)
+    shift
+    cmd_topology "$@"
+    ;;
   *)
     echo -e "${C_BOLD}Knot - Multi-Device Mesh Orchestrator${C_RESET}"
     echo "Usage:"
+    echo "  knot topology [show|refresh]  Visual multi-screen spatial layout & photo refresh"
     echo "  knot onboard [node_id]        Enroll current device into the mesh"
     echo "  knot sync                     Reconcile keys, configs, and layout"
     echo "  knot resolve <node_id> [port] Resolve active IP across 3 tiers"

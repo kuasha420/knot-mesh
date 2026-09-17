@@ -287,8 +287,7 @@ NOTIFY_EOF
     fi
   fi
 
-  # 6. Ensure InputCapture persistence shim is compiled
-  if [ -f "$KNOT_ROOT/core/shim/input_capture_shim.c" ] && [ ! -f /usr/local/lib/knot/libinputcapture-persist.so ]; then
+  if [ -f "$KNOT_ROOT/core/shim/input_capture_shim.c" ] && { [ ! -f /usr/local/lib/knot/libinputcapture-persist.so ] || [ "$KNOT_ROOT/core/shim/input_capture_shim.c" -nt /usr/local/lib/knot/libinputcapture-persist.so ]; }; then
     sudo mkdir -p /usr/local/lib/knot
     if ! sudo gcc -Wall -Wextra -O2 -shared -fPIC \
       "$KNOT_ROOT/core/shim/input_capture_shim.c" \
