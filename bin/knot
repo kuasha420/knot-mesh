@@ -234,43 +234,58 @@ cmd_kvm() {
       knot_log_info "Restarting Deskflow KVM across the Knot mesh..."
       local my_host
       my_host="$(knot_detect_hostname)"
+      local active_swarm
+      active_swarm="$(knot_get_active_swarm)"
       local anchor_host="desktop"
-      for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
-        [ -e "$manifest" ] || continue
-        if grep -q '"id":[[:space:]]*"desktop"' "$manifest"; then
-          anchor_host="$(grep -o '"hostname":[[:space:]]*"[^"]*"' "$manifest" | cut -d'"' -f4)"
-        fi
-      done
-
-      # 1. Restart Server first
-      if [ "$my_host" = "$anchor_host" ]; then
-        knot_log_info "Restarting KVM Server locally on Anchor ($anchor_host)..."
-        systemctl --user restart knot-deskflow
-      else
-        knot_log_info "Restarting KVM Server remotely on Anchor ($anchor_host)..."
-        ssh -o BatchMode=yes -o ConnectTimeout=5 desktop "systemctl --user restart knot-deskflow"
+      local anchor_id="desktop"
+      if knot_load_swarm_profile "$active_swarm"; then
+        anchor_id="${ANCHOR_ID:-desktop}"
+        anchor_host="${ANCHOR_HOST:-desktop}"
       fi
 
-      sleep 1.5
+      local is_anchor=0
+      if [ "$my_host" = "$anchor_host" ] || [ "$my_host" = "$anchor_id" ]; then
+        is_anchor=1
+      fi
 
-      # 2. Restart Client Strands
-      for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
-        [ -e "$manifest" ] || continue
-        local id host
-        id="$(grep -o '"id":[[:space:]]*"[^"]*"' "$manifest" | cut -d'"' -f4)"
-        host="$(grep -o '"hostname":[[:space:]]*"[^"]*"' "$manifest" | cut -d'"' -f4)"
-        if [ "$id" != "desktop" ] && [ "$host" != "$anchor_host" ]; then
-          knot_log_info "Restarting KVM Client on $id ($host)..."
-          if [ "$my_host" = "$host" ]; then
-            systemctl --user restart knot-deskflow
-          else
-            ssh -o BatchMode=yes -o ConnectTimeout=5 "$id" "systemctl --user restart knot-deskflow" || knot_log_warn "Failed to restart KVM on $id"
-          fi
+      if [ "$is_anchor" -eq 1 ]; then
+        knot_log_info "Restarting KVM Server locally on Anchor ($anchor_host)..."
+        systemctl --user restart knot-deskflow
+        sleep 1.5
+
+        local nodes_dir=""
+        local home
+        home="$(knot_detect_user_home)"
+        if [ -d "$home/.config/knot/swarms/${active_swarm}/nodes" ]; then
+          nodes_dir="$home/.config/knot/swarms/${active_swarm}/nodes"
+        elif [ -d "$KNOT_ROOT/registry/nodes" ]; then
+          nodes_dir="$KNOT_ROOT/registry/nodes"
         fi
-      done
+
+        if [ -n "$nodes_dir" ]; then
+          for manifest in "$nodes_dir/"*.json; do
+            [ -e "$manifest" ] || continue
+            local id host
+            id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+            host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+            if [ -n "$id" ] && [ "$id" != "$anchor_id" ] && [ "$host" != "$anchor_host" ]; then
+              knot_log_info "Restarting KVM Client remotely on $id ($host)..."
+              local r_out
+              if r_out="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$id" "systemctl --user restart knot-deskflow" 2>&1)"; then
+                :
+              else
+                knot_log_warn "Notice: Could not restart KVM remotely on $id: $r_out"
+              fi
+            fi
+          done
+        fi
+      else
+        knot_log_info "Restarting KVM Client locally on Strand ($my_host)..."
+        systemctl --user restart knot-deskflow
+      fi
 
       sleep 1
-      knot_log_ok "Deskflow KVM successfully restarted across the mesh."
+      knot_log_ok "Deskflow KVM restarted."
       ;;
     lock)
       source "$KNOT_ROOT/core/modules/deskflow.sh"
@@ -341,6 +356,15 @@ cmd_swarm() {
   if [ $# -gt 0 ]; then shift; fi
 
   case "$action" in
+    switch|use)
+      local target_swarm="${1:-}"
+      if [ -z "$target_swarm" ]; then
+        knot_log_err "Usage: knot swarm switch <swarm_id>"
+        exit 1
+      fi
+      knot_set_active_swarm "$target_swarm"
+      knot_log_ok "Switched active swarm to '$target_swarm'."
+      ;;
     status)
       antigravity_swarm_status
       ;;

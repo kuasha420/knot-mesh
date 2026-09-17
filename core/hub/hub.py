@@ -2621,6 +2621,7 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             if not pin:
                 self._send_error("Field 'pin' is required", 400)
                 return
+            body["ip_hint"] = body.get("ip_hint") or self.client_address[0]
             ok, msg, result = enrollment_coordinator.join_request(pin, body)
             if ok:
                 self._send_json(result, 200)
@@ -2684,6 +2685,7 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                         "hostname": sreq.get("hostname", node_id),
                         "role": sreq.get("role", "strand"),
                         "user": sreq.get("user", "psl"),
+                        "ip_hint": sreq.get("ip_hint", ""),
                         "port": sreq.get("port", 22),
                         "pubkey": sreq.get("pubkey", ""),
                         "display": sreq.get("display", {}),
