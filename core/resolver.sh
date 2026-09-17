@@ -98,21 +98,21 @@ is_port_open() {
   local ip="$1"
   local port="$2"
   if command -v nc >/dev/null; then
-    if nc -z -n -w 1 "$ip" "$port"; then
+    if nc -z -n -w 1 "$ip" "$port" </dev/null; then
       return 0
     else
       return 1
     fi
   elif command -v socat >/dev/null; then
     local err=""
-    if err="$(socat -T 1 - "TCP:$ip:$port" 2>&1)"; then
+    if err="$(socat -T 1 -u /dev/null "TCP:$ip:$port" 2>&1)"; then
       return 0
     else
       return 1
     fi
   else
     local probe_err=""
-    if probe_err="$(timeout 1 bash -c "echo > /dev/tcp/$ip/$port" 2>&1)"; then
+    if probe_err="$(timeout 1 bash -c "echo > /dev/tcp/$ip/$port" </dev/null 2>&1)"; then
       return 0
     else
       return 1
@@ -191,7 +191,7 @@ if [ -z "$RESOLVED_IP" ] && [ -n "$MANIFEST" ]; then
       MDNS_IP="$(getent ahostsv4 "$MDNS_HOST" | awk '{print $1}' | head -n1)"
     elif command -v avahi-resolve >/dev/null; then
       a_out=""
-      if a_out="$(avahi-resolve -n "$MDNS_HOST")"; then
+      if a_out="$(avahi-resolve -n "$MDNS_HOST" 2>&1)"; then
         MDNS_IP="$(echo "$a_out" | awk '{print $2}' | head -n1)"
       fi
     fi
