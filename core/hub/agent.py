@@ -13,6 +13,7 @@ import json
 import os
 import signal
 import socket
+import ssl
 import subprocess
 import sys
 import threading
@@ -397,13 +398,16 @@ def fetch_model_quota() -> dict | None:
 class HubClient:
     def __init__(self, hub_url: str):
         self.hub_url = hub_url.rstrip("/")
+        self.ssl_ctx = ssl.create_default_context()
+        self.ssl_ctx.check_hostname = False
+        self.ssl_ctx.verify_mode = ssl.CERT_NONE
 
     def _post(self, path: str, payload: dict, timeout: float = 10.0) -> dict | None:
         url = f"{self.hub_url}{path}"
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with urllib.request.urlopen(req, timeout=timeout, context=self.ssl_ctx) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except Exception as e:
             # Suppress poll logs
@@ -415,7 +419,7 @@ class HubClient:
         url = f"{self.hub_url}{path}"
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with urllib.request.urlopen(req, timeout=timeout, context=self.ssl_ctx) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except Exception:
             return None
@@ -1205,17 +1209,33 @@ def resolve_hub_url() -> str:
         return os.environ["KNOT_HUB_URL"]
 
     my_host = socket.gethostname().lower()
+    user_home = os.environ.get("HOME", os.path.expanduser("~"))
     knot_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-    active_profile_file = "/run/knot/active_swarm"
-    if os.path.exists(active_profile_file):
-        try:
-            with open(active_profile_file, "r") as f:
-                active_id = f.read().strip()
-            conf_path = f"/etc/knot/swarms.d/{active_id}.conf"
-            if os.path.exists(conf_path):
-                anchor_host = ""
-                anchor_id = ""
-                hub_port = DEFAULT_HUB_PORT
+
+    active_id = "office"
+    for active_profile_file in ["/run/knot/active_swarm", os.path.join(user_home, ".local/state/knot/active_swarm")]:
+        if os.path.exists(active_profile_file):
+            try:
+                with open(active_profile_file, "r") as f:
+                    content = f.read().strip()
+                    if content and content != "none":
+                        active_id = content
+                        break
+            except Exception:
+                pass
+
+    conf_candidates = [
+        f"/etc/knot/swarms.d/{active_id}.conf",
+        os.path.join(user_home, f".config/knot/swarms/{active_id}.conf"),
+        os.path.join(user_home, f".config/knot/swarms/{active_id}/swarm.conf"),
+    ]
+
+    for conf_path in conf_candidates:
+        if os.path.exists(conf_path):
+            anchor_host = ""
+            anchor_id = ""
+            hub_port = DEFAULT_HUB_PORT
+            try:
                 with open(conf_path, "r") as f:
                     for line in f:
                         if line.startswith("ANCHOR_HOST="):
@@ -1225,24 +1245,25 @@ def resolve_hub_url() -> str:
                         elif line.startswith("HUB_PORT="):
                             hub_port = int(line.split("=", 1)[1].strip().strip('"'))
                 if my_host in (anchor_host.lower(), anchor_id.lower()):
-                    return f"http://127.0.0.1:{hub_port}"
-        except Exception:
-            pass
+                    return f"https://127.0.0.1:{hub_port}"
+                elif anchor_host:
+                    return f"https://{anchor_host}:{hub_port}"
+            except Exception:
+                pass
 
-    # Try resolving 'desktop' Anchor via resolver or known IP hint
+    # Try resolving Anchor via resolver.sh
     try:
-        knot_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
         resolver = os.path.join(knot_root, "core/resolver.sh")
         if os.path.exists(resolver):
-            p = subprocess.run([resolver, "desktop", "22"], capture_output=True, text=True, timeout=3)
+            p = subprocess.run([resolver, "desktop", "4242"], capture_output=True, text=True, timeout=3)
             if p.returncode == 0 and p.stdout.strip():
                 ip = p.stdout.strip()
-                return f"http://{ip}:{DEFAULT_HUB_PORT}"
+                return f"https://{ip}:{DEFAULT_HUB_PORT}"
     except Exception:
         pass
 
-    # Fallback to local loopback
-    return f"http://127.0.0.1:{DEFAULT_HUB_PORT}"
+    # Fallback to local loopback HTTPS
+    return f"https://127.0.0.1:{DEFAULT_HUB_PORT}"
 
 
 def main():

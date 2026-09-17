@@ -534,19 +534,74 @@ JOIN_HELP
   # Post-enrollment setup
   echo -e "${C_CYAN}[•] Finalizing local service configurations...${C_RESET}"
 
-  # 1. Ensure OpenSSH daemon is enabled for Anchor remote execution
+  # 1. Ensure OpenSSH daemon is enabled and active for Anchor remote execution
   if command -v systemctl >/dev/null; then
-    if ! systemctl is-active --quiet sshd 2>/dev/null; then
-      if command -v sudo >/dev/null && sudo -n systemctl enable --now sshd 2>/dev/null; then
-        echo -e "  ${C_GREEN}[✓] OpenSSH daemon (sshd) enabled and started.${C_RESET}"
+    local ssh_svc="sshd"
+    local list_units=""
+    if list_units="$(systemctl list-unit-files 2>&1)"; then
+      if echo "$list_units" | grep -q "^ssh\.service"; then
+        ssh_svc="ssh"
+      fi
+    fi
+
+    local is_active=0
+    local act_probe=""
+    if act_probe="$(systemctl is-active "$ssh_svc" 2>&1)"; then
+      if [ "$act_probe" = "active" ]; then
+        is_active=1
+      fi
+    fi
+
+    if [ "$is_active" -eq 1 ]; then
+      echo -e "  ${C_GREEN}[✓] OpenSSH daemon (${ssh_svc}) is active and running.${C_RESET}"
+    else
+      if command -v sudo >/dev/null; then
+        echo -e "  ${C_CYAN}[•] Enabling and starting OpenSSH daemon (${ssh_svc})...${C_RESET}"
+        local s_out=""
+        if s_out="$(sudo systemctl enable --now "$ssh_svc" 2>&1)"; then
+          echo -e "  ${C_GREEN}[✓] OpenSSH daemon (${ssh_svc}) enabled and started.${C_RESET}"
+        else
+          echo -e "  ${C_YELLOW}[!] Notice: Could not enable ${ssh_svc}: ${s_out}${C_RESET}"
+        fi
+      else
+        echo -e "  ${C_YELLOW}[!] Sudo not available to start ${ssh_svc} automatically.${C_RESET}"
       fi
     fi
   fi
 
-  # 2. Deploy Deskflow KVM client runner and user service
+  # 2. Configure PAM dynamic sudo gate if supported by active swarm
+  if [ -f "$KNOT_ROOT/core/modules/sudo.sh" ] && command -v sudo >/dev/null; then
+    source "$KNOT_ROOT/core/modules/sudo.sh"
+    local sudo_err=""
+    if sudo_err="$(sudo_configure 2>&1)"; then
+      echo -e "  ${C_GREEN}[✓] Dynamic PAM passwordless sudo gate configured for active swarm.${C_RESET}"
+    else
+      echo -e "  ${C_YELLOW}[!] Notice: Could not configure PAM sudo gate: ${sudo_err}${C_RESET}"
+    fi
+  fi
+
+  # 3. Deploy Deskflow KVM client runner and user service
   if [ -f "$KNOT_ROOT/core/modules/deskflow.sh" ]; then
     source "$KNOT_ROOT/core/modules/deskflow.sh"
     deskflow_configure
+  fi
+
+  # 4. Deploy Knot Tuplespace Worker Agent user service
+  local agent_svc="$KNOT_ROOT/systemd/knot-agent.service"
+  local user_unit_dir="${HOME}/.config/systemd/user"
+  if [ -f "$agent_svc" ] && command -v systemctl >/dev/null; then
+    mkdir -p "$user_unit_dir"
+    ln -sf "$agent_svc" "$user_unit_dir/knot-agent.service"
+    local r_out=""
+    if r_out="$(systemctl --user daemon-reload 2>&1)"; then
+      :
+    fi
+    local a_out=""
+    if a_out="$(systemctl --user enable --now knot-agent.service 2>&1)"; then
+      echo -e "  ${C_GREEN}[✓] Knot Tuplespace Agent service enabled and active.${C_RESET}"
+    else
+      echo -e "  ${C_YELLOW}[!] Notice: Could not start knot-agent.service: ${a_out}${C_RESET}"
+    fi
   fi
 
   echo -e "${C_GREEN}${C_BOLD}[✓] Onboarding complete! This device is now an active Strand in the mesh.${C_RESET}\n"

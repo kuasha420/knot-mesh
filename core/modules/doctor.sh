@@ -90,28 +90,44 @@ doctor_check_local() {
   # 2. XDG Desktop Portals & RemoteDesktop Interface
   echo -e "\n${C_BOLD}[Desktop Portals & EI Integration]${C_RESET}"
   local portal_active=0
-  if systemctl --user is-active --quiet xdg-desktop-portal.service 2>/dev/null; then
-    doc_ok "xdg-desktop-portal.service is active"
-    portal_active=1
+  local p_out=""
+  if p_out="$(systemctl --user is-active xdg-desktop-portal.service 2>&1)"; then
+    if [ "$p_out" = "active" ]; then
+      doc_ok "xdg-desktop-portal.service is active"
+      portal_active=1
+    else
+      doc_fail "xdg-desktop-portal.service is not active ($p_out)"
+      failures=$((failures + 1))
+    fi
   else
-    doc_fail "xdg-desktop-portal.service is not active"
+    doc_fail "xdg-desktop-portal.service is not active ($p_out)"
     failures=$((failures + 1))
   fi
 
   local kde_portal_installed=0
   if command -v pacman >/dev/null; then
-    if pacman -Qs xdg-desktop-portal-kde >/dev/null 2>&1; then
+    local pac_out=""
+    if pac_out="$(pacman -Qs xdg-desktop-portal-kde 2>&1)"; then
       kde_portal_installed=1
     fi
-  elif dpkg -l xdg-desktop-portal-kde >/dev/null 2>&1; then
-    kde_portal_installed=1
+  elif command -v dpkg >/dev/null; then
+    local dpkg_out=""
+    if dpkg_out="$(dpkg -l xdg-desktop-portal-kde 2>&1)"; then
+      kde_portal_installed=1
+    fi
   elif [ -f /usr/lib/xdg-desktop-portal-kde ] || [ -f /usr/libexec/xdg-desktop-portal-kde ]; then
     kde_portal_installed=1
   fi
 
   if [ $kde_portal_installed -eq 1 ]; then
-    if systemctl --user is-active --quiet plasma-xdg-desktop-portal-kde.service 2>/dev/null; then
-      doc_ok "plasma-xdg-desktop-portal-kde.service is active"
+    local pkde_out=""
+    if pkde_out="$(systemctl --user is-active plasma-xdg-desktop-portal-kde.service 2>&1)"; then
+      if [ "$pkde_out" = "active" ]; then
+        doc_ok "plasma-xdg-desktop-portal-kde.service is active"
+      else
+        doc_fail "plasma-xdg-desktop-portal-kde.service is INACTIVE (KVM client will fail without RemoteDesktop interface)"
+        failures=$((failures + 1))
+      fi
     else
       doc_fail "plasma-xdg-desktop-portal-kde.service is INACTIVE (KVM client will fail without RemoteDesktop interface)"
       failures=$((failures + 1))
@@ -128,30 +144,39 @@ doctor_check_local() {
 
   # Test D-Bus interface availability
   if command -v gdbus >/dev/null; then
-    if gdbus introspect --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop 2>/dev/null | grep -q 'interface org.freedesktop.portal.RemoteDesktop'; then
-      doc_ok "D-Bus portal exports 'org.freedesktop.portal.RemoteDesktop'"
-    else
-      doc_fail "D-Bus portal DOES NOT export 'org.freedesktop.portal.RemoteDesktop' (Deskflow cannot inject input!)"
-      failures=$((failures + 1))
-    fi
-
-    if gdbus introspect --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop 2>/dev/null | grep -q 'interface org.freedesktop.portal.InputCapture'; then
-      doc_ok "D-Bus portal exports 'org.freedesktop.portal.InputCapture'"
-    else
-      if [ $is_anchor -eq 1 ]; then
-        doc_warn "D-Bus portal does not export 'org.freedesktop.portal.InputCapture' (Anchor uses persistence shim fallback)"
-        warnings=$((warnings + 1))
+    local gdbus_out=""
+    if gdbus_out="$(gdbus introspect --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop 2>&1)"; then
+      if echo "$gdbus_out" | grep -q 'interface org.freedesktop.portal.RemoteDesktop'; then
+        doc_ok "D-Bus portal exports 'org.freedesktop.portal.RemoteDesktop'"
+      else
+        doc_fail "D-Bus portal DOES NOT export 'org.freedesktop.portal.RemoteDesktop' (Deskflow cannot inject input!)"
+        failures=$((failures + 1))
       fi
+
+      if echo "$gdbus_out" | grep -q 'interface org.freedesktop.portal.InputCapture'; then
+        doc_ok "D-Bus portal exports 'org.freedesktop.portal.InputCapture'"
+      else
+        if [ $is_anchor -eq 1 ]; then
+          doc_warn "D-Bus portal does not export 'org.freedesktop.portal.InputCapture' (Anchor uses persistence shim fallback)"
+          warnings=$((warnings + 1))
+        fi
+      fi
+    else
+      doc_fail "Could not query D-Bus portal: $gdbus_out"
+      failures=$((failures + 1))
     fi
   fi
 
   # Flatpak permissions
   if command -v flatpak >/dev/null; then
-    if flatpak permissions 2>/dev/null | grep -qE "kde-authorized[[:space:]]+remote-desktop"; then
-      doc_ok "Flatpak kde-authorized remote-desktop permission is granted"
-    else
-      doc_warn "Flatpak kde-authorized remote-desktop permission not set"
-      warnings=$((warnings + 1))
+    local flatpak_out=""
+    if flatpak_out="$(flatpak permissions 2>&1)"; then
+      if echo "$flatpak_out" | grep -qE "kde-authorized[[:space:]]+remote-desktop"; then
+        doc_ok "Flatpak kde-authorized remote-desktop permission is granted"
+      else
+        doc_warn "Flatpak kde-authorized remote-desktop permission not set"
+        warnings=$((warnings + 1))
+      fi
     fi
   fi
 
@@ -219,8 +244,11 @@ doctor_check_local() {
   local tls_dir="$HOME/.config/Deskflow/tls"
   if [ -f "$tls_dir/deskflow.pem" ]; then
     doc_ok "TLS certificate present: $tls_dir/deskflow.pem"
-    local fp
-    fp="$(openssl x509 -in "$tls_dir/deskflow.pem" -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]' || true)"
+    local fp=""
+    local fp_probe=""
+    if fp_probe="$(openssl x509 -in "$tls_dir/deskflow.pem" -noout -fingerprint -sha256 2>&1)"; then
+      fp="$(echo "$fp_probe" | cut -d= -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+    fi
     if [ -n "$fp" ]; then
       if [ -f "$tls_dir/trusted-servers" ] && grep -q "$fp" "$tls_dir/trusted-servers"; then
         doc_ok "Server certificate fingerprint recognized in trusted-servers"
@@ -285,8 +313,14 @@ doctor_check_local() {
     warnings=$((warnings + 1))
   fi
 
-  if systemctl --user is-active --quiet knot-autounlock.service 2>/dev/null; then
-    doc_ok "knot-autounlock.service is active"
+  local unlock_probe=""
+  if unlock_probe="$(systemctl --user is-active knot-autounlock.service 2>&1)"; then
+    if [ "$unlock_probe" = "active" ]; then
+      doc_ok "knot-autounlock.service is active"
+    else
+      doc_warn "knot-autounlock.service is not active ($unlock_probe)"
+      warnings=$((warnings + 1))
+    fi
   else
     doc_warn "knot-autounlock.service is not active"
     warnings=$((warnings + 1))
@@ -558,42 +592,50 @@ doctor_repair_local() {
       ln -sf "$kde_portal_service" "$wants_dir/plasma-xdg-desktop-portal-kde.service"
       systemctl --user daemon-reload
     fi
-    if ! systemctl --user is-active --quiet plasma-xdg-desktop-portal-kde.service 2>/dev/null; then
+    local pkde_act=""
+    if pkde_act="$(systemctl --user is-active plasma-xdg-desktop-portal-kde.service 2>&1)"; then
+      if [ "$pkde_act" != "active" ]; then
+        knot_log_info "Starting plasma-xdg-desktop-portal-kde.service..."
+        systemctl --user start plasma-xdg-desktop-portal-kde.service
+      fi
+    else
       knot_log_info "Starting plasma-xdg-desktop-portal-kde.service..."
-      systemctl --user start plasma-xdg-desktop-portal-kde.service 2>/dev/null || true
+      systemctl --user start plasma-xdg-desktop-portal-kde.service
     fi
   fi
 
   # 2. Check if portal D-Bus interface is missing
   local portal_broken=0
   if command -v gdbus >/dev/null; then
-    if [ $is_anchor -eq 0 ]; then
-      if ! gdbus introspect --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop 2>/dev/null | grep -q 'interface org.freedesktop.portal.RemoteDesktop'; then
-        portal_broken=1
-      fi
-    else
-      if ! gdbus introspect --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop 2>/dev/null | grep -q 'interface org.freedesktop.portal.InputCapture'; then
-        portal_broken=1
+    local gdbus_chk=""
+    if gdbus_chk="$(gdbus introspect --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop 2>&1)"; then
+      if [ $is_anchor -eq 0 ]; then
+        if ! echo "$gdbus_chk" | grep -q 'interface org.freedesktop.portal.RemoteDesktop'; then
+          portal_broken=1
+        fi
+      else
+        if ! echo "$gdbus_chk" | grep -q 'interface org.freedesktop.portal.InputCapture'; then
+          portal_broken=1
+        fi
       fi
     fi
   fi
 
   # CRITICAL SAFETY: NEVER restart xdg-desktop-portal while Deskflow is running on Anchor!
-  # If portal is broken, stop knot-deskflow FIRST so KWin does not trap pointer/keyboard in an orphaned session.
   if [ $portal_broken -eq 1 ]; then
     knot_log_warn "Portal interface missing. Safely stopping deskflow before reloading xdg-desktop-portal..."
-    systemctl --user stop knot-deskflow.service 2>/dev/null || true
+    systemctl --user stop knot-deskflow.service
     sleep 0.5
-    systemctl --user restart xdg-desktop-portal.service 2>/dev/null || true
+    systemctl --user restart xdg-desktop-portal.service
     sleep 1
   fi
 
   # 3. Flatpak Remote Desktop Permissions
   if command -v flatpak >/dev/null; then
-    flatpak permission-set kde-authorized remote-desktop "" yes 2>/dev/null || true
-    flatpak permission-set kde-authorized remote-desktop org.deskflow.deskflow yes 2>/dev/null || true
-    flatpak permission-set kde-authorized remote-desktop deskflow yes 2>/dev/null || true
-    flatpak permission-set kde-authorized remote-desktop deskflow-core yes 2>/dev/null || true
+    flatpak permission-set kde-authorized remote-desktop "" yes
+    flatpak permission-set kde-authorized remote-desktop org.deskflow.deskflow yes
+    flatpak permission-set kde-authorized remote-desktop deskflow yes
+    flatpak permission-set kde-authorized remote-desktop deskflow-core yes
   fi
 
   # 4. Deskflow TLS sync
@@ -616,8 +658,16 @@ doctor_repair_local() {
     chmod 600 "$tls_dir/trusted-servers" "$tls_dir/trusted-clients"
   else
     if [ ! -f "$tls_dir/deskflow.pem" ]; then
-      knot_log_info "Syncing TLS certificate and fingerprints from Anchor desktop..."
-      scp -o BatchMode=yes -o ConnectTimeout=4 "desktop:.config/Deskflow/tls/deskflow.pem" "$tls_dir/deskflow.pem" 2>/dev/null || true
+      knot_log_info "Syncing TLS certificate and fingerprints from Anchor..."
+      local hub_addr="${anchor_host:-desktop}"
+      local h_port="4242"
+      if [ -r "/etc/knot/swarms.d/${active_swarm}.conf" ]; then
+        h_port="$(awk -F= '/HUB_PORT=/ {gsub(/[^0-9]/, "", $2); print $2}' "/etc/knot/swarms.d/${active_swarm}.conf")"
+      fi
+      local curl_out=""
+      if curl_out="$(curl -kfsSL "https://${hub_addr}:${h_port:-4242}/dist/deskflow.pem" -o "$tls_dir/deskflow.pem" 2>&1)"; then
+        chmod 600 "$tls_dir/deskflow.pem"
+      fi
     fi
     if [ -f "$tls_dir/deskflow.pem" ]; then
       chmod 600 "$tls_dir/deskflow.pem"
@@ -634,19 +684,97 @@ doctor_repair_local() {
   if [ $is_anchor -eq 0 ]; then
     deskflow_configure
   else
-    # On Anchor: only configure/restart if not running or listening
-    if ! ss -H -tl sport = :24800 2>/dev/null | grep -q 24800 || ! systemctl --user is-active --quiet knot-deskflow 2>/dev/null; then
+    local desk_running=0
+    local ss_out=""
+    if ss_out="$(ss -H -tl sport = :24800 2>&1)"; then
+      if echo "$ss_out" | grep -q "24800"; then
+        desk_running=1
+      fi
+    fi
+    local desk_act=""
+    if desk_act="$(systemctl --user is-active knot-deskflow 2>&1)"; then
+      if [ "$desk_act" != "active" ]; then
+        desk_running=0
+      fi
+    fi
+    if [ $desk_running -eq 0 ]; then
       deskflow_configure
     fi
   fi
 
   # 6. Ensure auto-unlock daemon is running
   source "$KNOT_ROOT/core/modules/autounlock.sh"
-  if ! systemctl --user is-active --quiet knot-autounlock 2>/dev/null; then
+  local auto_act=""
+  if auto_act="$(systemctl --user is-active knot-autounlock 2>&1)"; then
+    if [ "$auto_act" != "active" ]; then
+      autounlock_configure
+    fi
+  else
     autounlock_configure
   fi
 
-  # 7. Ensure KDE Connect mesh sync & clipboard sharing
+  # 7. Ensure OpenSSH server daemon is active
+  if command -v systemctl >/dev/null; then
+    local ssh_svc="sshd"
+    local list_units=""
+    if list_units="$(systemctl list-unit-files 2>&1)"; then
+      if echo "$list_units" | grep -q "^ssh\.service"; then
+        ssh_svc="ssh"
+      fi
+    fi
+    local act_probe=""
+    if act_probe="$(systemctl is-active "$ssh_svc" 2>&1)"; then
+      if [ "$act_probe" != "active" ]; then
+        if command -v sudo >/dev/null; then
+          knot_log_info "OpenSSH daemon ($ssh_svc) is inactive. Enabling and starting..."
+          local s_out=""
+          if s_out="$(sudo systemctl enable --now "$ssh_svc" 2>&1)"; then
+            knot_log_ok "OpenSSH daemon ($ssh_svc) started successfully."
+          else
+            knot_log_warn "Could not enable $ssh_svc: $s_out"
+          fi
+        fi
+      fi
+    fi
+  fi
+
+  # 8. Ensure PAM dynamic sudo gate is configured
+  if [ -f "$KNOT_ROOT/core/modules/sudo.sh" ] && command -v sudo >/dev/null; then
+    source "$KNOT_ROOT/core/modules/sudo.sh"
+    local sudo_err=""
+    if sudo_err="$(sudo_configure 2>&1)"; then
+      knot_log_ok "Dynamic PAM passwordless sudo gate verified."
+    else
+      knot_log_warn "Could not configure PAM sudo gate: $sudo_err"
+    fi
+  fi
+
+  # 9. Ensure Knot Tuplespace Agent is active
+  local agent_svc="$KNOT_ROOT/systemd/knot-agent.service"
+  local user_unit_dir="${HOME}/.config/systemd/user"
+  if [ -f "$agent_svc" ] && command -v systemctl >/dev/null; then
+    mkdir -p "$user_unit_dir"
+    ln -sf "$agent_svc" "$user_unit_dir/knot-agent.service"
+    local r_out=""
+    if r_out="$(systemctl --user daemon-reload 2>&1)"; then :; fi
+    local a_probe=""
+    if a_probe="$(systemctl --user is-active knot-agent.service 2>&1)"; then
+      if [ "$a_probe" != "active" ]; then
+        local a_start=""
+        if a_start="$(systemctl --user enable --now knot-agent.service 2>&1)"; then
+          knot_log_ok "Knot Tuplespace Agent service enabled and active."
+        else
+          knot_log_warn "Could not start knot-agent.service: $a_start"
+        fi
+      fi
+    fi
+  fi
+
+  # 10. Ensure ~/.ssh/config is up to date with active swarm aliases
+  source "$KNOT_ROOT/core/modules/ssh.sh"
+  ssh_sync_client_config
+
+  # 11. Ensure KDE Connect mesh sync & clipboard sharing
   source "$KNOT_ROOT/core/modules/kdeconnect.sh"
   kdeconnect_sync_mesh
 
@@ -695,40 +823,92 @@ doctor_repair() {
     # Step 1: Check Anchor Health. ONLY repair Anchor if it is NOT healthy!
     local anchor_healthy=1
     if [ "$my_host" = "$anchor_host" ]; then
-      if ! ss -H -tl sport = :24800 2>/dev/null | grep -q 24800 || ! systemctl --user is-active --quiet knot-deskflow 2>/dev/null; then
+      local a_ss=""
+      local a_act=""
+      a_ss="$(ss -H -tl sport = :24800 2>&1)"
+      a_act="$(systemctl --user is-active knot-deskflow 2>&1)"
+      if ! echo "$a_ss" | grep -q "24800" || [ "$a_act" != "active" ]; then
         anchor_healthy=0
         doctor_repair_local
       else
         knot_log_ok "Anchor desktop ($anchor_host) KVM server is healthy and listening."
       fi
     else
-      if ! ssh -o BatchMode=yes -o ConnectTimeout=3 "$anchor_id" "ss -H -tl sport = :24800 | grep -q 24800 && systemctl --user is-active --quiet knot-deskflow" 2>/dev/null; then
+      local a_probe=""
+      if a_probe="$(ssh -o BatchMode=yes -o ConnectTimeout=3 "$anchor_id" "ss -H -tl sport = :24800 | grep -q 24800 && systemctl --user is-active --quiet knot-deskflow" 2>&1)"; then
+        knot_log_ok "Anchor desktop ($anchor_host) KVM server is healthy and listening."
+      else
         anchor_healthy=0
         knot_log_info "Initiating repair on Anchor desktop ($anchor_host)..."
-        ssh -o BatchMode=yes -o ConnectTimeout=5 "$anchor_id" "knot repair local 2>/dev/null || ~/Dev/knot/bin/knot repair local" || knot_log_warn "Failed to repair Anchor"
-      else
-        knot_log_ok "Anchor desktop ($anchor_host) KVM server is healthy and listening."
+        local rep_out=""
+        if rep_out="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$anchor_id" "knot doctor --repair local" 2>&1)"; then
+          knot_log_ok "Anchor repaired."
+        else
+          knot_log_warn "Failed to repair Anchor: $rep_out"
+        fi
       fi
     fi
 
     sleep 0.5
 
-    # Step 2: Repair Strands
-    for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
-      [ -e "$manifest" ] || continue
+    # Step 2: Repair Strands across all active swarm and registry manifests
+    local strand_manifests=()
+    local user_home
+    user_home="$(knot_detect_user_home)"
+    if [ -n "$active_swarm" ] && [ "$active_swarm" != "none" ] && [ -d "$user_home/.config/knot/swarms/${active_swarm}/nodes" ]; then
+      for m in "$user_home/.config/knot/swarms/${active_swarm}/nodes/"*.json; do
+        [ -e "$m" ] || continue
+        strand_manifests+=("$m")
+      done
+    fi
+    if [ -d "$KNOT_ROOT/registry/nodes" ]; then
+      for m in "$KNOT_ROOT/registry/nodes/"*.json; do
+        [ -e "$m" ] || continue
+        strand_manifests+=("$m")
+      done
+    fi
+
+    local seen_strands=()
+    for manifest in "${strand_manifests[@]}"; do
       local id host
       id="$(grep -o '"id":[[:space:]]*"[^"]*"' "$manifest" | cut -d'"' -f4)"
       host="$(grep -o '"hostname":[[:space:]]*"[^"]*"' "$manifest" | cut -d'"' -f4)"
+      [ -n "$id" ] || continue
+      if [[ " ${seen_strands[*]:-} " =~ " ${id} " ]]; then continue; fi
+      seen_strands+=("$id")
 
       if [ "$id" = "$anchor_id" ] || [ "$host" = "$anchor_host" ]; then
         continue
       fi
 
-      if [ "$my_host" = "$host" ]; then
+      if [ "$my_host" = "$host" ] || [ "$my_host" = "$id" ]; then
         doctor_repair_local
       else
         knot_log_info "Initiating repair on Strand $id ($host)..."
-        ssh -o BatchMode=yes -o ConnectTimeout=5 "$id" "knot repair local 2>/dev/null || ~/Dev/knot/bin/knot repair local" || knot_log_warn "Failed to repair $id"
+        local s_rep=""
+        if s_rep="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$id" "knot doctor --repair local" 2>&1)"; then
+          knot_log_ok "Strand $id repair completed."
+        else
+          knot_log_warn "Notice: Strand $id could not be contacted directly via SSH: $s_rep"
+          knot_log_info "Submitting autonomous self-healing task to Knot Hub for $id..."
+          python3 -c '
+import urllib.request, json, ssl, sys
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+payload = {
+    "title": "Self-Healing Repair Task for " + sys.argv[1],
+    "prompt": "knot doctor --repair local",
+    "target_plane": sys.argv[1]
+}
+try:
+    req = urllib.request.Request("https://127.0.0.1:4242/tasks/post", data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, context=ctx, timeout=3) as resp:
+        print("[✓] Tuplespace repair task queued for", sys.argv[1])
+except Exception as e:
+    pass
+' "$id"
+        fi
       fi
     done
 
@@ -745,8 +925,13 @@ doctor_repair() {
       doctor_repair_local
     else
       knot_log_info "Initiating repair on target $target..."
-      ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "knot repair local 2>/dev/null || ~/Dev/knot/bin/knot repair local"
-      "$KNOT_ROOT/bin/knot" exec "$target" "systemctl --user restart knot-deskflow.service"
+      local t_out=""
+      if t_out="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "knot doctor --repair local" 2>&1)"; then
+        knot_log_ok "Target $target repaired."
+        "$KNOT_ROOT/bin/knot" exec "$target" "systemctl --user restart knot-deskflow.service"
+      else
+        knot_log_warn "Notice: Target $target could not be contacted directly via SSH: $t_out"
+      fi
     fi
   fi
 

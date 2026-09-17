@@ -120,10 +120,38 @@ is_port_open() {
   fi
 }
 
+is_host_alive() {
+  local ip="$1"
+  if [ -z "$ip" ]; then return 1; fi
+
+  # 1. Primary check: requested port
+  if is_port_open "$ip" "$PORT"; then
+    return 0
+  fi
+
+  # 2. In proxy mode, we must strictly have $PORT open for SSH/TCP forwarding
+  if [ "$MODE" = "proxy" ]; then
+    return 1
+  fi
+
+  # 3. Address resolution fallback: probe mesh ports (24800 Deskflow, 4242 Hub)
+  if is_port_open "$ip" 24800 || is_port_open "$ip" 4242; then
+    return 0
+  fi
+
+  # 4. Address resolution fallback: ICMP ping
+  local p_out=""
+  if p_out="$(ping -c 1 -W 1 "$ip" 2>&1)"; then
+    return 0
+  fi
+
+  return 1
+}
+
 # --- TIER 0: Check lease cache ---
 if [ -r "$LEASE_FILE" ]; then
   CACHED_IP="$(tr -d '[:space:]' < "$LEASE_FILE")"
-  if [ -n "$CACHED_IP" ] && is_port_open "$CACHED_IP" "$PORT"; then
+  if [ -n "$CACHED_IP" ] && is_host_alive "$CACHED_IP"; then
     RESOLVED_IP="$CACHED_IP"
   fi
 fi
@@ -142,7 +170,7 @@ if [ -z "$RESOLVED_IP" ]; then
       IS_LOCAL=1
     fi
   fi
-  if [ "$IS_LOCAL" -eq 1 ] && is_port_open "127.0.0.1" "$PORT"; then
+  if [ "$IS_LOCAL" -eq 1 ] && is_host_alive "127.0.0.1"; then
     RESOLVED_IP="127.0.0.1"
   fi
 fi
@@ -167,7 +195,7 @@ if [ -z "$RESOLVED_IP" ] && [ -n "$MANIFEST" ]; then
         MDNS_IP="$(echo "$a_out" | awk '{print $2}' | head -n1)"
       fi
     fi
-    if [ -n "$MDNS_IP" ] && is_port_open "$MDNS_IP" "$PORT"; then
+    if [ -n "$MDNS_IP" ] && is_host_alive "$MDNS_IP"; then
       RESOLVED_IP="$MDNS_IP"
     fi
   fi
@@ -176,7 +204,7 @@ fi
 # --- TIER 2: IP Hint from Manifest ---
 if [ -z "$RESOLVED_IP" ] && [ -n "$MANIFEST" ]; then
   IP_HINT="$(awk -F'"' '/"ip_hint":/ {print $4}' "$MANIFEST")"
-  if [ -n "$IP_HINT" ] && is_port_open "$IP_HINT" "$PORT"; then
+  if [ -n "$IP_HINT" ] && is_host_alive "$IP_HINT"; then
     RESOLVED_IP="$IP_HINT"
   fi
 fi
@@ -187,7 +215,7 @@ if [ -z "$RESOLVED_IP" ] && [ -n "$MANIFEST" ]; then
   for mac in $MACS; do
     LOWER_MAC="$(echo "$mac" | tr '[:upper:]' '[:lower:]')"
     FOUND_IP="$(ip neigh | awk -v mac="$LOWER_MAC" 'tolower($0) ~ mac {print $1; exit}')"
-    if [ -n "$FOUND_IP" ] && is_port_open "$FOUND_IP" "$PORT"; then
+    if [ -n "$FOUND_IP" ] && is_host_alive "$FOUND_IP"; then
       RESOLVED_IP="$FOUND_IP"
       break
     fi
@@ -212,7 +240,7 @@ if [ -z "$RESOLVED_IP" ] && [ -n "$MANIFEST" ]; then
     for mac in $MACS; do
       LOWER_MAC="$(echo "$mac" | tr '[:upper:]' '[:lower:]')"
       FOUND_IP="$(ip neigh | awk -v mac="$LOWER_MAC" 'tolower($0) ~ mac {print $1; exit}')"
-      if [ -n "$FOUND_IP" ] && is_port_open "$FOUND_IP" "$PORT"; then
+      if [ -n "$FOUND_IP" ] && is_host_alive "$FOUND_IP"; then
         RESOLVED_IP="$FOUND_IP"
         break
       fi

@@ -729,6 +729,11 @@ def render_bootstrap_script(swarm_name: str, anchor_host: str, anchor_port: str,
     return f"""#!/usr/bin/env bash
 set -euo pipefail
 
+# Re-attach standard input to /dev/tty if run via curl | bash
+if [ -t 1 ] && [ -r /dev/tty ] && [ ! -t 0 ]; then
+  exec < /dev/tty
+fi
+
 # Knot Mesh Zero-Setup Strand Onboarding Bootstrap
 # Swarm: {swarm_name} | Anchor: {anchor_host}:{anchor_port}
 
@@ -805,6 +810,14 @@ chmod +x "$INSTALL_DIR/bin/knot" "$INSTALL_DIR/bin/knot-installer" "$INSTALL_DIR
 chmod +x "$INSTALL_DIR/core/installer/display.sh" "$INSTALL_DIR/core/installer/enroll.py"
 
 export PATH="$BIN_DIR:$PATH"
+
+# Pre-authenticate sudo credentials if available so background system setup succeeds seamlessly
+if command -v sudo >/dev/null; then
+  echo -e "${{C_CYAN}}[•] Authenticating root privileges for system service & OpenSSH configuration...${{C_RESET}}"
+  if ! sudo -n true 2>&1 >/dev/null; then
+    sudo -v || echo -e "${{C_YELLOW}}[!] Notice: Sudo authentication cancelled. Continuing with user-level setup...${{C_RESET}}"
+  fi
+fi
 
 # Step 4: Execute enrollment handshake
 echo -e "${{C_CYAN}}[•] Submitting Strand enrollment to Anchor...${{C_RESET}}"
@@ -2759,6 +2772,14 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                                 subprocess.run(["systemctl", "--user", "restart", "knot-deskflow.service"], check=False)
                         except Exception as te:
                             sys.stderr.write(f"[knot-hub] Error auto-updating topology/deskflow: {te}\n")
+
+                    # Synchronize Anchor ~/.ssh/config so newly enrolled node is immediately reachable
+                    ssh_script = os.path.join(REPO_ROOT, "core/modules/ssh.sh")
+                    if os.path.isfile(ssh_script):
+                        try:
+                            subprocess.run(["bash", ssh_script, "sync-config"], check=False)
+                        except Exception as se:
+                            sys.stderr.write(f"[knot-hub] Error syncing ssh config: {se}\n")
 
             ok, msg = enrollment_coordinator.approve_enrollment(pin, placement, anchor_meta)
             if ok:

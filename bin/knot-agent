@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Knot Swarm Worker Agent CLI Wrapper
+KNOT_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+exec python3 "$KNOT_ROOT/core/hub/agent.py" "$@"

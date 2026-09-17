@@ -228,3 +228,22 @@ ssh_sync_client_config() {
   chown "$user:" "$config_file"
   knot_log_ok "~/.ssh/config compiled with dynamic resolver ProxyCommands."
 }
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  case "${1:-}" in
+    sync-config|client-config)
+      ssh_sync_client_config
+      ;;
+    sync-keys|authorized-keys)
+      ssh_sync_authorized_keys
+      ;;
+    harden)
+      ssh_harden_server
+      ;;
+    *)
+      ssh_ensure_local_key
+      ssh_sync_authorized_keys
+      ssh_sync_client_config
+      ;;
+  esac
+fi
