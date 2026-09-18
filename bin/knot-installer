@@ -734,7 +734,7 @@ main() {
       cmd_uninstall "$@"
       ;;
     -v|--version|version)
-      echo "knot-mesh version 1.0.0-rc1"
+      echo "knot-mesh version 1.0.0-rc2"
       ;;
     -h|--help|help)
       usage

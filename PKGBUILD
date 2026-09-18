@@ -1,6 +1,6 @@
 # Maintainer: Arafat Zahan <kuasha420>
 pkgname=knot-mesh
-pkgver=1.0.0.rc1
+pkgver=1.0.0.rc2
 pkgrel=1
 pkgdesc="Distributed workspace mesh for Arch Linux / KDE Plasma 6 Wayland"
 arch=('any')
@@ -22,14 +22,14 @@ optdepends=(
     'wlr-randr: Wayland display auto-discovery for wlroots compositors'
     'libnotify: Desktop notification support for KVM cursor locking'
 )
-source=("knot-mesh-${pkgver}.tar.gz::https://github.com/kuasha420/knot-mesh/archive/refs/tags/v1.0.0-rc1.tar.gz")
+source=("knot-mesh-${pkgver}.tar.gz::https://github.com/kuasha420/knot-mesh/archive/refs/tags/v1.0.0-rc2.tar.gz")
 sha256sums=('SKIP')
 
 package() {
     if [ -d "${srcdir}/${pkgname}-${pkgver}" ]; then
         cd "${srcdir}/${pkgname}-${pkgver}"
-    elif [ -d "${srcdir}/${pkgname}-1.0.0-rc1" ]; then
-        cd "${srcdir}/${pkgname}-1.0.0-rc1"
+    elif [ -d "${srcdir}/${pkgname}-1.0.0-rc2" ]; then
+        cd "${srcdir}/${pkgname}-1.0.0-rc2"
     else
         cd "${srcdir}"
     fi
