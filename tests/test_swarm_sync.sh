@@ -41,6 +41,11 @@ export KNOT_RUNTIME_DIR="$TMP_DIR/run"
 export MOCK_REMOTE_HOME="$TMP_DIR/remote_home"
 mkdir -p "$HOME/.config/knot/swarms/testswarm/nodes" "$HOME/.local/state/knot" "$KNOT_RUNTIME_DIR" "$MOCK_REMOTE_HOME"
 
+sudo() {
+  return 1
+}
+export -f sudo
+
 # Setup test swarm profile & topology on Anchor
 cat << 'SWARM_EOF' > "$HOME/.config/knot/swarms/testswarm/swarm.conf"
 SWARM_ID="testswarm"
