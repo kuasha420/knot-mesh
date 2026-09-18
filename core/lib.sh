@@ -46,7 +46,7 @@ knot_detect_sshd_port() {
   fi
   if [ -z "$p" ] && command -v sshd >/dev/null; then
     if sudo -n true; then
-      p="$(sudo -n /usr/bin/sshd -T | awk '/^port / {print $2}' | head -n1)"
+      p="$(sudo -n /usr/bin/sshd -T | awk 'tolower($1) == "port" {print $2}' | head -n1)"
     fi
   fi
   if [ -n "$p" ]; then

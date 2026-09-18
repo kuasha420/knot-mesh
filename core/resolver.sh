@@ -165,9 +165,8 @@ if [ -z "$RESOLVED_IP" ]; then
     IS_LOCAL=1
   elif [ -n "$MANIFEST" ] && [ -r "$MANIFEST" ]; then
     M_HOST="$(awk -F'"' '/"hostname":/ {print $4}' "$MANIFEST")"
-    if [ "$M_HOST" = "$MY_HOST" ]; then
-      IS_LOCAL=1
-    elif grep -q "\"$MY_HOST\"" "$MANIFEST"; then
+    M_ID="$(awk -F'"' '/"id":/ {print $4}' "$MANIFEST")"
+    if [ "$M_HOST" = "$MY_HOST" ] || [ "$M_ID" = "$MY_HOST" ]; then
       IS_LOCAL=1
     fi
   fi

@@ -21,6 +21,7 @@ source "$KNOT_ROOT/core/modules/hub.sh"
 source "$KNOT_ROOT/core/modules/memory.sh"
 source "$KNOT_ROOT/core/modules/shutdown.sh"
 source "$KNOT_ROOT/core/modules/topology.sh"
+source "$KNOT_ROOT/core/modules/swarm_sync.sh"
 
 cmd_onboard() {
   local node_id="${1:-}"
@@ -103,12 +104,126 @@ JSON_EOF
 }
 
 cmd_sync() {
-  knot_log_info "Synchronizing Knot mesh across local system..."
-  ssh_sync_authorized_keys
-  ssh_sync_client_config
-  deskflow_configure
-  kdeconnect_sync_mesh
-  knot_log_ok "Knot mesh synchronization complete."
+  local target="${1:-}"
+
+  local my_host
+  my_host="$(knot_detect_hostname)"
+  local active_swarm
+  active_swarm="$(knot_get_active_swarm)"
+  local anchor_id="desktop"
+  local anchor_host="desktop"
+
+  if knot_load_swarm_profile "$active_swarm"; then
+    anchor_id="${ANCHOR_ID:-desktop}"
+    anchor_host="${ANCHOR_HOST:-desktop}"
+  fi
+
+  local is_anchor=0
+  if [ "$my_host" = "$anchor_host" ] || [ "$my_host" = "$anchor_id" ]; then
+    is_anchor=1
+  else
+    local nodes_dir=""
+    if nodes_dir="$(knot_get_nodes_dir)"; then
+      if [ -f "$nodes_dir/${my_host}.json" ] && grep -q '"role":[[:space:]]*"anchor"' "$nodes_dir/${my_host}.json"; then
+        is_anchor=1
+      fi
+    fi
+  fi
+
+  if [ "$is_anchor" -eq 1 ]; then
+    # Running on Anchor Workstation
+    if [ "$target" = "--all" ]; then
+      knot_log_info "Synchronizing Knot mesh across local system ($my_host)..."
+      ssh_sync_authorized_keys
+      ssh_sync_client_config
+      deskflow_configure
+      kdeconnect_sync_mesh
+      knot_log_ok "Local Anchor configuration synchronized."
+
+      local nodes_dir=""
+      if ! nodes_dir="$(knot_get_nodes_dir)"; then
+        knot_log_err "No nodes directory found for active swarm '$active_swarm'"
+        return 1
+      fi
+
+      local topo_file=""
+      local user_home
+      user_home="$(knot_detect_user_home)"
+      if [ -r "$user_home/.config/knot/swarms/${active_swarm}/topology.json" ]; then
+        topo_file="$user_home/.config/knot/swarms/${active_swarm}/topology.json"
+      elif [ -r "/etc/knot/swarms.d/${active_swarm}/topology.json" ]; then
+        topo_file="/etc/knot/swarms.d/${active_swarm}/topology.json"
+      fi
+
+      local swarm_conf=""
+      if [ -r "/etc/knot/swarms.d/${active_swarm}.conf" ]; then
+        swarm_conf="/etc/knot/swarms.d/${active_swarm}.conf"
+      elif [ -r "$user_home/.config/knot/swarms/${active_swarm}.conf" ]; then
+        swarm_conf="$user_home/.config/knot/swarms/${active_swarm}.conf"
+      elif [ -r "$user_home/.config/knot/swarms/${active_swarm}/swarm.conf" ]; then
+        swarm_conf="$user_home/.config/knot/swarms/${active_swarm}/swarm.conf"
+      fi
+
+      local sync_count=0
+      for manifest in "$nodes_dir/"*.json; do
+        [ -e "$manifest" ] || continue
+        local id host role
+        id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+        host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+        role="$(awk -F'"' '/"role":/ {print $4}' "$manifest")"
+
+        if [ "$id" = "$anchor_id" ] || [ "$host" = "$anchor_host" ] || [ "$id" = "$my_host" ] || [ "$host" = "$my_host" ] || [ "$role" = "anchor" ]; then
+          continue
+        fi
+
+        swarm_sync_anchor_push "$id" "$active_swarm" "$nodes_dir" "$topo_file" "$swarm_conf"
+        sync_count=$((sync_count + 1))
+      done
+      knot_log_ok "Mesh-wide swarm synchronization complete ($sync_count Strands updated)."
+    elif [ -n "$target" ] && [ "$target" != "$my_host" ] && [ "$target" != "$anchor_id" ] && [ "$target" != "local" ] && [ "$target" != "localhost" ]; then
+      # Targeted Strand sync from Anchor
+      local nodes_dir=""
+      if ! nodes_dir="$(knot_get_nodes_dir)"; then
+        knot_log_err "No nodes directory found for active swarm '$active_swarm'"
+        return 1
+      fi
+
+      local topo_file=""
+      local user_home
+      user_home="$(knot_detect_user_home)"
+      if [ -r "$user_home/.config/knot/swarms/${active_swarm}/topology.json" ]; then
+        topo_file="$user_home/.config/knot/swarms/${active_swarm}/topology.json"
+      elif [ -r "/etc/knot/swarms.d/${active_swarm}/topology.json" ]; then
+        topo_file="/etc/knot/swarms.d/${active_swarm}/topology.json"
+      fi
+
+      local swarm_conf=""
+      if [ -r "/etc/knot/swarms.d/${active_swarm}.conf" ]; then
+        swarm_conf="/etc/knot/swarms.d/${active_swarm}.conf"
+      elif [ -r "$user_home/.config/knot/swarms/${active_swarm}.conf" ]; then
+        swarm_conf="$user_home/.config/knot/swarms/${active_swarm}.conf"
+      elif [ -r "$user_home/.config/knot/swarms/${active_swarm}/swarm.conf" ]; then
+        swarm_conf="$user_home/.config/knot/swarms/${active_swarm}/swarm.conf"
+      fi
+
+      swarm_sync_anchor_push "$target" "$active_swarm" "$nodes_dir" "$topo_file" "$swarm_conf"
+      knot_log_ok "Swarm synchronization to Strand '$target' complete."
+    else
+      # Local sync only on Anchor
+      knot_log_info "Synchronizing Knot mesh across local system ($my_host)..."
+      ssh_sync_authorized_keys
+      ssh_sync_client_config
+      deskflow_configure
+      kdeconnect_sync_mesh
+      knot_log_ok "Knot mesh synchronization complete."
+    fi
+  else
+    # Running locally on Strand
+    if [ -n "$target" ] && [ "$target" != "--all" ] && [ "$target" != "$my_host" ] && [ "$target" != "local" ] && [ "$target" != "localhost" ]; then
+      knot_log_warn "Notice: Device '$my_host' is a Strand. Multi-node distribution is orchestrated by the Anchor ($anchor_host)."
+    fi
+    swarm_sync_strand_pull
+  fi
 }
 
 cmd_resolve() {
@@ -692,7 +807,8 @@ case "${1:-}" in
     cmd_onboard "$@"
     ;;
   sync)
-    cmd_sync
+    shift
+    cmd_sync "$@"
     ;;
   resolve)
     shift
@@ -815,7 +931,7 @@ case "${1:-}" in
     echo "Usage:"
     echo "  knot topology [show|refresh]  Visual multi-screen spatial layout & photo refresh"
     echo "  knot onboard [node_id]        Enroll current device into the mesh"
-    echo "  knot sync                     Reconcile keys, configs, and layout"
+    echo "  knot sync [--all | <node_id>] Reconcile keys, configs, and layout across swarm"
     echo "  knot resolve <node_id> [port] Resolve active IP across 3 tiers"
     echo "  knot status                   Show live status of all mesh nodes"
     echo "  knot swarm [status|quota|test|exec|auth] Manage Antigravity AI agents across the mesh"
