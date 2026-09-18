@@ -26,6 +26,7 @@ import tarfile
 import threading
 import time
 import uuid
+from typing import Optional, Dict, Any, List, Tuple, Union
 
 logger = logging.getLogger("knot-hub")
 from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -3406,6 +3407,14 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             active_swarm, _ = get_active_swarm_info()
             user_home = os.path.expanduser("~")
             nodes_dir = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/nodes")
+            anchor_id = "desktop"
+            topo_path = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/topology.json")
+            if os.path.isfile(topo_path):
+                try:
+                    with open(topo_path, "r") as tf:
+                        anchor_id = json.load(tf).get("anchor", "desktop")
+                except Exception:
+                    pass
 
             # 1. Broadcast display_identify SSE event to all connected Kafe web clients
             broadcast_event("display_identify", {
@@ -3414,23 +3423,48 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 "timestamp": time.time()
             })
 
-            # 2. Trigger local display overlay on anchor if display is available
+            # 2. Trigger local display overlay on anchor if display is available and not already running
             overlay_script = os.path.join(REPO_ROOT, "core/vision/display_overlay.py")
             if os.path.exists(overlay_script) and (os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")):
                 try:
-                    subprocess.Popen([
-                        sys.executable,
-                        overlay_script,
-                        "--bg", bg,
-                        "--duration", str(duration)
-                    ])
+                    res_check = subprocess.run(["pgrep", "-f", "display_overlay.py"], capture_output=True, text=True)
+                    if not res_check.stdout.strip():
+                        subprocess.Popen([
+                            sys.executable,
+                            overlay_script,
+                            "--bg", bg,
+                            "--duration", str(duration)
+                        ])
                 except Exception as oe:
                     logger.warning("Failed to launch local display overlay: %s", oe)
 
-            # 3. Asynchronously trigger remote strand overlays over SSH in background thread
+            # 3. Asynchronously trigger remote strand overlays over SSH concurrently in background threads
+            def _trigger_single_node(nid, user, ip, port):
+                remote_cmd = (
+                    f"export XDG_RUNTIME_DIR=/run/user/$(id -u); "
+                    f"export WAYLAND_DISPLAY=${{WAYLAND_DISPLAY:-wayland-0}}; "
+                    f"export DISPLAY=${{DISPLAY:-:0}}; "
+                    f"export PATH=\"$HOME/.local/bin:$HOME/.local/share/knot-mesh/bin:/usr/local/bin:$PATH\"; "
+                    f"knot topology identify --bg {bg} --duration {duration}"
+                )
+                # Try via SSH config alias first (supports dynamic knot-resolve proxy)
+                ssh_cmd = [
+                    "ssh", "-o", "ConnectTimeout=3", "-o", "StrictHostKeyChecking=accept-new",
+                    nid, remote_cmd
+                ]
+                res = subprocess.run(ssh_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=duration + 5)
+                if res.returncode != 0 and ip:
+                    # Fallback to direct user@ip
+                    fallback_cmd = [
+                        "ssh", "-o", "ConnectTimeout=3", "-o", "StrictHostKeyChecking=accept-new",
+                        "-p", port, f"{user}@{ip}", remote_cmd
+                    ]
+                    subprocess.run(fallback_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=duration + 5)
+
             def _trigger_remote_nodes():
                 if not os.path.isdir(nodes_dir):
                     return
+                threads = []
                 for fname in sorted(os.listdir(nodes_dir)):
                     if fname.endswith(".json"):
                         try:
@@ -3438,20 +3472,18 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                                 mdata = json.load(mf)
                             nid = mdata.get("id") or fname[:-5]
                             role = mdata.get("role", "strand")
-                            if role == "anchor":
+                            if role == "anchor" or nid == "desktop" or nid == anchor_id:
                                 continue
                             ip = mdata.get("ip_hint") or ""
                             user = mdata.get("user") or "psl"
                             port = str(mdata.get("port") or 22)
-                            if ip:
-                                remote_cmd = f"WAYLAND_DISPLAY=${{WAYLAND_DISPLAY:-wayland-0}} DISPLAY=${{DISPLAY:-:0}} knot topology identify --bg {bg} --duration {duration}"
-                                ssh_cmd = [
-                                    "ssh", "-o", "ConnectTimeout=3", "-o", "StrictHostKeyChecking=accept-new",
-                                    "-p", port, f"{user}@{ip}", remote_cmd
-                                ]
-                                subprocess.run(ssh_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=duration + 5)
+                            t = threading.Thread(target=_trigger_single_node, args=(nid, user, ip, port), daemon=True)
+                            threads.append(t)
+                            t.start()
                         except Exception as re:
                             logger.debug("Remote identify trigger error for %s: %s", fname, re)
+                for t in threads:
+                    t.join(timeout=duration + 5)
 
             threading.Thread(target=_trigger_remote_nodes, daemon=True).start()
 
