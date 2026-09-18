@@ -35,23 +35,37 @@ print('')
 # Draw visual 2D ASCII screen layout
 # Determine left, right, up, down relative to anchor
 anchor_layout = layout.get(anchor, {})
-left_node = anchor_layout.get('left', {}).get('node', None)
-right_node = anchor_layout.get('right', {}).get('node', None)
-up_node = anchor_layout.get('up', {}).get('node', None)
-down_node = anchor_layout.get('down', {}).get('node', None)
+def _extract_nodes(spec):
+    if not spec:
+        return []
+    if isinstance(spec, list):
+        return [s.get('node', '?') for s in spec if isinstance(s, dict) and s.get('node')]
+    if isinstance(spec, dict) and spec.get('node'):
+        return [spec['node']]
+    return []
 
-if up_node:
+left_nodes = _extract_nodes(anchor_layout.get('left'))
+right_nodes = _extract_nodes(anchor_layout.get('right'))
+up_nodes = _extract_nodes(anchor_layout.get('up'))
+down_nodes = _extract_nodes(anchor_layout.get('down'))
+
+left_label = '/'.join(left_nodes) if left_nodes else None
+right_label = '/'.join(right_nodes) if right_nodes else None
+up_label = '/'.join(up_nodes) if up_nodes else None
+down_label = ' | '.join(down_nodes) if down_nodes else None
+
+if up_label:
     print(f'                     ┌──────────────────┐')
-    print(f'                     │ {up_node:^16} │ (UP)')
+    print(f'                     │ {up_label:^16} │ (UP)')
     print(f'                     └────────┬─────────┘')
     print(f'                              │ ↕')
 
 # Main row
 left_box = [
     '┌──────────────────┐',
-    f'│ {left_node:^16} │',
+    f'│ {left_label:^16} │',
     '└──────────────────┘'
-] if left_node else ['                    ', '                    ', '                    ']
+] if left_label else ['                    ', '                    ', '                    ']
 
 anchor_box = [
     '┌────────────────────────┐',
@@ -61,30 +75,41 @@ anchor_box = [
 
 right_box = [
     '┌──────────────────┐',
-    f'│ {right_node:^16} │',
+    f'│ {right_label:^16} │',
     '└──────────────────┘'
-] if right_node else ['                    ', '                    ', '                    ']
+] if right_label else ['                    ', '                    ', '                    ']
 
-l_arrow = ' ⇄ ' if left_node else '   '
-r_arrow = ' ⇄ ' if right_node else '   '
+l_arrow = ' ⇄ ' if left_label else '   '
+r_arrow = ' ⇄ ' if right_label else '   '
 
 print(f'{left_box[0]}{l_arrow}{anchor_box[0]}{r_arrow}{right_box[0]}')
 print(f'{left_box[1]}{l_arrow}\033[1;36m{anchor_box[1]}\033[0m{r_arrow}{right_box[1]}')
 print(f'{left_box[2]}{l_arrow}{anchor_box[2]}{r_arrow}{right_box[2]}')
 
-if down_node:
+if down_label:
     print(f'                              │ ↕')
-    print(f'                     ┌────────┴─────────┐')
-    print(f'                     │ {down_node:^16} │ (DOWN)')
-    print(f'                     └──────────────────┘')
+    if len(down_nodes) > 1:
+        d1 = down_nodes[0]
+        d2 = down_nodes[1]
+        print(f'           ┌──────────────────┐    ┌──────────────────┐')
+        print(f'           │ {d1:^16} │    │ {d2:^16} │ (DOWN)')
+        print(f'           └──────────────────┘    └──────────────────┘')
+    else:
+        print(f'                     ┌────────┴─────────┐')
+        print(f'                     │ {down_label:^16} │ (DOWN)')
+        print(f'                     └──────────────────┘')
 
 print('')
 print('\033[1mBidirectional Reciprocal Links:\033[0m')
 for src, dirs in layout.items():
-    for d, target_info in dirs.items():
-        t = target_info.get('node', '?')
-        s = target_info.get('span', [0, 100])
-        print(f'  \033[34m{src}\033[0m --[{d} span={s[0]}-{s[1]}%]--> \033[32m{t}\033[0m')
+    for d, target_val in dirs.items():
+        specs = target_val if isinstance(target_val, list) else [target_val]
+        for spec in specs:
+            if isinstance(spec, dict):
+                t = spec.get('node', '?')
+                s = spec.get('span', [0, 100])
+                ts = spec.get('target_span', [0, 100])
+                print(f'  \033[34m{src}\033[0m --[{d} span={s[0]}-{s[1]}% -> {t} span={ts[0]}-{ts[1]}%]--> \033[32m{t}\033[0m')
 "
 }
 
