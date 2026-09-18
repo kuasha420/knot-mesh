@@ -130,6 +130,30 @@ antigravity_sync_credentials() {
   return 1
 }
 
+# Check if KWallet or Secret Service is unlocked on local node
+antigravity_is_kwallet_unlocked() {
+  # Check KDE KWallet DBus interface (Plasma 6 / 5)
+  for svc in org.kde.kwalletd6 org.kde.kwalletd5; do
+    local mod="${svc##*.}"
+    if busctl --user call "$svc" "/modules/$mod" org.kde.KWallet isEnabled 2>/dev/null | grep -q "true"; then
+      local wallet
+      wallet="$(busctl --user call "$svc" "/modules/$mod" org.kde.KWallet localWallet 2>/dev/null | awk -F'"' '{print $2}' || echo "kdewallet")"
+      [ -z "$wallet" ] && wallet="kdewallet"
+      if busctl --user call "$svc" "/modules/$mod" org.kde.KWallet isOpen s "$wallet" 2>/dev/null | grep -q "false"; then
+        return 1
+      fi
+    fi
+  done
+
+  # Check Secret Service collection Locked property
+  local locked
+  locked="$(busctl --user get-property org.freedesktop.secrets /org/freedesktop/secrets/aliases/default org.freedesktop.Secret.Collection Locked 2>/dev/null || echo "")"
+  if echo "$locked" | grep -q "true"; then
+    return 1
+  fi
+  return 0
+}
+
 # Fast verification of token/auth state on local node
 antigravity_check_auth_local() {
   local agy_path
@@ -138,12 +162,19 @@ antigravity_check_auth_local() {
     return 1
   fi
 
-  # Ensure credentials are sync'd first
-  antigravity_sync_credentials || true
+  # Ensure credentials are sync'd first if unlocked
+  if antigravity_is_kwallet_unlocked; then
+    antigravity_sync_credentials || true
+  fi
 
   local token_file="$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
   if [ -s "$token_file" ] && jq -e '.token.access_token or .token.refresh_token' "$token_file" >/dev/null 2>&1; then
     return 0
+  fi
+
+  # Skip headless probe if KWallet is locked
+  if ! antigravity_is_kwallet_unlocked; then
+    return 1
   fi
 
   # Probe with a 1-token prompt to check live backend connectivity
@@ -291,23 +322,27 @@ antigravity_swarm_status() {
     if [ "$host" = "$my_host" ]; then
       if antigravity_detect_cli; then
         ver="$(antigravity_get_version)"
-        test_out="$(antigravity_exec_node "local" "ping" 2>&1)" || rc=$?
-        if [ $rc -eq 0 ] && echo "$test_out" | grep -q '"status":[[:space:]]*"SUCCESS"'; then
-          auth_status="${C_GREEN}AUTHENTICATED${C_RESET}"
-          local dur
-          dur="$(echo "$test_out" | grep -o '"duration_seconds":[0-9.]*' | cut -d: -f2 | awk '{printf "%.2fs", $1}')"
-          if [ -n "$dur" ]; then latency="$dur"; fi
+        if ! antigravity_is_kwallet_unlocked; then
+          auth_status="${C_YELLOW}KWALLET LOCKED${C_RESET}"
         else
-          auth_status="${C_RED}NOT LOGGED IN${C_RESET}"
+          test_out="$(antigravity_exec_node "local" "ping" 2>&1)" || rc=$?
+          if [ $rc -eq 0 ] && echo "$test_out" | grep -q '"status":[[:space:]]*"SUCCESS"'; then
+            auth_status="${C_GREEN}AUTHENTICATED${C_RESET}"
+            local dur
+            dur="$(echo "$test_out" | grep -o '"duration_seconds":[0-9.]*' | cut -d: -f2 | awk '{printf "%.2fs", $1}')"
+            if [ -n "$dur" ]; then latency="$dur"; fi
+          else
+            auth_status="${C_RED}NOT LOGGED IN${C_RESET}"
+          fi
         fi
       else
         ver="${C_RED}NOT INSTALLED${C_RESET}"
         auth_status="${C_RED}UNAVAILABLE${C_RESET}"
       fi
     else
-      # Query remote node via knot exec
+      # Query remote node via knot exec with explicit 15s timeout
       local remote_probe=""
-      remote_probe="$(knot exec "$id" "systemd-run --user --pipe --setenv=\"PATH=\$HOME/.local/bin:\$HOME/.local/share/knot/shims:/usr/local/bin:/usr/bin:/bin\" --setenv=BROWSER=/bin/true --setenv=DE=generic --setenv=XDG_CURRENT_DESKTOP=\"\" --setenv=KDE_FULL_SESSION=\"\" --setenv=KDE_SESSION_VERSION=\"\" agy -p 'ping' --output-format json" 2>&1)" || rc=$?
+      remote_probe="$(timeout 15 knot exec "$id" "systemd-run --user --pipe --setenv=\"PATH=\$HOME/.local/bin:\$HOME/.local/share/knot/shims:/usr/local/bin:/usr/bin:/bin\" --setenv=BROWSER=/bin/true --setenv=DE=generic --setenv=XDG_CURRENT_DESKTOP=\"\" --setenv=KDE_FULL_SESSION=\"\" --setenv=KDE_SESSION_VERSION=\"\" agy -p 'ping' --output-format json" 2>&1)" || rc=$?
       if [ $rc -eq 0 ] && echo "$remote_probe" | grep -q '"status":[[:space:]]*"SUCCESS"'; then
         auth_status="${C_GREEN}AUTHENTICATED${C_RESET}"
         local dur
@@ -315,10 +350,12 @@ antigravity_swarm_status() {
         if [ -n "$dur" ]; then latency="$dur"; fi
 
         local remote_ver=""
-        remote_ver="$(knot exec "$id" "PATH=\"\$HOME/.local/bin:\$PATH\" agy --version" 2>&1 | head -n1 | awk '{print $NF}' || echo "")"
+        remote_ver="$(timeout 15 knot exec "$id" "PATH=\"\$HOME/.local/bin:\$PATH\" agy --version" 2>&1 | head -n1 | awk '{print $NF}' || echo "")"
         if [ -n "$remote_ver" ]; then ver="$remote_ver"; else ver="installed"; fi
       else
-        if echo "$remote_probe" | grep -q "command not found"; then
+        if [ $rc -eq 124 ]; then
+          auth_status="${C_YELLOW}KEYRING LOCKED / TIMED OUT${C_RESET}"
+        elif echo "$remote_probe" | grep -q "command not found"; then
           ver="${C_RED}NOT INSTALLED${C_RESET}"
           auth_status="${C_RED}UNAVAILABLE${C_RESET}"
         elif echo "$remote_probe" | grep -qi "authentication required"; then
