@@ -214,7 +214,7 @@ class OfflineVisionDetector:
             }
         ]
 
-        # Compute features for all zones first
+        # Compute features for all zones first, filtering out vertical non-display chassis panels
         zone_features = []
         for z in initial_zones:
             ref_box = self._refine_bounding_box(gray_arr, z["box"])
@@ -271,21 +271,37 @@ class OfflineVisionDetector:
 
             for nid in candidates:
                 nid_lower = nid.lower()
+                c_manifest = next((n for n in known_nodes if n.get("id") == nid), {})
+                c_caps = [str(c).lower() for c in c_manifest.get("capabilities", [])]
+                c_aliases = [str(a).lower() for a in c_manifest.get("aliases", [])]
+
                 hist_sim = 0.0
                 if nid in node_histograms:
                     hist_sim = self._histogram_similarity(zf["hist"], node_histograms[nid])
 
                 # Heuristic bonus
                 h_bonus = 0.0
-                if dtype == "laptop" and ("devbox" in nid_lower or "laptop" in nid_lower):
+                if dtype == "laptop" and ("devbox" in nid_lower or "laptop" in nid_lower or "laptop" in c_caps):
                     h_bonus += 0.50
-                elif dtype == "handheld_pc" and ("deck" in nid_lower or "steam" in nid_lower):
-                    h_bonus += 0.45
+                elif dtype == "handheld_pc":
+                    # Disambiguate Steam Deck vs ROG Ally handhelds
+                    if "deck" in nid_lower or "steam" in nid_lower or any("deck" in a for a in c_aliases):
+                        if zname == "front_right_handheld":
+                            h_bonus += 0.60
+                        else:
+                            h_bonus += 0.30
+                    elif "ally" in nid_lower or "rog" in nid_lower or any("ally" in a for a in c_aliases):
+                        if zname == "front_left_handheld":
+                            h_bonus += 0.60
+                        else:
+                            h_bonus += 0.30
+                    else:
+                        h_bonus += 0.40
                 elif dtype == "desktop_monitor" and ("purrfect" in nid_lower or "desktop" in nid_lower or "psl" in nid_lower):
                     h_bonus += 0.45
 
                 # Spatial position bonus
-                if z["expected_position"] == "left" and "devbox" in nid_lower:
+                if z["expected_position"] == "left" and ("devbox" in nid_lower or "laptop" in nid_lower):
                     h_bonus += 0.25
                 if z["expected_position"] == "right" and ("purrfect" in nid_lower or "psl" in nid_lower):
                     h_bonus += 0.25
@@ -309,15 +325,18 @@ class OfflineVisionDetector:
                 )
                 assigned_nodes.add(nid)
 
-        # Fallback for any unassigned zones
-        for i, zf in enumerate(zone_features):
-            if i not in assigned_zones:
-                z = zf["zone"]
-                nid = f"{z['default_device_type']}_{z['zone_name']}"
-                assigned_zones[i] = (nid, 0.70, f"Unassigned {z['default_device_type']}")
+        # Swarm profile cardinality constraint:
+        # Only synthesize unassigned dummy zones when unconstrained (no swarm_nodes passed)
+        if swarm_nodes is None:
+            for i, zf in enumerate(zone_features):
+                if i not in assigned_zones:
+                    z = zf["zone"]
+                    nid = f"{z['default_device_type']}_{z['zone_name']}"
+                    assigned_zones[i] = (nid, 0.70, f"Unassigned {z['default_device_type']}")
 
         # Build detected_screens list
-        for i, zf in enumerate(zone_features):
+        for i in sorted(assigned_zones.keys()):
+            zf = zone_features[i]
             z = zf["zone"]
             nid, conf, desc = assigned_zones[i]
             is_internal = nid.startswith(f"{anchor_node_id}:")

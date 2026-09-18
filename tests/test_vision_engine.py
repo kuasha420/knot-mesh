@@ -111,17 +111,28 @@ class TestVisionEngine(unittest.TestCase):
         with self.assertRaises(ValueError):
             analyze_desk_photo(self.img, mode="invalid_mode")
 
-    def test_real_desk_photo_if_available(self):
-        """If user photo exists, verify end-to-end analysis on physical desk photograph."""
-        user_photo = "/home/psl/.gemini/antigravity/brain/4185ee65-1bbc-4276-9a58-6fe8aff41629/.user_uploaded/media_1789637677523.jpg"
-        if os.path.isfile(user_photo):
-            res = analyze_desk_photo(user_photo, mode="offline", anchor_id="rog-ally")
-            self.assertEqual(res["engine"], "offline")
-            self.assertGreaterEqual(len(res["screens"]), 4)
-            # Center display must be rog-ally
-            anchor_screen = next((s for s in res["screens"] if s["position_relative_to_anchor"] == "anchor"), None)
-            self.assertIsNotNone(anchor_screen)
-            self.assertEqual(anchor_screen["matched_node_id"], "rog-ally")
+    def test_pc_chassis_rejection_and_swarm_cardinality(self):
+        """Verify that offline detector rejects PC chassis panels and constrains detection to known swarm nodes (#40)."""
+        nodes = [
+            {"id": "desktop", "role": "anchor"},
+            {"id": "laptop", "role": "strand", "capabilities": ["laptop"]},
+            {"id": "rog-ally", "role": "strand", "capabilities": ["handheld"], "aliases": ["ally"]},
+            {"id": "steamdeck", "role": "strand", "capabilities": ["handheld"], "aliases": ["deck"]}
+        ]
+        res = offline_detector.analyze(self.img, swarm_nodes=nodes, anchor_id="desktop")
+        screen_ids = [s["matched_node_id"] for s in res["screens"]]
+
+        # Exactly 4 screens matched (no fake 5th desktop_monitor_right_flank)
+        self.assertEqual(len(res["screens"]), 4)
+        self.assertNotIn("desktop_monitor_right_flank", screen_ids)
+        self.assertIn("desktop", screen_ids)
+        self.assertIn("laptop", screen_ids)
+        self.assertIn("rog-ally", screen_ids)
+        self.assertIn("steamdeck", screen_ids)
+
+        # Disambiguation: steamdeck on right, rog-ally on left/internal
+        deck_screen = next(s for s in res["screens"] if s["matched_node_id"] == "steamdeck")
+        self.assertEqual(deck_screen["position_relative_to_anchor"], "down")
 
 if __name__ == "__main__":
     unittest.main()
