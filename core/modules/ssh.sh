@@ -77,8 +77,11 @@ ssh_sync_authorized_keys() {
       search_dirs+=("$sdir")
     done
   fi
-  if [ -d "$KNOT_ROOT/registry/nodes" ]; then
-    search_dirs+=("$KNOT_ROOT/registry/nodes")
+  if [ -d "/etc/knot/swarms.d" ]; then
+    for sdir in /etc/knot/swarms.d/*/nodes; do
+      [ -d "$sdir" ] || continue
+      search_dirs+=("$sdir")
+    done
   fi
 
   local seen_keys=()
@@ -177,10 +180,12 @@ ssh_sync_client_config() {
   local active_swarm=""
   active_swarm="$(knot_get_active_swarm)"
   local active_nodes_dir=""
-  if [ -n "$active_swarm" ] && [ "$active_swarm" != "none" ] && [ -d "$home/.config/knot/swarms/${active_swarm}/nodes" ]; then
-    active_nodes_dir="$home/.config/knot/swarms/${active_swarm}/nodes"
-  elif [ -d "$KNOT_ROOT/registry/nodes" ]; then
-    active_nodes_dir="$KNOT_ROOT/registry/nodes"
+  if [ -n "$active_swarm" ] && [ "$active_swarm" != "none" ]; then
+    if [ -d "$home/.config/knot/swarms/${active_swarm}/nodes" ]; then
+      active_nodes_dir="$home/.config/knot/swarms/${active_swarm}/nodes"
+    elif [ -d "/etc/knot/swarms.d/${active_swarm}/nodes" ]; then
+      active_nodes_dir="/etc/knot/swarms.d/${active_swarm}/nodes"
+    fi
   fi
 
   if [ -n "$active_nodes_dir" ] && [ -d "$active_nodes_dir" ]; then

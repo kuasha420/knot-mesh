@@ -482,36 +482,58 @@ doctor_diagnose() {
     doctor_check_local || local_issues=$?
     total_issues=$((total_issues + local_issues))
 
-    # Then check all remote nodes in registry
+    # Then check all remote nodes in swarm
     local my_host
     my_host="$(knot_detect_hostname)"
-    for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
-      [ -e "$manifest" ] || continue
-      local id host
-      id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-      host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+    local nodes_dirs=()
+    local primary_dir=""
+    if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+      nodes_dirs+=("$primary_dir")
+    fi
+    local user_home
+    user_home="$(knot_detect_user_home)"
+    for d in "$user_home/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
+      [ -d "$d" ] || continue
+      if [[ ! " ${nodes_dirs[*]} " =~ " ${d} " ]]; then
+        nodes_dirs+=("$d")
+      fi
+    done
 
-      if [ "$host" = "$my_host" ]; then
-        continue
-      fi
+    local seen_nodes=()
+    for ndir in "${nodes_dirs[@]}"; do
+      for manifest in "$ndir/"*.json; do
+        [ -e "$manifest" ] || continue
+        local id host
+        id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+        host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
 
-      echo -e "\n${C_BOLD}>>> Querying node: $id ($host)...${C_RESET}"
-      local remote_out="" rc=0
-      remote_out="$(ssh -o BatchMode=yes -o ConnectTimeout=4 "$id" "knot doctor local" 2>&1)" || rc=$?
-      if [ -n "$remote_out" ]; then
-        echo "$remote_out"
-      fi
-      if [ $rc -ne 0 ]; then
-        total_issues=$((total_issues + rc))
-      fi
+        if [ -z "$id" ] || [ "$host" = "$my_host" ] || [ "$id" = "$my_host" ]; then
+          continue
+        fi
+        if [[ " ${seen_nodes[*]} " =~ " ${id} " ]]; then
+          continue
+        fi
+        seen_nodes+=("$id")
+
+        echo -e "\n${C_BOLD}>>> Querying node: $id ($host)...${C_RESET}"
+        local remote_out="" rc=0
+        remote_out="$(ssh -o BatchMode=yes -o ConnectTimeout=4 "$id" "knot doctor local" 2>&1)" || rc=$?
+        if [ -n "$remote_out" ]; then
+          echo "$remote_out"
+        fi
+        if [ $rc -ne 0 ]; then
+          total_issues=$((total_issues + rc))
+        fi
+      done
     done
   else
     # Target specific node
     local my_host
     my_host="$(knot_detect_hostname)"
     local target_host=""
-    local manifest="$KNOT_ROOT/registry/nodes/${target}.json"
-    if [ -f "$manifest" ]; then
+    local manifest=""
+    manifest="$(knot_get_manifest_path "$target" 2>/dev/null || true)"
+    if [ -n "$manifest" ] && [ -f "$manifest" ]; then
       target_host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
     fi
 
@@ -556,9 +578,15 @@ doctor_repair_local() {
   my_host="$(knot_detect_hostname)"
   local my_user
   my_user="$(knot_detect_user)"
-  local is_anchor=0
-
-  if [ -f "$KNOT_ROOT/registry/nodes/desktop.json" ] && grep -q "$my_host" "$KNOT_ROOT/registry/nodes/desktop.json"; then
+  local active_swarm
+  active_swarm="$(knot_get_active_swarm)"
+  local anchor_id="desktop"
+  local anchor_host="desktop"
+  if knot_load_swarm_profile "$active_swarm"; then
+    anchor_id="${ANCHOR_ID:-desktop}"
+    anchor_host="${ANCHOR_HOST:-desktop}"
+  fi
+  if [ "$my_host" = "$anchor_host" ] || [ "$my_host" = "$anchor_id" ]; then
     is_anchor=1
   fi
 
@@ -809,13 +837,11 @@ doctor_repair() {
       anchor_host="${ANCHOR_HOST:-$anchor_id}"
     fi
   fi
-  if [ -z "$anchor_host" ] && [ -d "$KNOT_ROOT/registry/nodes" ]; then
-    for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
-      [ -e "$manifest" ] || continue
-      if grep -q '"id":[[:space:]]*"desktop"' "$manifest"; then
-        anchor_host="$(grep -o '"hostname":[[:space:]]*"[^"]*"' "$manifest" | cut -d'"' -f4)"
-      fi
-    done
+  if [ -z "$anchor_host" ]; then
+    local a_manifest=""
+    if a_manifest="$(knot_get_manifest_path "$anchor_id" 2>/dev/null)"; then
+      anchor_host="$(awk -F'"' '/"hostname":/ {print $4}' "$a_manifest")"
+    fi
   fi
 
   local my_host
@@ -855,22 +881,27 @@ doctor_repair() {
 
     sleep 0.5
 
-    # Step 2: Repair Strands across all active swarm and registry manifests
+    # Step 2: Repair Strands across all active and configured swarm manifests
     local strand_manifests=()
     local user_home
     user_home="$(knot_detect_user_home)"
-    if [ -n "$active_swarm" ] && [ "$active_swarm" != "none" ] && [ -d "$user_home/.config/knot/swarms/${active_swarm}/nodes" ]; then
-      for m in "$user_home/.config/knot/swarms/${active_swarm}/nodes/"*.json; do
+    local nodes_dirs=()
+    local primary_dir=""
+    if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+      nodes_dirs+=("$primary_dir")
+    fi
+    for d in "$user_home/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
+      [ -d "$d" ] || continue
+      if [[ ! " ${nodes_dirs[*]} " =~ " ${d} " ]]; then
+        nodes_dirs+=("$d")
+      fi
+    done
+    for ndir in "${nodes_dirs[@]}"; do
+      for m in "$ndir/"*.json; do
         [ -e "$m" ] || continue
         strand_manifests+=("$m")
       done
-    fi
-    if [ -d "$KNOT_ROOT/registry/nodes" ]; then
-      for m in "$KNOT_ROOT/registry/nodes/"*.json; do
-        [ -e "$m" ] || continue
-        strand_manifests+=("$m")
-      done
-    fi
+    done
 
     local seen_strands=()
     for manifest in "${strand_manifests[@]}"; do

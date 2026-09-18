@@ -181,37 +181,56 @@ screen_status() {
     printf "%-12s %-10s %-8s %-8s %-10s %-12s\n" "NODE" "USER" "SESSION" "SEAT" "TYPE" "LOCK STATE"
     printf "%-12s %-10s %-8s %-8s %-10s %-12s\n" "----" "----" "-------" "----" "----" "----------"
 
-    for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
-      [ -e "$manifest" ] || continue
-      local id
-      id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-      local out=""
-      local my_id="desktop"
-      if [ -f "$KNOT_ROOT/registry/nodes/desktop.json" ] && grep -q "$(knot_detect_hostname)" "$KNOT_ROOT/registry/nodes/desktop.json"; then
-        my_id="desktop"
+    local my_host
+    my_host="$(knot_detect_hostname)"
+    local nodes_dirs=()
+    local primary_dir=""
+    if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+      nodes_dirs+=("$primary_dir")
+    fi
+    local user_home
+    user_home="$(knot_detect_user_home)"
+    for d in "$user_home/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
+      [ -d "$d" ] || continue
+      if [[ ! " ${nodes_dirs[*]} " =~ " ${d} " ]]; then
+        nodes_dirs+=("$d")
       fi
+    done
 
-      if [ "$id" = "$my_id" ]; then
-        out="$(screen_status_raw)"
-      else
-        if ! out="$("$KNOT_ROOT/bin/knot" exec "$id" "knot screen status-raw")"; then
-          out=""
-        fi
-      fi
+    local seen_nodes=()
+    for ndir in "${nodes_dirs[@]}"; do
+      for manifest in "$ndir/"*.json; do
+        [ -e "$manifest" ] || continue
+        local id h
+        id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+        h="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+        [ -n "$id" ] || continue
+        if [[ " ${seen_nodes[*]:-} " =~ " ${id} " ]]; then continue; fi
+        seen_nodes+=("$id")
 
-      if [ -z "$out" ]; then
-        printf "%-12s %-10s %-8s %-8s %-10s ${C_RED}%-12s${C_RESET}\n" "$id" "-" "-" "-" "-" "UNREACHABLE"
-      elif [ "$out" = "NO_SESSION" ]; then
-        printf "%-12s %-10s %-8s %-8s %-10s ${C_RED}%-12s${C_RESET}\n" "$id" "-" "-" "-" "-" "NO SESSION"
-      else
-        local u sid seat stype locked
-        IFS='|' read -r u sid seat stype locked <<< "$out"
-        if [ "$locked" = "yes" ]; then
-          printf "%-12s %-10s %-8s %-8s %-10s ${C_YELLOW}%-12s${C_RESET}\n" "$id" "$u" "$sid" "$seat" "$stype" "LOCKED"
+        local out=""
+        if [ "$id" = "$my_host" ] || [ "$h" = "$my_host" ]; then
+          out="$(screen_status_raw)"
         else
-          printf "%-12s %-10s %-8s %-8s %-10s ${C_GREEN}%-12s${C_RESET}\n" "$id" "$u" "$sid" "$seat" "$stype" "UNLOCKED"
+          if ! out="$("$KNOT_ROOT/bin/knot" exec "$id" "knot screen status-raw")"; then
+            out=""
+          fi
         fi
-      fi
+
+        if [ -z "$out" ]; then
+          printf "%-12s %-10s %-8s %-8s %-10s ${C_RED}%-12s${C_RESET}\n" "$id" "-" "-" "-" "-" "UNREACHABLE"
+        elif [ "$out" = "NO_SESSION" ]; then
+          printf "%-12s %-10s %-8s %-8s %-10s ${C_RED}%-12s${C_RESET}\n" "$id" "-" "-" "-" "-" "NO SESSION"
+        else
+          local u sid seat stype locked
+          IFS='|' read -r u sid seat stype locked <<< "$out"
+          if [ "$locked" = "yes" ]; then
+            printf "%-12s %-10s %-8s %-8s %-10s ${C_YELLOW}%-12s${C_RESET}\n" "$id" "$u" "$sid" "$seat" "$stype" "LOCKED"
+          else
+            printf "%-12s %-10s %-8s %-8s %-10s ${C_GREEN}%-12s${C_RESET}\n" "$id" "$u" "$sid" "$seat" "$stype" "UNLOCKED"
+          fi
+        fi
+      done
     done
   elif [ "$target" = "local" ]; then
     local out
@@ -237,21 +256,40 @@ screen_status() {
 screen_unlock() {
   local target="${1:-local}"
   if [ "$target" = "--all" ]; then
-    for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
-      [ -e "$manifest" ] || continue
-      local id
-      id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-      local my_id="desktop"
-      if [ -f "$KNOT_ROOT/registry/nodes/desktop.json" ] && grep -q "$(knot_detect_hostname)" "$KNOT_ROOT/registry/nodes/desktop.json"; then
-        my_id="desktop"
+    local my_host
+    my_host="$(knot_detect_hostname)"
+    local nodes_dirs=()
+    local primary_dir=""
+    if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+      nodes_dirs+=("$primary_dir")
+    fi
+    local user_home
+    user_home="$(knot_detect_user_home)"
+    for d in "$user_home/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
+      [ -d "$d" ] || continue
+      if [[ ! " ${nodes_dirs[*]} " =~ " ${d} " ]]; then
+        nodes_dirs+=("$d")
       fi
+    done
 
-      if [ "$id" = "$my_id" ]; then
-        screen_unlock_local
-      else
-        knot_log_info "Unlocking display on $id..."
-        "$KNOT_ROOT/bin/knot" exec "$id" "knot screen unlock local"
-      fi
+    local seen_nodes=()
+    for ndir in "${nodes_dirs[@]}"; do
+      for manifest in "$ndir/"*.json; do
+        [ -e "$manifest" ] || continue
+        local id h
+        id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+        h="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+        [ -n "$id" ] || continue
+        if [[ " ${seen_nodes[*]:-} " =~ " ${id} " ]]; then continue; fi
+        seen_nodes+=("$id")
+
+        if [ "$id" = "$my_host" ] || [ "$h" = "$my_host" ]; then
+          screen_unlock_local
+        else
+          knot_log_info "Unlocking display on $id..."
+          "$KNOT_ROOT/bin/knot" exec "$id" "knot screen unlock local"
+        fi
+      done
     done
   elif [ "$target" = "local" ]; then
     screen_unlock_local
@@ -263,21 +301,40 @@ screen_unlock() {
 screen_lock() {
   local target="${1:-local}"
   if [ "$target" = "--all" ]; then
-    for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
-      [ -e "$manifest" ] || continue
-      local id
-      id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-      local my_id="desktop"
-      if [ -f "$KNOT_ROOT/registry/nodes/desktop.json" ] && grep -q "$(knot_detect_hostname)" "$KNOT_ROOT/registry/nodes/desktop.json"; then
-        my_id="desktop"
+    local my_host
+    my_host="$(knot_detect_hostname)"
+    local nodes_dirs=()
+    local primary_dir=""
+    if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+      nodes_dirs+=("$primary_dir")
+    fi
+    local user_home
+    user_home="$(knot_detect_user_home)"
+    for d in "$user_home/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
+      [ -d "$d" ] || continue
+      if [[ ! " ${nodes_dirs[*]} " =~ " ${d} " ]]; then
+        nodes_dirs+=("$d")
       fi
+    done
 
-      if [ "$id" = "$my_id" ]; then
-        screen_lock_local
-      else
-        knot_log_info "Locking display on $id..."
-        "$KNOT_ROOT/bin/knot" exec "$id" "knot screen lock local"
-      fi
+    local seen_nodes=()
+    for ndir in "${nodes_dirs[@]}"; do
+      for manifest in "$ndir/"*.json; do
+        [ -e "$manifest" ] || continue
+        local id h
+        id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+        h="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+        [ -n "$id" ] || continue
+        if [[ " ${seen_nodes[*]:-} " =~ " ${id} " ]]; then continue; fi
+        seen_nodes+=("$id")
+
+        if [ "$id" = "$my_host" ] || [ "$h" = "$my_host" ]; then
+          screen_lock_local
+        else
+          knot_log_info "Locking display on $id..."
+          "$KNOT_ROOT/bin/knot" exec "$id" "knot screen lock local"
+        fi
+      done
     done
   elif [ "$target" = "local" ]; then
     screen_lock_local

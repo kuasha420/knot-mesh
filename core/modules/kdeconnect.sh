@@ -30,28 +30,63 @@ kdeconnect_configure_custom_devices() {
   local my_host
   my_host="$(knot_detect_hostname)"
 
-  # Gather peer node IPs from Knot registry
-  local peer_ips=()
-  for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
-    [ -e "$manifest" ] || continue
-    local h
-    h="$(grep -o '"hostname":[[:space:]]*"[^"]*"' "$manifest" | cut -d'"' -f4)"
-    if [ "$h" = "$my_host" ]; then
-      continue
-    fi
-    local node_id
-    node_id="$(grep -o '"id":[[:space:]]*"[^"]*"' "$manifest" | cut -d'"' -f4)"
-    local port
-    port="$(grep -o '"port":[[:space:]]*[0-9]*' "$manifest" | awk '{print $NF}')"
-    local ip
-    ip="$("$KNOT_ROOT/bin/knot" resolve "$node_id" "$port")"
-    if [ -n "$ip" ]; then
-      peer_ips+=("$ip")
+  # 1. Discover all swarm node directories
+  local nodes_dirs=()
+  local primary_dir=""
+  if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+    nodes_dirs+=("$primary_dir")
+  fi
+
+  for d in "$home/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
+    [ -d "$d" ] || continue
+    if [[ ! " ${nodes_dirs[*]} " =~ " ${d} " ]]; then
+      nodes_dirs+=("$d")
     fi
   done
 
+  # 2. Gather existing customDevices (e.g. mobile phones)
+  local existing_ips=()
+  if [ -f "$cfg_file" ]; then
+    local cur_val
+    cur_val="$(awk -F= '/^customDevices=/ {print $2}' "$cfg_file" | tr -d ' ')"
+    if [ -n "$cur_val" ]; then
+      IFS=',' read -ra ADDR <<< "$cur_val"
+      for ip in "${ADDR[@]}"; do
+        [ -n "$ip" ] && existing_ips+=("$ip")
+      done
+    fi
+  fi
+
+  # 3. Resolve peer node IPs from manifests
+  local peer_ips=("${existing_ips[@]}")
+  local seen_nodes=()
+  for ndir in "${nodes_dirs[@]}"; do
+    for manifest in "$ndir/"*.json; do
+      [ -e "$manifest" ] || continue
+      local node_id h port
+      node_id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+      h="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+      port="$(awk -F': ' '/"port":/ {print $2}' "$manifest" | tr -d ', ')"
+      if [ -z "$node_id" ] || [ "$h" = "$my_host" ] || [ "$node_id" = "$my_host" ]; then
+        continue
+      fi
+      if [[ " ${seen_nodes[*]} " =~ " ${node_id} " ]]; then
+        continue
+      fi
+      seen_nodes+=("$node_id")
+
+      local ip
+      ip="$("$KNOT_ROOT/bin/knot" resolve "$node_id" "${port:-22}" 2>/dev/null || true)"
+      if [ -n "$ip" ] && [ "$ip" != "127.0.0.1" ]; then
+        if [[ ! " ${peer_ips[*]} " =~ " ${ip} " ]]; then
+          peer_ips+=("$ip")
+        fi
+      fi
+    done
+  done
+
   if [ "${#peer_ips[@]}" -eq 0 ]; then
-    knot_log_warn "No peer IPs resolved from registry for KDE Connect customDevices"
+    knot_log_warn "No peer IPs resolved from swarm manifests for KDE Connect customDevices"
     return 0
   fi
 
@@ -65,7 +100,7 @@ keyAlgorithm=EC
 customDevices=$joined_ips
 CFG_EOF
   else
-    if grep -q "customDevices=" "$cfg_file"; then
+    if grep -q "^customDevices=" "$cfg_file"; then
       sed -i "s/^customDevices=.*/customDevices=$joined_ips/" "$cfg_file"
     else
       if grep -q "\[General\]" "$cfg_file"; then

@@ -197,11 +197,7 @@ antigravity_exec_node() {
   my_host="$(knot_detect_hostname)"
 
   local manifest=""
-  if manifest="$(knot_get_manifest_path "$target")"; then
-    :
-  elif [ -f "$KNOT_ROOT/registry/nodes/${target}.json" ]; then
-    manifest="$KNOT_ROOT/registry/nodes/${target}.json"
-  fi
+  manifest="$(knot_get_manifest_path "$target" 2>/dev/null || true)"
   local target_host="$target"
   if [ -n "$manifest" ] && [ -f "$manifest" ]; then
     target_host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
@@ -305,16 +301,30 @@ antigravity_swarm_status() {
   local my_host
   my_host="$(knot_detect_hostname)"
 
-  local nodes_dir=""
-  if ! nodes_dir="$(knot_get_nodes_dir)"; then
-    nodes_dir="$KNOT_ROOT/registry/nodes"
+  local nodes_dirs=()
+  local primary_dir=""
+  if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+    nodes_dirs+=("$primary_dir")
   fi
+  local user_home
+  user_home="$(knot_detect_user_home)"
+  for d in "$user_home/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
+    [ -d "$d" ] || continue
+    if [[ ! " ${nodes_dirs[*]} " =~ " ${d} " ]]; then
+      nodes_dirs+=("$d")
+    fi
+  done
 
-  for manifest in "$nodes_dir/"*.json; do
-    [ -e "$manifest" ] || continue
-    local id host
-    id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-    host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+  local seen_nodes=()
+  for ndir in "${nodes_dirs[@]}"; do
+    for manifest in "$ndir/"*.json; do
+      [ -e "$manifest" ] || continue
+      local id host
+      id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+      host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+      [ -n "$id" ] || continue
+      if [[ " ${seen_nodes[*]:-} " =~ " ${id} " ]]; then continue; fi
+      seen_nodes+=("$id")
 
     local ver="missing" auth_status="UNKNOWN" latency="-"
     local test_out="" rc=0
@@ -368,6 +378,7 @@ antigravity_swarm_status() {
     fi
 
     printf "%-12s %-16s %-12b %-25b %-12s\n" "$id" "$host" "$ver" "$auth_status" "$latency"
+    done
   done
 }
 
@@ -377,15 +388,31 @@ antigravity_swarm_test() {
   local prompt="${2:-Say hello from your node name in 4 words}"
 
   if [ "$target" = "all" ] || [ "$target" = "--all" ]; then
-    local nodes_dir=""
-    if ! nodes_dir="$(knot_get_nodes_dir)"; then
-      nodes_dir="$KNOT_ROOT/registry/nodes"
+    local nodes_dirs=()
+    local primary_dir=""
+    if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+      nodes_dirs+=("$primary_dir")
     fi
-    for manifest in "$nodes_dir/"*.json; do
-      [ -e "$manifest" ] || continue
-      local id
-      id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-      antigravity_swarm_test "$id" "$prompt"
+    local user_home
+    user_home="$(knot_detect_user_home)"
+    for d in "$user_home/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
+      [ -d "$d" ] || continue
+      if [[ ! " ${nodes_dirs[*]} " =~ " ${d} " ]]; then
+        nodes_dirs+=("$d")
+      fi
+    done
+
+    local seen_nodes=()
+    for ndir in "${nodes_dirs[@]}"; do
+      for manifest in "$ndir/"*.json; do
+        [ -e "$manifest" ] || continue
+        local id
+        id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+        [ -n "$id" ] || continue
+        if [[ " ${seen_nodes[*]:-} " =~ " ${id} " ]]; then continue; fi
+        seen_nodes+=("$id")
+        antigravity_swarm_test "$id" "$prompt"
+      done
     done
     return 0
   fi
@@ -451,19 +478,30 @@ antigravity_swarm_quota() {
 antigravity_get_my_node() {
   local my_host
   my_host="$(knot_detect_hostname)"
-  local nodes_dir=""
-  if ! nodes_dir="$(knot_get_nodes_dir)"; then
-    nodes_dir="$KNOT_ROOT/registry/nodes"
+  local nodes_dirs=()
+  local primary_dir=""
+  if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+    nodes_dirs+=("$primary_dir")
   fi
-  for manifest in "$nodes_dir/"*.json; do
-    [ -e "$manifest" ] || continue
-    local h id
-    h="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
-    id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-    if [ "$h" = "$my_host" ]; then
-      echo "$id"
-      return 0
+  local user_home
+  user_home="$(knot_detect_user_home)"
+  for d in "$user_home/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
+    [ -d "$d" ] || continue
+    if [[ ! " ${nodes_dirs[*]} " =~ " ${d} " ]]; then
+      nodes_dirs+=("$d")
     fi
+  done
+  for ndir in "${nodes_dirs[@]}"; do
+    for manifest in "$ndir/"*.json; do
+      [ -e "$manifest" ] || continue
+      local h id
+      h="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+      id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+      if [ "$h" = "$my_host" ]; then
+        echo "$id"
+        return 0
+      fi
+    done
   done
   echo "$my_host"
 }
@@ -494,18 +532,33 @@ antigravity_swarm_auth() {
     if [ "${1:-}" = "--all" ]; then
       knot_log_info "Synchronizing Antigravity credentials across all mesh nodes..."
       antigravity_sync_credentials || true
-      local nodes_dir=""
-      if ! nodes_dir="$(knot_get_nodes_dir)"; then
-        nodes_dir="$KNOT_ROOT/registry/nodes"
+      local nodes_dirs=()
+      local primary_dir=""
+      if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+        nodes_dirs+=("$primary_dir")
       fi
-      for manifest in "$nodes_dir/"*.json; do
-        [ -e "$manifest" ] || continue
-        local id host
-        id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-        host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
-        if [ "$host" != "$(knot_detect_hostname)" ]; then
-          ssh -o BatchMode=yes -o ConnectTimeout=4 "$id" "knot auth sync" || true
+      local user_home
+      user_home="$(knot_detect_user_home)"
+      for d in "$user_home/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
+        [ -d "$d" ] || continue
+        if [[ ! " ${nodes_dirs[*]} " =~ " ${d} " ]]; then
+          nodes_dirs+=("$d")
         fi
+      done
+      local seen_nodes=()
+      for ndir in "${nodes_dirs[@]}"; do
+        for manifest in "$ndir/"*.json; do
+          [ -e "$manifest" ] || continue
+          local id host
+          id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+          host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+          [ -n "$id" ] || continue
+          if [[ " ${seen_nodes[*]:-} " =~ " ${id} " ]]; then continue; fi
+          seen_nodes+=("$id")
+          if [ "$host" != "$(knot_detect_hostname)" ] && [ "$id" != "$(knot_detect_hostname)" ]; then
+            ssh -o BatchMode=yes -o ConnectTimeout=4 "$id" "knot auth sync" || true
+          fi
+        done
       done
       knot_log_ok "Credential sync complete across swarm."
       return 0

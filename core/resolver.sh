@@ -56,15 +56,23 @@ mkdir -p "$CACHE_DIR/leases"
 LEASE_FILE="$CACHE_DIR/leases/${TARGET_SWARM}_${TARGET_NODE}"
 
 # Search directories for node manifest:
-# 1. Swarm-specific profile directory (~/.config/knot/swarms/<swarm_id>/nodes/)
-# 2. Base registry ($KNOT_ROOT/registry/nodes/)
+# 1. Swarm-specific profile directory (~/.config/knot/swarms/<swarm_id>/nodes/ and /etc/knot/swarms.d/<swarm_id>/nodes/)
+# 2. All other swarm profile directories
 SEARCH_DIRS=()
-if [ -n "$TARGET_SWARM" ] && [ -d "$USER_HOME/.config/knot/swarms/${TARGET_SWARM}/nodes" ]; then
-  SEARCH_DIRS+=("$USER_HOME/.config/knot/swarms/${TARGET_SWARM}/nodes")
+if [ -n "$TARGET_SWARM" ]; then
+  if [ -d "$USER_HOME/.config/knot/swarms/${TARGET_SWARM}/nodes" ]; then
+    SEARCH_DIRS+=("$USER_HOME/.config/knot/swarms/${TARGET_SWARM}/nodes")
+  fi
+  if [ -d "/etc/knot/swarms.d/${TARGET_SWARM}/nodes" ]; then
+    SEARCH_DIRS+=("/etc/knot/swarms.d/${TARGET_SWARM}/nodes")
+  fi
 fi
-if [ -d "$KNOT_ROOT/registry/nodes" ]; then
-  SEARCH_DIRS+=("$KNOT_ROOT/registry/nodes")
-fi
+for d in "$USER_HOME/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
+  [ -d "$d" ] || continue
+  if [[ ! " ${SEARCH_DIRS[*]} " =~ " ${d} " ]]; then
+    SEARCH_DIRS+=("$d")
+  fi
+done
 
 MANIFEST=""
 for sdir in "${SEARCH_DIRS[@]}"; do

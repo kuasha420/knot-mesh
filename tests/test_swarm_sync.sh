@@ -25,6 +25,13 @@ if grep -rn "|| :" "$KNOT_ROOT/core/modules/swarm_sync.sh"; then
 fi
 echo "  -> Rule 02 Zero Error Swallowing compliance: OK"
 
+echo "=== [Test 2b] Rule 01 Legacy Registry Cleanliness Audit ==="
+if grep -rn "registry/nodes" "$KNOT_ROOT/bin/" "$KNOT_ROOT/core/"; then
+  echo "Error: Forbidden legacy registry/nodes reference found in codebase" >&2
+  exit 1
+fi
+echo "  -> Zero legacy registry/nodes references: OK"
+
 echo "=== [Test 3] Swarm Sync Anchor Push & Strand Pull Logic ==="
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT

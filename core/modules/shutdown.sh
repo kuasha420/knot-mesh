@@ -86,10 +86,13 @@ shutdown_stop_local_services() {
       anchor_host="${ANCHOR_HOST:-$ANCHOR_ID}"
     fi
   fi
-  if [ -z "$anchor_host" ] && [ -f "$KNOT_ROOT/registry/nodes/desktop.json" ]; then
-    local h
-    h="$(awk -F'"' '/"hostname":/ {print $4}' "$KNOT_ROOT/registry/nodes/desktop.json")"
-    if [ -n "$h" ]; then anchor_host="$h"; fi
+  if [ -z "$anchor_host" ]; then
+    local a_manifest=""
+    if a_manifest="$(knot_get_manifest_path "desktop" 2>/dev/null)"; then
+      local h
+      h="$(awk -F'"' '/"hostname":/ {print $4}' "$a_manifest")"
+      if [ -n "$h" ]; then anchor_host="$h"; fi
+    fi
   fi
 
   if [ -n "$anchor_host" ] && [ "$my_host" = "$anchor_host" ]; then
@@ -126,10 +129,13 @@ shutdown_resume_local_services() {
       anchor_host="${ANCHOR_HOST:-$ANCHOR_ID}"
     fi
   fi
-  if [ -z "$anchor_host" ] && [ -f "$KNOT_ROOT/registry/nodes/desktop.json" ]; then
-    local h
-    h="$(awk -F'"' '/"hostname":/ {print $4}' "$KNOT_ROOT/registry/nodes/desktop.json")"
-    if [ -n "$h" ]; then anchor_host="$h"; fi
+  if [ -z "$anchor_host" ]; then
+    local a_manifest=""
+    if a_manifest="$(knot_get_manifest_path "desktop" 2>/dev/null)"; then
+      local h
+      h="$(awk -F'"' '/"hostname":/ {print $4}' "$a_manifest")"
+      if [ -n "$h" ]; then anchor_host="$h"; fi
+    fi
   fi
 
   if [ -n "$anchor_host" ] && [ "$my_host" = "$anchor_host" ]; then
@@ -189,8 +195,9 @@ shutdown_exec_remote() {
   local delay_arg="${3:-now}"
   local wall_msg="${4:-Shutdown scheduled via Knot Swarm}"
 
-  local manifest="$KNOT_ROOT/registry/nodes/${target}.json"
-  if [ ! -f "$manifest" ]; then
+  local manifest=""
+  manifest="$(knot_get_manifest_path "$target" 2>/dev/null || true)"
+  if [ -z "$manifest" ] || [ ! -f "$manifest" ]; then
     knot_log_err "Unknown node '$target'"
     return 1
   fi
@@ -247,17 +254,37 @@ shutdown_exec_all() {
     fi
   fi
 
-  for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
-    [ -e "$manifest" ] || continue
-    local id host
-    id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-    host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
-
-    if [ "$id" = "$anchor_id" ] || [ -n "$anchor_host" ] && [ "$host" = "$anchor_host" ]; then
-      anchor="$id"
-    else
-      strands+=("$id")
+  local nodes_dirs=()
+  local primary_dir=""
+  if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+    nodes_dirs+=("$primary_dir")
+  fi
+  local user_home
+  user_home="$(knot_detect_user_home)"
+  for d in "$user_home/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
+    [ -d "$d" ] || continue
+    if [[ ! " ${nodes_dirs[*]} " =~ " ${d} " ]]; then
+      nodes_dirs+=("$d")
     fi
+  done
+
+  local seen_nodes=()
+  for ndir in "${nodes_dirs[@]}"; do
+    for manifest in "$ndir/"*.json; do
+      [ -e "$manifest" ] || continue
+      local id host
+      id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+      host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+      [ -n "$id" ] || continue
+      if [[ " ${seen_nodes[*]:-} " =~ " ${id} " ]]; then continue; fi
+      seen_nodes+=("$id")
+
+      if [ "$id" = "$anchor_id" ] || [ -n "$anchor_host" ] && [ "$host" = "$anchor_host" ]; then
+        anchor="$id"
+      else
+        strands+=("$id")
+      fi
+    done
   done
 
   if [ "$action" = "show" ] || [ "$action" = "status" ]; then
@@ -287,9 +314,10 @@ shutdown_exec_all() {
 
   # 1. Shut down / schedule strands first
   for s in "${strands[@]}"; do
-    local s_manifest="$KNOT_ROOT/registry/nodes/${s}.json"
+    local s_manifest=""
+    s_manifest="$(knot_get_manifest_path "$s" 2>/dev/null || true)"
     local s_host=""
-    if [ -f "$s_manifest" ]; then
+    if [ -n "$s_manifest" ] && [ -f "$s_manifest" ]; then
       s_host="$(awk -F'"' '/"hostname":/ {print $4}' "$s_manifest")"
     fi
     if [ "$s_host" != "$my_host" ]; then

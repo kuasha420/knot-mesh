@@ -24,6 +24,35 @@ KNOT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "../.."))
 def get_my_hostname() -> str:
     return socket.gethostname()
 
+def get_swarm_node_dirs() -> List[str]:
+    home = os.path.expanduser("~")
+    dirs = []
+    active_swarm = os.environ.get("KNOT_ACTIVE_SWARM")
+    if not active_swarm:
+        for p in ["/run/knot/active_swarm", os.path.join(home, ".local/state/knot/active_swarm")]:
+            if os.path.isfile(p):
+                try:
+                    with open(p, "r") as f:
+                        s = f.read().strip()
+                        if s and s != "none":
+                            active_swarm = s
+                            break
+                except Exception:
+                    pass
+    if active_swarm:
+        for base in [os.path.join(home, f".config/knot/swarms/{active_swarm}/nodes"), f"/etc/knot/swarms.d/{active_swarm}/nodes"]:
+            if os.path.isdir(base) and base not in dirs:
+                dirs.append(base)
+    swarms_base = os.path.join(home, ".config/knot/swarms")
+    if os.path.isdir(swarms_base):
+        for entry in glob.glob(os.path.join(swarms_base, "*/nodes")):
+            if os.path.isdir(entry) and entry not in dirs:
+                dirs.append(entry)
+    for entry in glob.glob("/etc/knot/swarms.d/*/nodes"):
+        if os.path.isdir(entry) and entry not in dirs:
+            dirs.append(entry)
+    return dirs
+
 def resolve_anchor_host() -> str:
     """
     Resolves the Anchor node address. If running on Anchor itself, uses 127.0.0.1.
@@ -34,18 +63,19 @@ def resolve_anchor_host() -> str:
         return override
 
     my_host = get_my_hostname()
-    manifest_path = os.path.join(KNOT_ROOT, "registry/nodes/desktop.json")
-    if os.path.exists(manifest_path):
-        try:
-            with open(manifest_path, "r") as f:
-                d = json.load(f)
-                if d.get("hostname") == my_host:
-                    return "127.0.0.1"
-                ip_hint = d.get("ip_hint")
-                if ip_hint:
-                    return ip_hint
-        except Exception:
-            pass
+    for ndir in get_swarm_node_dirs():
+        manifest_path = os.path.join(ndir, "desktop.json")
+        if os.path.isfile(manifest_path):
+            try:
+                with open(manifest_path, "r") as f:
+                    d = json.load(f)
+                    if d.get("hostname") == my_host:
+                        return "127.0.0.1"
+                    ip_hint = d.get("ip_hint")
+                    if ip_hint:
+                        return ip_hint
+            except Exception:
+                pass
     return "127.0.0.1"
 
 class MemoryPalaceClient:
@@ -69,19 +99,19 @@ class MemoryPalaceClient:
 
     def _detect_node_id(self) -> str:
         my_host = get_my_hostname()
-        reg_dir = os.path.join(KNOT_ROOT, "registry/nodes")
-        if os.path.isdir(reg_dir):
-            for fn in os.listdir(reg_dir):
-                if fn.endswith(".json"):
-                    fp = os.path.join(reg_dir, fn)
-                    try:
-                        with open(fp, "r") as f:
-                            d = json.load(f)
-                            if d.get("hostname") == my_host:
-                                return d.get("id", "desktop")
-                    except Exception:
-                        pass
-        return "desktop"
+        for ndir in get_swarm_node_dirs():
+            if os.path.isdir(ndir):
+                for fn in os.listdir(ndir):
+                    if fn.endswith(".json"):
+                        fp = os.path.join(ndir, fn)
+                        try:
+                            with open(fp, "r") as f:
+                                d = json.load(f)
+                                if d.get("hostname") == my_host:
+                                    return d.get("id", my_host)
+                        except Exception:
+                            pass
+        return my_host
 
     def execute_surreal(self, sql: str) -> List[Dict[str, Any]]:
         """

@@ -26,9 +26,10 @@ autologin_is_anchor() {
     fi
   fi
 
-  if [ -f "$KNOT_ROOT/registry/nodes/desktop.json" ]; then
+  local a_manifest=""
+  if a_manifest="$(knot_get_manifest_path "desktop" 2>/dev/null)"; then
     local h
-    h="$(awk -F'"' '/"hostname":/ {print $4}' "$KNOT_ROOT/registry/nodes/desktop.json")"
+    h="$(awk -F'"' '/"hostname":/ {print $4}' "$a_manifest")"
     if [ -n "$h" ] && [ "$my_host" = "$h" ]; then
       return 0
     fi
@@ -44,21 +45,28 @@ autologin_detect_user() {
     return 0
   fi
 
-  # In root context: inspect registry node for local hostname
+  # In root context: inspect swarm node manifests for local hostname
   local my_host
-  my_host="$(hostname)"
-  for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
-    [ -e "$manifest" ] || continue
-    local host
-    host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
-    if [ "$host" = "$my_host" ]; then
-      local reg_user
-      reg_user="$(awk -F'"' '/"user":/ {print $4}' "$manifest")"
-      if [ -n "$reg_user" ]; then
-        echo "$reg_user"
-        return 0
+  my_host="$(knot_detect_hostname)"
+  local nodes_dirs=()
+  for d in /home/*/.config/knot/swarms/*/nodes /etc/knot/swarms.d/*/nodes; do
+    [ -d "$d" ] || continue
+    nodes_dirs+=("$d")
+  done
+  for ndir in "${nodes_dirs[@]}"; do
+    for manifest in "$ndir/"*.json; do
+      [ -e "$manifest" ] || continue
+      local host
+      host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+      if [ "$host" = "$my_host" ]; then
+        local reg_user
+        reg_user="$(awk -F'"' '/"user":/ {print $4}' "$manifest")"
+        if [ -n "$reg_user" ]; then
+          echo "$reg_user"
+          return 0
+        fi
       fi
-    fi
+    done
   done
 
   # Fallback to first non-system user with home directory
@@ -319,17 +327,35 @@ autologin_reconcile_all() {
 
   knot_log_info "Anchor is UNLOCKED. Scanning strands for pending first logins..."
   local my_host
-  my_host="$(hostname)"
-
-  for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
-    [ -e "$manifest" ] || continue
-    local id host
-    id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-    host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
-
-    if [ "$id" = "desktop" ] || [ "$host" = "$my_host" ]; then
-      continue
+  my_host="$(knot_detect_hostname)"
+  local nodes_dirs=()
+  local primary_dir=""
+  if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+    nodes_dirs+=("$primary_dir")
+  fi
+  local user_home
+  user_home="$(knot_detect_user_home)"
+  for d in "$user_home/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
+    [ -d "$d" ] || continue
+    if [[ ! " ${nodes_dirs[*]} " =~ " ${d} " ]]; then
+      nodes_dirs+=("$d")
     fi
+  done
+
+  local seen_nodes=()
+  for ndir in "${nodes_dirs[@]}"; do
+    for manifest in "$ndir/"*.json; do
+      [ -e "$manifest" ] || continue
+      local id host
+      id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+      host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+      [ -n "$id" ] || continue
+      if [[ " ${seen_nodes[*]:-} " =~ " ${id} " ]]; then continue; fi
+      seen_nodes+=("$id")
+
+      if [ "$id" = "desktop" ] || [ "$host" = "$my_host" ] || [ "$id" = "$my_host" ]; then
+        continue
+      fi
 
     local strand_status=""
     if strand_status="$("$KNOT_ROOT/bin/knot" exec "$id" "knot screen status-raw")"; then
@@ -344,6 +370,7 @@ autologin_reconcile_all() {
     else
       knot_log_warn "Strand '$id' ($host) is unreachable."
     fi
+    done
   done
 
   return 0
