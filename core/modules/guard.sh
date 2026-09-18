@@ -28,6 +28,8 @@ guard_configure() {
 
   knot_log_info "Configuring Knot Multi-Swarm Network Guard..."
   sudo mkdir -p /etc/knot/swarms.d
+  sudo mkdir -p /run/knot
+  sudo chmod 1777 /run/knot
 
   # Write swarm profile if not already present or if parameters provided
   local swarm_conf="/etc/knot/swarms.d/${swarm_id}.conf"

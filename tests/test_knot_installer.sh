@@ -81,7 +81,13 @@ if [ ! -f "$ACTIVE_SWARM_STATE" ] || [ "$(cat "$ACTIVE_SWARM_STATE")" != "lab" ]
   echo "Error: active swarm was not set to 'lab'!" >&2
   exit 1
 fi
-echo "  -> Active swarm state: OK"
+# Check knot-guard.service deployment
+GUARD_SERVICE="$HOME/.config/systemd/user/knot-guard.service"
+if [ ! -f "$GUARD_SERVICE" ] && [ ! -L "$GUARD_SERVICE" ]; then
+  echo "Error: knot-guard.service was not deployed to $GUARD_SERVICE" >&2
+  exit 1
+fi
+echo "  -> Knot Guard user service deployment: OK"
 
 echo "=== [Test 4] Subcommand: uninstall (-y) ==="
 "$INSTALLER" uninstall -y

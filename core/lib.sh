@@ -276,10 +276,32 @@ knot_set_active_swarm() {
   
   # 1. System runtime directory
   if [ -d "$run_dir" ] || [ -w "$(dirname "$run_dir")" ]; then
-    mkdir -p "$run_dir"
-    if [ -w "$run_dir" ]; then
+    if [ ! -d "$run_dir" ]; then
+      mkdir -p "$run_dir"
+    fi
+    if [ -w "$run_dir/active_swarm" ]; then
+      echo "$swarm_id" > "$run_dir/active_swarm"
+    elif [ -w "$run_dir" ]; then
       echo "$swarm_id" > "$run_dir/active_swarm.tmp"
-      mv -f "$run_dir/active_swarm.tmp" "$run_dir/active_swarm"
+      if ! mv -f "$run_dir/active_swarm.tmp" "$run_dir/active_swarm" 2>&1; then
+        if [ -w "$run_dir/active_swarm" ]; then
+          cat "$run_dir/active_swarm.tmp" > "$run_dir/active_swarm"
+        elif command -v sudo >/dev/null; then
+          if sudo -n true 2>&1; then
+            echo "$swarm_id" | sudo tee "$run_dir/active_swarm" >/dev/null
+          fi
+        fi
+        rm -f "$run_dir/active_swarm.tmp"
+      fi
+    elif command -v sudo >/dev/null; then
+      if sudo -n true 2>&1; then
+        echo "$swarm_id" | sudo tee "$run_dir/active_swarm" >/dev/null
+      fi
+    fi
+  elif command -v sudo >/dev/null; then
+    if sudo -n true 2>&1; then
+      sudo mkdir -p "$run_dir"
+      echo "$swarm_id" | sudo tee "$run_dir/active_swarm" >/dev/null
     fi
   fi
 
@@ -311,6 +333,8 @@ knot_load_swarm_profile() {
     user_home="$(knot_detect_user_home)"
     if [ -r "$user_home/.config/knot/swarms/${target_id}.conf" ]; then
       conf="$user_home/.config/knot/swarms/${target_id}.conf"
+    elif [ -r "$user_home/.config/knot/swarms/${target_id}/swarm.conf" ]; then
+      conf="$user_home/.config/knot/swarms/${target_id}/swarm.conf"
     fi
   fi
 
