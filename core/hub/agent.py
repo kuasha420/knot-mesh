@@ -11,6 +11,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -177,6 +178,88 @@ def get_headless_systemd_env() -> list[str]:
     ]
 
 
+def is_headless() -> bool:
+    """
+    Checks if current execution is in a non-interactive headless context.
+    """
+    if not sys.stdin.isatty():
+        return True
+    if os.environ.get("JOURNAL_STREAM") or os.environ.get("INVOCATION_ID"):
+        return True
+    if os.environ.get("DE") == "generic" or not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+        return True
+    return False
+
+
+def is_kwallet_unlocked() -> bool:
+    """
+    Checks if KWallet or the desktop Secret Service keyring is unlocked.
+    Returns True if unlocked, or if KWallet is not enabled/installed.
+    Returns False if KWallet/Secret Service is present and confirmed locked.
+    """
+    # 1. Check KDE KWallet DBus interface (Plasma 6 kwalletd6 and Plasma 5 kwalletd5)
+    for service, path in [("org.kde.kwalletd6", "/modules/kwalletd6"), ("org.kde.kwalletd5", "/modules/kwalletd5")]:
+        try:
+            p_enabled = subprocess.run(
+                ["busctl", "--user", "call", service, path, "org.kde.KWallet", "isEnabled"],
+                capture_output=True, text=True, timeout=1.5
+            )
+            if p_enabled.returncode == 0 and "true" in p_enabled.stdout:
+                wallet = "kdewallet"
+                p_wallet = subprocess.run(
+                    ["busctl", "--user", "call", service, path, "org.kde.KWallet", "localWallet"],
+                    capture_output=True, text=True, timeout=1.5
+                )
+                if p_wallet.returncode == 0:
+                    m = re.search(r"\"([^\"]+)\"", p_wallet.stdout)
+                    if m:
+                        wallet = m.group(1)
+                p_open = subprocess.run(
+                    ["busctl", "--user", "call", service, path, "org.kde.KWallet", "isOpen", "s", wallet],
+                    capture_output=True, text=True, timeout=1.5
+                )
+                if p_open.returncode == 0:
+                    if "false" in p_open.stdout:
+                        return False
+                    if "true" in p_open.stdout:
+                        return True
+        except Exception:
+            pass
+
+    # 2. Check FreeDesktop Secret Service default collection Locked property
+    try:
+        p_sec = subprocess.run(
+            ["busctl", "--user", "get-property", "org.freedesktop.secrets",
+             "/org/freedesktop/secrets/aliases/default", "org.freedesktop.Secret.Collection", "Locked"],
+            capture_output=True, text=True, timeout=1.5
+        )
+        if p_sec.returncode == 0:
+            if "true" in p_sec.stdout:
+                return False
+            if "false" in p_sec.stdout:
+                return True
+    except Exception:
+        pass
+
+    # 3. Probe secret-tool search as fallback
+    try:
+        p_st = subprocess.run(
+            ["secret-tool", "search", "service", "gemini"],
+            capture_output=True, text=True, timeout=1.5
+        )
+        if p_st.returncode == 0 and p_st.stdout:
+            for line in p_st.stdout.splitlines():
+                if line.startswith("secret = "):
+                    val = line[len("secret = "):].strip()
+                    if not val:
+                        return False
+                    return True
+    except Exception:
+        pass
+
+    return True
+
+
 _account_info_cache: dict = {}
 _account_info_cached_at: float = 0.0
 _account_info_token_sig: str = ""
@@ -189,27 +272,28 @@ def sync_oauth_token_file() -> dict | None:
     """
     primary_token = os.path.expanduser("~/.gemini/antigravity-cli/antigravity-oauth-token")
 
-    # Check Secret Service for updated token
-    try:
-        sp = subprocess.run(["secret-tool", "search", "service", "gemini"], capture_output=True, text=True, timeout=3)
-        for line in sp.stdout.splitlines():
-            if line.startswith("secret = "):
-                secret_json = line[len("secret = "):].strip()
-                if "refresh_token" in secret_json or "access_token" in secret_json:
-                    parsed = json.loads(secret_json)
-                    os.makedirs(os.path.dirname(primary_token), exist_ok=True)
-                    try:
-                        with open(primary_token, "r") as existing_f:
-                            existing_content = existing_f.read().strip()
-                    except Exception:
-                        existing_content = ""
-                    if existing_content != secret_json:
-                        with open(primary_token, "w") as tf:
-                            tf.write(secret_json + "\n")
-                        os.chmod(primary_token, 0o600)
-                    return parsed
-    except Exception:
-        pass
+    # Check Secret Service for updated token if wallet is unlocked
+    if is_kwallet_unlocked():
+        try:
+            sp = subprocess.run(["secret-tool", "search", "service", "gemini"], capture_output=True, text=True, timeout=3)
+            for line in sp.stdout.splitlines():
+                if line.startswith("secret = "):
+                    secret_json = line[len("secret = "):].strip()
+                    if "refresh_token" in secret_json or "access_token" in secret_json:
+                        parsed = json.loads(secret_json)
+                        os.makedirs(os.path.dirname(primary_token), exist_ok=True)
+                        try:
+                            with open(primary_token, "r") as existing_f:
+                                existing_content = existing_f.read().strip()
+                        except Exception:
+                            existing_content = ""
+                        if existing_content != secret_json:
+                            with open(primary_token, "w") as tf:
+                                tf.write(secret_json + "\n")
+                            os.chmod(primary_token, 0o600)
+                        return parsed
+        except Exception:
+            pass
 
     # Fallback to local token files
     token_candidates = [
@@ -319,6 +403,10 @@ def get_agy_info() -> tuple[str, str]:
     else:
         if not is_online():
             return ver, "UNAUTHENTICATED"
+        # Skip headless probe if KWallet is locked to avoid desktop warnings
+        if not is_kwallet_unlocked() and is_headless():
+            print("[knot-agent] KWallet is locked on autologin node; skipping headless auth probe")
+            return ver, "UNAUTHENTICATED"
         # Fallback to systemd probe with headless browser prevention and 30s timeout
         try:
             cmd = ["systemd-run", "--user", "--pipe"] + get_headless_systemd_env() + [
@@ -341,6 +429,10 @@ def fetch_model_quota() -> dict | None:
     Consumes zero tokens. Enforces headless shims and preflight network check.
     """
     if not is_online():
+        return None
+
+    if not is_kwallet_unlocked():
+        print("[knot-agent] KWallet is locked on autologin node; skipping headless quota probe")
         return None
 
     agy_bin = find_agy_binary()
@@ -537,6 +629,10 @@ class AgentWorker:
         with self._quota_lock:
             if self.agy_auth != "AUTHENTICATED":
                 return
+            if not is_kwallet_unlocked():
+                print("[knot-agent] KWallet is locked on autologin node; skipping headless quota probe")
+                self.last_quota_fetch = time.time()
+                return
             self.last_quota_fetch = time.time()
             try:
                 self.account_info = fetch_account_info()
@@ -706,6 +802,10 @@ class AgentWorker:
 
         if not is_online():
             return "ERROR", "Network or DNS offline on this node. Task deferred.", "", 0.0, 0
+
+        if not is_kwallet_unlocked():
+            print("[knot-agent] KWallet is locked on autologin node; skipping headless agy execution")
+            return "ERROR", "KWallet is locked on autologin node. Please unlock KWallet to execute tasks.", "", 0.0, 0
 
         knot_dir = (
             os.environ.get("KNOT_ROOT")
