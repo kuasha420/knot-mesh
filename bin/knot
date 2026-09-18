@@ -1129,11 +1129,16 @@ cmd_update() {
 
     ssh -o BatchMode=yes "$strand" "mkdir -p '$strand_root/bin' '$strand_root/core' \"\$HOME/.local/bin\""
 
-    knot_log_info "Syncing binaries to $strand:$strand_root/bin/..."
-    rsync -az --exclude '__pycache__' "$KNOT_ROOT/bin/" "$strand:$strand_root/bin/"
+    if ssh -o BatchMode=yes -o ConnectTimeout=4 "$strand" "command -v rsync >/dev/null" 2>&1; then
+      knot_log_info "Syncing binaries to $strand:$strand_root/bin/..."
+      rsync -az --exclude '__pycache__' "$KNOT_ROOT/bin/" "$strand:$strand_root/bin/"
 
-    knot_log_info "Syncing core modules to $strand:$strand_root/core/..."
-    rsync -az --exclude '__pycache__' "$KNOT_ROOT/core/" "$strand:$strand_root/core/"
+      knot_log_info "Syncing core modules to $strand:$strand_root/core/..."
+      rsync -az --exclude '__pycache__' "$KNOT_ROOT/core/" "$strand:$strand_root/core/"
+    else
+      knot_log_info "Syncing binaries and core modules to $strand:$strand_root/ via streaming tar fallback..."
+      tar -czf - --exclude='__pycache__' -C "$KNOT_ROOT" bin core | ssh -o BatchMode=yes "$strand" "tar -xzf - -C '$strand_root'"
+    fi
 
     ssh -o BatchMode=yes "$strand" "
       chmod +x '$strand_root/bin/'*
