@@ -4,6 +4,7 @@ set -euo pipefail
 # Knot - Multi-Device Mesh Orchestrator CLI
 
 KNOT_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+KNOT_VERSION="${KNOT_VERSION:-1.0.0-rc3}"
 source "$KNOT_ROOT/core/lib.sh"
 source "$KNOT_ROOT/core/gitops.sh"
 source "$KNOT_ROOT/core/modules/ssh.sh"
@@ -874,7 +875,306 @@ for i, t in enumerate(tools, 1):
   esac
 }
 
+cmd_update() {
+  local target="local"
+  local force=0
+  local orig_args=()
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -h|--help)
+        echo -e "${C_BOLD}knot update - Swarm-Wide Binary & Module Updater${C_RESET}"
+        echo "Usage:"
+        echo "  knot update [options]               Check and update local node from GitHub release"
+        echo "  knot update --all [options]         Anchor mode: Coordinated rollout across all active Strands"
+        echo "  knot update <node_id> [options]     Roll out update to a specific mesh node"
+        echo ""
+        echo "Options:"
+        echo "  -f, --force    Force reinstall/download even if version matches"
+        echo "  -h, --help     Show this help message"
+        return 0
+        ;;
+      -f|--force)
+        force=1
+        orig_args+=("$1")
+        shift
+        ;;
+      --all)
+        target="--all"
+        orig_args+=("$1")
+        shift
+        ;;
+      local)
+        target="local"
+        shift
+        ;;
+      *)
+        target="$1"
+        orig_args+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  if [ "$target" = "local" ]; then
+    local local_ver="${KNOT_VERSION:-1.0.0-rc3}"
+    knot_log_info "Checking for latest Knot Mesh release (current: v${local_ver})..."
+
+    local remote_tag=""
+    if command -v gh >/dev/null; then
+      local gh_out=""
+      if gh_out="$(gh release view --json tagName -q .tagName 2>&1)"; then
+        remote_tag="$(echo "$gh_out" | tr -d '[:space:]')"
+      fi
+    fi
+
+    if [ -z "$remote_tag" ] && command -v curl >/dev/null; then
+      local curl_out=""
+      if curl_out="$(curl -sSfL -H "Accept: application/vnd.github+json" https://api.github.com/repos/kuasha420/knot-mesh/releases/latest 2>&1)"; then
+        remote_tag="$(echo "$curl_out" | grep '"tag_name":' | head -n1 | cut -d '"' -f 4 | tr -d '[:space:]')"
+      fi
+    fi
+
+    if [ -z "$remote_tag" ]; then
+      knot_log_err "Failed to fetch latest release tag from GitHub."
+      return 1
+    fi
+
+    local clean_remote="${remote_tag#v}"
+    local clean_local="${local_ver#v}"
+
+    if [ "$clean_remote" = "$clean_local" ] && [ $force -eq 0 ]; then
+      knot_log_ok "Knot Mesh is up to date (${remote_tag})."
+      return 0
+    fi
+
+    knot_log_info "Updating Knot Mesh: v${clean_local} -> ${remote_tag}..."
+
+    local tmp_dir=""
+    tmp_dir="$(mktemp -d)"
+    local tarball="$tmp_dir/release.tar.gz"
+
+    knot_log_info "Downloading release tarball (${remote_tag})..."
+    local dl_url="https://github.com/kuasha420/knot-mesh/archive/refs/tags/${remote_tag}.tar.gz"
+    local dl_err=""
+    if ! dl_err="$(curl -sSfL "$dl_url" -o "$tarball" 2>&1)"; then
+      knot_log_err "Failed to download release archive from $dl_url: $dl_err"
+      rm -rf "$tmp_dir"
+      return 1
+    fi
+
+    knot_log_info "Extracting release tarball..."
+    local tar_err=""
+    if ! tar_err="$(tar -xzf "$tarball" -C "$tmp_dir" 2>&1)"; then
+      knot_log_err "Failed to extract release archive: $tar_err"
+      rm -rf "$tmp_dir"
+      return 1
+    fi
+
+    local extracted_root=""
+    extracted_root="$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -n1)"
+    if [ -z "$extracted_root" ] || [ ! -d "$extracted_root" ]; then
+      knot_log_err "Failed to locate extracted release directory in $tmp_dir"
+      rm -rf "$tmp_dir"
+      return 1
+    fi
+
+    local user_home
+    user_home="$(knot_detect_user_home)"
+    local bin_dest="$user_home/.local/bin"
+    mkdir -p "$bin_dest"
+
+    local target_root="$KNOT_ROOT"
+    if [ -d "$KNOT_ROOT/.git" ] && [ -d "$user_home/.local/share/knot-mesh" ]; then
+      target_root="$user_home/.local/share/knot-mesh"
+    elif [ ! -w "$target_root" ] || [ ! -d "$target_root/core" ]; then
+      target_root="$user_home/.local/share/knot-mesh"
+    fi
+    mkdir -p "$target_root/bin" "$target_root/core"
+
+    if [ -d "$extracted_root/core" ]; then
+      knot_log_info "Installing core libraries to $target_root/core/..."
+      cp -r "$extracted_root/core/"* "$target_root/core/"
+      if [ "$target_root" != "$user_home/.local/share/knot-mesh" ] && [ -d "$user_home/.local/share/knot-mesh/core" ] && [ -w "$user_home/.local/share/knot-mesh/core" ]; then
+        cp -r "$extracted_root/core/"* "$user_home/.local/share/knot-mesh/core/"
+      fi
+    fi
+
+    if [ -d "$extracted_root/bin" ]; then
+      knot_log_info "Installing binaries to $target_root/bin/ and $bin_dest/..."
+      cp -r "$extracted_root/bin/"* "$target_root/bin/"
+      chmod +x "$target_root/bin/"*
+      for b in "$extracted_root/bin/"*; do
+        [ -f "$b" ] || continue
+        local b_name
+        b_name="$(basename "$b")"
+        if [ -L "$bin_dest/$b_name" ]; then
+          local link_target
+          link_target="$(readlink -f "$bin_dest/$b_name")"
+          if [ -f "$link_target" ] && [ "$link_target" != "$extracted_root/bin/$b_name" ]; then
+            if [[ "$link_target" != *"/Dev/"* ]] && [[ "$link_target" != *".git"* ]]; then
+              cp -f "$b" "$link_target"
+            fi
+          fi
+        else
+          cp -f "$b" "$bin_dest/$b_name"
+        fi
+        chmod +x "$bin_dest/$b_name"
+      done
+    fi
+
+    rm -rf "$tmp_dir"
+
+    knot_log_info "Refreshing systemd services (preserving active KVM sessions)..."
+    if systemctl --user is-active --quiet knot-agent.service; then
+      systemctl --user restart knot-agent.service
+      knot_log_ok "knot-agent.service restarted."
+    fi
+    if systemctl --user is-active --quiet knot-stripd.service; then
+      systemctl --user restart knot-stripd.service
+      knot_log_ok "knot-stripd.service restarted."
+    fi
+
+    knot_log_ok "Local Knot Mesh update complete (${remote_tag})."
+    return 0
+  fi
+
+  local my_host
+  my_host="$(knot_detect_hostname)"
+  local active_swarm
+  active_swarm="$(knot_get_active_swarm)"
+  local anchor_id="desktop"
+  local anchor_host="desktop"
+  if knot_load_swarm_profile "$active_swarm"; then
+    anchor_id="${ANCHOR_ID:-desktop}"
+    anchor_host="${ANCHOR_HOST:-desktop}"
+  fi
+
+  local is_anchor=0
+  if [ "$my_host" = "$anchor_host" ] || [ "$my_host" = "$anchor_id" ]; then
+    is_anchor=1
+  fi
+
+  # If run on a Strand, delegate to the Anchor
+  if [ $is_anchor -eq 0 ]; then
+    knot_log_info "Node '$my_host' is a Strand. Delegating fleet update to Anchor ($anchor_id)..."
+    local remote_cmd="export PATH=\"\$HOME/.local/bin:\$PATH\"; knot update"
+    if [ ${#orig_args[@]} -gt 0 ]; then
+      remote_cmd="$remote_cmd ${orig_args[*]}"
+    fi
+    if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "$anchor_id" "$remote_cmd"; then
+      knot_log_err "Failed to execute update on Anchor ($anchor_id)"
+      return 1
+    fi
+    return 0
+  fi
+
+  # We are on the Anchor
+  local strands=()
+  if [ "$target" = "--all" ]; then
+    local nodes_dir=""
+    if nodes_dir="$(knot_get_nodes_dir)"; then
+      for manifest in "$nodes_dir/"*.json; do
+        [ -e "$manifest" ] || continue
+        local n_id n_role n_host
+        n_id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+        n_role="$(awk -F'"' '/"role":/ {print $4}' "$manifest")"
+        n_host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+        if [ "$n_role" = "anchor" ] || [ "$n_id" = "$anchor_id" ] || [ "$n_host" = "$anchor_host" ]; then
+          continue
+        fi
+        if [ -n "$n_id" ]; then
+          strands+=("$n_id")
+        fi
+      done
+    fi
+    if [ ${#strands[@]} -eq 0 ]; then
+      strands=("laptop" "rog-ally" "steamdeck")
+    fi
+  else
+    strands=("$target")
+  fi
+
+  knot_log_info "Anchor mode: Orchestrating rollout across strands: ${strands[*]}..."
+
+  for strand in "${strands[@]}"; do
+    echo -e "\n${C_CYAN}=== Rolling out update to Strand: [$strand] ===${C_RESET}"
+
+    local probe_out=""
+    if ! probe_out="$(ssh -o BatchMode=yes -o ConnectTimeout=4 "$strand" "true" 2>&1)"; then
+      knot_log_warn "Strand '$strand' is unreachable: $probe_out. Skipping."
+      continue
+    fi
+
+    local strand_root=""
+    strand_root="$(ssh -o BatchMode=yes -o ConnectTimeout=4 "$strand" '
+      if [ -L "$HOME/.local/bin/knot" ]; then
+        p="$(readlink -f "$HOME/.local/bin/knot")"
+        dirname "$(dirname "$p")"
+      elif [ -d "$HOME/.local/share/knot-mesh" ]; then
+        echo "$HOME/.local/share/knot-mesh"
+      elif [ -d "$HOME/knot-mesh" ]; then
+        echo "$HOME/knot-mesh"
+      else
+        echo "$HOME/.local/share/knot-mesh"
+      fi
+    ')"
+
+    if [ -z "$strand_root" ]; then
+      knot_log_err "Failed to determine Knot root directory on $strand"
+      continue
+    fi
+
+    knot_log_info "Target root on $strand: $strand_root"
+
+    ssh -o BatchMode=yes "$strand" "mkdir -p '$strand_root/bin' '$strand_root/core' \"\$HOME/.local/bin\""
+
+    knot_log_info "Syncing binaries to $strand:$strand_root/bin/..."
+    rsync -az --exclude '__pycache__' "$KNOT_ROOT/bin/" "$strand:$strand_root/bin/"
+
+    knot_log_info "Syncing core modules to $strand:$strand_root/core/..."
+    rsync -az --exclude '__pycache__' "$KNOT_ROOT/core/" "$strand:$strand_root/core/"
+
+    ssh -o BatchMode=yes "$strand" "
+      chmod +x '$strand_root/bin/'*
+      for b in '$strand_root/bin/'*; do
+        [ -f \"\$b\" ] || continue
+        base=\"\$(basename \"\$b\")\"
+        if [ ! -L \"\$HOME/.local/bin/\$base\" ] && [ ! -f \"\$HOME/.local/bin/\$base\" ]; then
+          ln -sf \"\$b\" \"\$HOME/.local/bin/\$base\"
+        elif [ -L \"\$HOME/.local/bin/\$base\" ]; then
+          ln -sf \"\$b\" \"\$HOME/.local/bin/\$base\"
+        fi
+        chmod +x \"\$HOME/.local/bin/\$base\"
+      done
+    "
+
+    knot_log_info "Restarting services on $strand without interrupting KVM..."
+    ssh -o BatchMode=yes "$strand" '
+      if systemctl --user is-active --quiet knot-agent.service; then
+        systemctl --user restart knot-agent.service
+        echo "  [✓] knot-agent.service restarted"
+      fi
+      if systemctl --user is-active --quiet knot-stripd.service; then
+        systemctl --user restart knot-stripd.service
+        echo "  [✓] knot-stripd.service restarted"
+      fi
+    '
+
+    knot_log_ok "Strand '$strand' updated successfully."
+  done
+
+  knot_log_ok "Swarm-wide fleet rollout complete."
+}
+
 case "${1:-}" in
+  update)
+    shift
+    cmd_update "$@"
+    ;;
+  -v|--version|version)
+    echo "knot-mesh version ${KNOT_VERSION:-1.0.0-rc3}"
+    ;;
   mcp)
     shift
     cmd_mcp "$@"
@@ -1006,6 +1306,7 @@ case "${1:-}" in
   *)
     echo -e "${C_BOLD}Knot - Multi-Device Mesh Orchestrator${C_RESET}"
     echo "Usage:"
+    echo "  knot update [--all|<node_id>] Update Knot binaries & core modules from release/Anchor"
     echo "  knot topology [show|refresh]  Visual multi-screen spatial layout & photo refresh"
     echo "  knot onboard [node_id]        Enroll current device into the mesh"
     echo "  knot sync [--all | <node_id>] Reconcile keys, configs, and layout across swarm"

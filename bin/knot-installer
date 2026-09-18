@@ -44,6 +44,7 @@ ${C_BOLD}COMMANDS:${C_RESET}
     ${C_GREEN}invite${C_RESET}    Generate a pairing token and coordinate Strand enrollment rendezvous
     ${C_GREEN}join${C_RESET}      Enroll this machine as a Strand in an existing Knot Mesh swarm
     ${C_GREEN}doctor${C_RESET}    Run comprehensive health and diagnostic checks across the mesh
+    ${C_GREEN}update${C_RESET}    Update Knot Mesh binaries and modules from release or Anchor
     ${C_GREEN}uninstall${C_RESET} Cleanly stop services, unbind mesh symlinks, and remove state
 
 ${C_BOLD}OPTIONS:${C_RESET}
@@ -727,6 +728,17 @@ cmd_uninstall() {
   echo -e "${C_GREEN}[✓] Knot Mesh uninstalled cleanly from this node.${C_RESET}\n"
 }
 
+cmd_update() {
+  if [ -x "$KNOT_ROOT/bin/knot" ]; then
+    exec "$KNOT_ROOT/bin/knot" update "$@"
+  elif command -v knot >/dev/null; then
+    exec knot update "$@"
+  else
+    echo -e "${C_RED}Error:${C_RESET} knot command not found" >&2
+    exit 1
+  fi
+}
+
 main() {
   if [ $# -eq 0 ]; then
     usage
@@ -749,6 +761,10 @@ main() {
     doctor)
       shift
       cmd_doctor "$@"
+      ;;
+    update)
+      shift
+      cmd_update "$@"
       ;;
     uninstall)
       shift
