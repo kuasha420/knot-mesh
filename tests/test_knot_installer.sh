@@ -91,6 +91,22 @@ if [ ! -f "$GUARD_SERVICE" ] && [ ! -L "$GUARD_SERVICE" ]; then
 fi
 echo "  -> Knot Guard user service deployment: OK"
 
+# Check Antigravity skills deployment
+SKILLS_DIR="$HOME/.gemini/antigravity/skills"
+if [ ! -d "$SKILLS_DIR/knot-swarm" ] || [ ! -d "$SKILLS_DIR/core-mesh" ]; then
+  echo "Error: Antigravity skills were not deployed to $SKILLS_DIR" >&2
+  exit 1
+fi
+echo "  -> Antigravity skills deployment: OK"
+
+# Check Antigravity MCP sync
+MCP_CONF="$HOME/.gemini/config/mcp_config.json"
+if [ ! -f "$MCP_CONF" ] || ! grep -q '"knot"' "$MCP_CONF"; then
+  echo "Error: Knot MCP server configuration was not found in $MCP_CONF" >&2
+  exit 1
+fi
+echo "  -> Antigravity MCP gateway configuration: OK"
+
 echo "=== [Test 4] Subcommand: uninstall (-y) ==="
 "$INSTALLER" uninstall -y
 echo "  -> Clean uninstall: OK"

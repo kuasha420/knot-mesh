@@ -64,6 +64,8 @@ cmd_init() {
   local gateway_mac=""
   local ssid=""
   local subnet=""
+  local skip_firewall=0
+  local skip_antigravity=0
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -99,6 +101,14 @@ cmd_init() {
         subnet="$2"
         shift 2
         ;;
+      --skip-firewall)
+        skip_firewall=1
+        shift
+        ;;
+      --skip-antigravity)
+        skip_antigravity=1
+        shift
+        ;;
       -h|--help)
         cat << INIT_HELP
 ${C_BOLD}Usage:${C_RESET} knot-installer init [OPTIONS]
@@ -114,6 +124,8 @@ ${C_BOLD}Options:${C_RESET}
     --ssid <ssid>        Wi-Fi network SSID to fence this swarm (defaults to active SSID)
     --subnet <cidr>      Network subnet CIDR for PAM/sudo trust (defaults to active subnet)
     --headless           Configure Anchor as a headless compute node without display
+    --skip-firewall      Skip automated UFW / firewalld port configuration
+    --skip-antigravity   Skip automated Antigravity MCP and skills onboarding
 INIT_HELP
         exit 0
         ;;
@@ -287,6 +299,52 @@ TOPO_EOF
       echo -e "  ${C_GREEN}[✓] Knot Guard service enabled.${C_RESET}"
     else
       echo -e "  ${C_YELLOW}[!] Notice: Could not enable knot-guard.service: ${g_out}${C_RESET}"
+    fi
+  fi
+
+  # 9. Configure Firewall
+  if [ "$skip_firewall" -eq 0 ] && [ -z "${KNOT_TEST_MODE:-}" ]; then
+    if [ -f "$KNOT_ROOT/core/modules/firewall.sh" ]; then
+      source "$KNOT_ROOT/core/modules/firewall.sh"
+      local fw_err=""
+      if fw_err="$(firewall_configure 2>&1)"; then
+        echo -e "  ${C_GREEN}[✓] Firewall configured for Knot mesh services.${C_RESET}"
+      else
+        echo -e "  ${C_YELLOW}[!] Notice: Could not configure firewall automatically: ${fw_err}${C_RESET}"
+      fi
+    fi
+  fi
+
+  # 10. Configure Antigravity MCP, skills, and agent onboarding
+  if [ "$skip_antigravity" -eq 0 ]; then
+    echo -e "  ${C_CYAN}[•] Synchronizing Knot Antigravity skills and MCP gateway...${C_RESET}"
+    if [ -f "$KNOT_ROOT/core/mcp/sync.py" ]; then
+      local mcp_out=""
+      if mcp_out="$(python3 "$KNOT_ROOT/core/mcp/sync.py" 2>&1)"; then
+        echo -e "  ${C_GREEN}[✓] Knot MCP gateway synchronized.${C_RESET}"
+      else
+        echo -e "  ${C_YELLOW}[!] Notice: Could not sync Knot MCP gateway: ${mcp_out}${C_RESET}"
+      fi
+    fi
+    local gemini_skills="${home}/.gemini/antigravity/skills"
+    mkdir -p "$gemini_skills"
+    if [ -d "$KNOT_ROOT/skills" ]; then
+      for s in "$KNOT_ROOT/skills"/*; do
+        [ -d "$s" ] || continue
+        local s_name
+        s_name="$(basename "$s")"
+        ln -sfn "$s" "$gemini_skills/$s_name"
+      done
+      echo -e "  ${C_GREEN}[✓] Knot Swarm skills deployed to ${gemini_skills}.${C_RESET}"
+    fi
+    if [ -f "$KNOT_ROOT/core/modules/antigravity.sh" ]; then
+      source "$KNOT_ROOT/core/modules/antigravity.sh"
+      local agy_err=""
+      if agy_err="$(antigravity_onboard 2>&1)"; then
+        echo -e "  ${C_GREEN}[✓] Antigravity onboarding complete.${C_RESET}"
+      else
+        echo -e "  ${C_YELLOW}[!] Notice: Antigravity onboarding: ${agy_err}${C_RESET}"
+      fi
     fi
   fi
 
@@ -508,6 +566,8 @@ ${C_BOLD}Options:${C_RESET}
     --height <pixels>    Override screen height
     --scale <factor>     Override display scale factor (e.g. 1.25)
     --auto               Non-interactive automated enrollment mode
+    --skip-firewall      Skip automated UFW / firewalld port configuration
+    --skip-antigravity   Skip automated Antigravity MCP and skills onboarding
 JOIN_HELP
     exit 1
   fi
@@ -517,6 +577,8 @@ JOIN_HELP
   shift 2
 
   local auto_mode=0
+  local skip_firewall=0
+  local skip_antigravity=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --id)
@@ -541,6 +603,14 @@ JOIN_HELP
         ;;
       --auto)
         auto_mode=1
+        shift
+        ;;
+      --skip-firewall)
+        skip_firewall=1
+        shift
+        ;;
+      --skip-antigravity)
+        skip_antigravity=1
         shift
         ;;
       *)
@@ -662,6 +732,52 @@ JOIN_HELP
       echo -e "  ${C_GREEN}[✓] Knot Guard service enabled.${C_RESET}"
     else
       echo -e "  ${C_YELLOW}[!] Notice: Could not enable knot-guard.service: ${g_out}${C_RESET}"
+    fi
+  fi
+
+  # 5. Configure Firewall
+  if [ "$skip_firewall" -eq 0 ] && [ -z "${KNOT_TEST_MODE:-}" ]; then
+    if [ -f "$KNOT_ROOT/core/modules/firewall.sh" ]; then
+      source "$KNOT_ROOT/core/modules/firewall.sh"
+      local fw_err=""
+      if fw_err="$(firewall_configure 2>&1)"; then
+        echo -e "  ${C_GREEN}[✓] Firewall configured for Knot mesh services.${C_RESET}"
+      else
+        echo -e "  ${C_YELLOW}[!] Notice: Could not configure firewall automatically: ${fw_err}${C_RESET}"
+      fi
+    fi
+  fi
+
+  # 6. Configure Antigravity MCP, skills, and agent onboarding
+  if [ "$skip_antigravity" -eq 0 ]; then
+    echo -e "  ${C_CYAN}[•] Synchronizing Knot Antigravity skills and MCP gateway...${C_RESET}"
+    if [ -f "$KNOT_ROOT/core/mcp/sync.py" ]; then
+      local mcp_out=""
+      if mcp_out="$(python3 "$KNOT_ROOT/core/mcp/sync.py" 2>&1)"; then
+        echo -e "  ${C_GREEN}[✓] Knot MCP gateway synchronized.${C_RESET}"
+      else
+        echo -e "  ${C_YELLOW}[!] Notice: Could not sync Knot MCP gateway: ${mcp_out}${C_RESET}"
+      fi
+    fi
+    local gemini_skills="${HOME}/.gemini/antigravity/skills"
+    mkdir -p "$gemini_skills"
+    if [ -d "$KNOT_ROOT/skills" ]; then
+      for s in "$KNOT_ROOT/skills"/*; do
+        [ -d "$s" ] || continue
+        local s_name
+        s_name="$(basename "$s")"
+        ln -sfn "$s" "$gemini_skills/$s_name"
+      done
+      echo -e "  ${C_GREEN}[✓] Knot Swarm skills deployed to ${gemini_skills}.${C_RESET}"
+    fi
+    if [ -f "$KNOT_ROOT/core/modules/antigravity.sh" ]; then
+      source "$KNOT_ROOT/core/modules/antigravity.sh"
+      local agy_err=""
+      if agy_err="$(antigravity_onboard 2>&1)"; then
+        echo -e "  ${C_GREEN}[✓] Antigravity onboarding complete.${C_RESET}"
+      else
+        echo -e "  ${C_YELLOW}[!] Notice: Antigravity onboarding: ${agy_err}${C_RESET}"
+      fi
     fi
   fi
 

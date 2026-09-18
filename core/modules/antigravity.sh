@@ -270,6 +270,12 @@ antigravity_onboard() {
   local agy_bin
   agy_bin="$(antigravity_get_cli_path)"
   knot_log_warn "Antigravity CLI is not yet authenticated on this node."
+
+  if [ -n "${KNOT_TEST_MODE:-}" ] || [ ! -t 0 ]; then
+    knot_log_info "Non-interactive session: skipping graphical login prompt. Run 'agy' later to authenticate."
+    return 0
+  fi
+
   knot_log_info "Initiating guided authentication terminal on graphical display..."
 
   if command -v konsole >/dev/null 2>&1; then
