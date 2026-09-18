@@ -155,6 +155,12 @@ autologin_anchor_status() {
 }
 
 autologin_execute_local() {
+  # Recursion circuit-breaker
+  if [ "${_KNOT_AUTOLOGIN_RUNNING:-0}" -eq 1 ]; then
+    return 0
+  fi
+  export _KNOT_AUTOLOGIN_RUNNING=1
+
   local my_host
   my_host="$(knot_detect_hostname)"
 
@@ -165,11 +171,14 @@ autologin_execute_local() {
 
   # 1. Verify Active Swarm Network Fence
   local active_swarm=""
-  if [ -x /usr/local/bin/knot-guard ]; then
-    local probed=""
-    if probed="$(/usr/local/bin/knot-guard --check-active 2>/dev/null)"; then
-      if [ -n "$probed" ] && [ "$probed" != "none" ]; then
-        active_swarm="$probed"
+  if [ "${_KNOT_GUARD_RUNNING:-0}" -eq 0 ] && [ -x /usr/local/bin/knot-guard ]; then
+    # Verify knot-guard actually supports --check-active to prevent recursion with legacy guard scripts
+    if grep -q "check-active" /usr/local/bin/knot-guard 2>/dev/null; then
+      local probed=""
+      if probed="$(/usr/local/bin/knot-guard --check-active 2>/dev/null)"; then
+        if [ -n "$probed" ] && [ "$probed" != "none" ]; then
+          active_swarm="$probed"
+        fi
       fi
     fi
   fi

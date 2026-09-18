@@ -53,6 +53,9 @@ SWARM_EOF
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Prevent recursion with autologin or nested callers
+export _KNOT_GUARD_RUNNING=1
+
 # Multi-Swarm Network Guard Runner
 # Hardware interface arbitration: Ethernet prioritized over Wi-Fi.
 # Debounce hysteresis: 4 seconds before confirming network transition.
@@ -209,7 +212,7 @@ sync_active_swarm() {
       uname="$(basename "$udir")"
       if [ "$(id -u)" -eq 0 ]; then
         echo "$target_swarm" > "$sdir/active_swarm.tmp"
-        chown "$uname":"$uname" "$sdir/active_swarm.tmp"
+        chown "$uname" "$sdir/active_swarm.tmp"
         mv -f "$sdir/active_swarm.tmp" "$sdir/active_swarm"
       elif [ "${USER:-}" = "$uname" ]; then
         echo "$target_swarm" > "$sdir/active_swarm.tmp"
@@ -357,8 +360,8 @@ reconcile_state() {
       fi
     fi
 
-    # Trigger autologin check if Anchor is reachable
-    if [ -x /usr/local/bin/knot ]; then
+    # Trigger autologin check if Anchor is reachable (guarded against recursive invocation)
+    if [ -x /usr/local/bin/knot ] && [ "${_KNOT_AUTOLOGIN_RUNNING:-0}" -eq 0 ]; then
       local auto_out=""
       if ! auto_out="$(/usr/local/bin/knot autologin check 2>&1)"; then
         logger -t knot-guard "Autologin check notice: $auto_out"
