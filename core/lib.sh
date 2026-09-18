@@ -257,7 +257,18 @@ knot_get_active_swarm() {
     fi
   fi
 
-  # 3. Fallback to first available profile
+  # 3. Fallback to user swarm directories
+  if [ -d "$user_home/.config/knot/swarms" ]; then
+    for f in "$user_home/.config/knot/swarms"/*/swarm.conf; do
+      [ -e "$f" ] || continue
+      local base
+      base="$(basename "$(dirname "$f")")"
+      echo "$base"
+      return 0
+    done
+  fi
+
+  # 4. Fallback to first available system profile
   if [ -d "/etc/knot/swarms.d" ]; then
     for f in /etc/knot/swarms.d/*.conf; do
       [ -e "$f" ] || continue
@@ -388,5 +399,35 @@ knot_get_manifest_path() {
       return 0
     fi
   fi
+  return 1
+}
+
+# Returns 0 if current node is the Anchor of the active swarm, 1 otherwise
+knot_is_anchor() {
+  local my_host
+  my_host="$(knot_detect_hostname)"
+  local active_swarm
+  active_swarm="$(knot_get_active_swarm)"
+  local anchor_id="desktop"
+  local anchor_host="desktop"
+
+  if knot_load_swarm_profile "$active_swarm"; then
+    anchor_id="${ANCHOR_ID:-desktop}"
+    anchor_host="${ANCHOR_HOST:-desktop}"
+  fi
+
+  if [ "$my_host" = "$anchor_host" ] || [ "$my_host" = "$anchor_id" ]; then
+    return 0
+  fi
+
+  local a_manifest=""
+  if a_manifest="$(knot_get_manifest_path "$anchor_id" 2>/dev/null)"; then
+    local a_host
+    a_host="$(awk -F'"' '/"hostname":/ {print $4}' "$a_manifest" 2>/dev/null || true)"
+    if [ -n "$a_host" ] && [ "$my_host" = "$a_host" ]; then
+      return 0
+    fi
+  fi
+
   return 1
 }

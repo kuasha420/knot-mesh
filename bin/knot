@@ -403,7 +403,7 @@ cmd_kvm() {
   fi
 
   local is_anchor=0
-  if [ "$my_host" = "$anchor_host" ] || [ "$my_host" = "$anchor_id" ]; then
+  if knot_is_anchor; then
     is_anchor=1
   fi
 
@@ -1051,7 +1051,12 @@ cmd_update() {
   fi
 
   local is_anchor=0
-  if [ "$my_host" = "$anchor_host" ] || [ "$my_host" = "$anchor_id" ]; then
+  if knot_is_anchor; then
+    is_anchor=1
+  fi
+
+  # Prevent infinite delegation loop: if target anchor resolves to local host, we are the Anchor
+  if [ "$anchor_id" = "$my_host" ] || [ "$anchor_host" = "$my_host" ]; then
     is_anchor=1
   fi
 
