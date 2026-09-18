@@ -524,8 +524,85 @@ cmd_swarm() {
         knot_log_err "Usage: knot swarm switch <swarm_id>"
         exit 1
       fi
+
+      local user_home
+      user_home="$(knot_detect_user_home)"
+      local profile_found=0
+      local profile_path=""
+
+      if [ -r "/etc/knot/swarms.d/${target_swarm}.conf" ]; then
+        profile_found=1
+        profile_path="/etc/knot/swarms.d/${target_swarm}.conf"
+      elif [ -r "$user_home/.config/knot/swarms/${target_swarm}/swarm.conf" ]; then
+        profile_found=1
+        profile_path="$user_home/.config/knot/swarms/${target_swarm}/swarm.conf"
+      elif [ -r "$user_home/.config/knot/swarms/${target_swarm}.conf" ]; then
+        profile_found=1
+        profile_path="$user_home/.config/knot/swarms/${target_swarm}.conf"
+      fi
+
+      if [ "$profile_found" -eq 0 ]; then
+        knot_log_err "Swarm profile for '$target_swarm' not found in /etc/knot/swarms.d/${target_swarm}.conf or ~/.config/knot/swarms/${target_swarm}/swarm.conf"
+        exit 1
+      fi
+
       knot_set_active_swarm "$target_swarm"
       knot_log_ok "Switched active swarm to '$target_swarm'."
+
+      local my_host
+      my_host="$(knot_detect_hostname)"
+      local anchor_id="desktop"
+      local anchor_host="desktop.local"
+
+      if [ -n "$profile_path" ]; then
+        local a_id a_host
+        a_id="$(awk -F= '/^ANCHOR_ID=/ {print $2}' "$profile_path" | tr -d '"'\'' ')"
+        a_host="$(awk -F= '/^ANCHOR_HOST=/ {print $2}' "$profile_path" | tr -d '"'\'' ')"
+        [ -n "$a_id" ] && anchor_id="$a_id"
+        [ -n "$a_host" ] && anchor_host="$a_host"
+      fi
+
+      local is_anchor=0
+      if [ "$my_host" = "$anchor_host" ] || [ "$my_host" = "$anchor_id" ]; then
+        is_anchor=1
+      else
+        local nodes_dir=""
+        if [ -d "$user_home/.config/knot/swarms/${target_swarm}/nodes" ]; then
+          nodes_dir="$user_home/.config/knot/swarms/${target_swarm}/nodes"
+        elif [ -d "/etc/knot/swarms.d/${target_swarm}/nodes" ]; then
+          nodes_dir="/etc/knot/swarms.d/${target_swarm}/nodes"
+        fi
+        if [ -n "$nodes_dir" ] && [ -r "$nodes_dir/${anchor_id}.json" ]; then
+          local m_host
+          m_host="$(awk -F'"' '/"hostname":/ {print $4}' "$nodes_dir/${anchor_id}.json")"
+          if [ "$m_host" = "$my_host" ] || grep -q "\"$my_host\"" "$nodes_dir/${anchor_id}.json"; then
+            is_anchor=1
+          fi
+        fi
+      fi
+
+      if [ "$is_anchor" -eq 1 ]; then
+        knot_log_info "Node '$my_host' is ANCHOR in swarm '$target_swarm'. Recompiling Deskflow server configuration..."
+        deskflow_write_server_conf
+      else
+        knot_log_info "Node '$my_host' is STRAND in swarm '$target_swarm'. Recompiling Deskflow client configuration..."
+        deskflow_write_client_conf
+      fi
+
+      if command -v systemctl >/dev/null; then
+        local d_out="" s_out=""
+        if d_out="$(systemctl --user restart knot-deskflow.service 2>&1)"; then
+          knot_log_ok "Restarted knot-deskflow service."
+        else
+          knot_log_warn "Notice: knot-deskflow restart: $d_out"
+        fi
+
+        if s_out="$(systemctl --user restart knot-stripd.service 2>&1)"; then
+          knot_log_ok "Restarted knot-stripd service."
+        else
+          knot_log_warn "Notice: knot-stripd restart: $s_out"
+        fi
+      fi
       ;;
     status)
       antigravity_swarm_status

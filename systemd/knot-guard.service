@@ -1,0 +1,11 @@
+[Unit]
+Description=Knot Multi-Swarm Network Guard
+After=network.target default.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/knot-guard --immediate
+RemainAfterExit=yes
+
+[Install]
+WantedBy=default.target

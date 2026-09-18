@@ -270,7 +270,7 @@ TOPO_EOF
     fi
   done
 
-  for svc in knot-hub.service knot-agent.service knot-stripd.service; do
+  for svc in knot-hub.service knot-agent.service knot-stripd.service knot-guard.service; do
     if [ -f "$KNOT_ROOT/systemd/$svc" ]; then
       ln -sf "$KNOT_ROOT/systemd/$svc" "$user_unit_dir/$svc"
     fi
@@ -280,6 +280,12 @@ TOPO_EOF
     local r_out=""
     if r_out="$(systemctl --user daemon-reload 2>&1)"; then
       :
+    fi
+    local g_out=""
+    if g_out="$(systemctl --user enable knot-guard.service 2>&1)"; then
+      echo -e "  ${C_GREEN}[✓] Knot Guard service enabled.${C_RESET}"
+    else
+      echo -e "  ${C_YELLOW}[!] Notice: Could not enable knot-guard.service: ${g_out}${C_RESET}"
     fi
   fi
 
@@ -640,6 +646,21 @@ JOIN_HELP
       echo -e "  ${C_GREEN}[✓] Knot Tuplespace Agent service enabled and active.${C_RESET}"
     else
       echo -e "  ${C_YELLOW}[!] Notice: Could not start knot-agent.service: ${a_out}${C_RESET}"
+    fi
+  fi
+
+  local guard_svc="$KNOT_ROOT/systemd/knot-guard.service"
+  if [ -f "$guard_svc" ] && command -v systemctl >/dev/null; then
+    ln -sf "$guard_svc" "$user_unit_dir/knot-guard.service"
+    local r_out=""
+    if r_out="$(systemctl --user daemon-reload 2>&1)"; then
+      :
+    fi
+    local g_out=""
+    if g_out="$(systemctl --user enable knot-guard.service 2>&1)"; then
+      echo -e "  ${C_GREEN}[✓] Knot Guard service enabled.${C_RESET}"
+    else
+      echo -e "  ${C_YELLOW}[!] Notice: Could not enable knot-guard.service: ${g_out}${C_RESET}"
     fi
   fi
 

@@ -51,7 +51,115 @@ deskflow_compile_server_config() {
 }
 
 deskflow_write_server_conf() {
-  deskflow_compile_server_config "$@"
+  local mode="${1:-$(deskflow_get_lock)}"
+  deskflow_compile_server_config "$mode"
+
+  local home
+  home="$(knot_detect_user_home)"
+  local cfg_dir="$home/.config/Deskflow"
+  mkdir -p "$cfg_dir"
+  local my_host
+  my_host="$(knot_detect_hostname)"
+
+  cat << CONF_EOF > "$cfg_dir/Deskflow.conf"
+[core]
+computerName=${my_host:-localhost}
+
+[server]
+externalConfig=true
+externalConfigFile=$cfg_dir/deskflow-server.conf
+CONF_EOF
+
+  return 0
+}
+
+deskflow_write_client_conf() {
+  local home
+  home="$(knot_detect_user_home)"
+  local cfg_dir="$home/.config/Deskflow"
+  mkdir -p "$cfg_dir"
+
+  local active_swarm
+  active_swarm="$(knot_get_active_swarm)"
+  local my_host
+  my_host="$(knot_detect_hostname)"
+
+  local anchor_target="desktop"
+  local anchor_host="desktop.local"
+  local swarm_cfg=""
+  if [ -r "/etc/knot/swarms.d/${active_swarm}.conf" ]; then
+    swarm_cfg="/etc/knot/swarms.d/${active_swarm}.conf"
+  elif [ -r "$home/.config/knot/swarms/${active_swarm}.conf" ]; then
+    swarm_cfg="$home/.config/knot/swarms/${active_swarm}.conf"
+  elif [ -r "$home/.config/knot/swarms/${active_swarm}/swarm.conf" ]; then
+    swarm_cfg="$home/.config/knot/swarms/${active_swarm}/swarm.conf"
+  fi
+
+  if [ -n "$swarm_cfg" ] && [ -r "$swarm_cfg" ]; then
+    local a_id_cfg a_host_cfg
+    a_id_cfg="$(awk -F= '/^ANCHOR_ID=/ {print $2}' "$swarm_cfg" | tr -d '"'\'' ')"
+    a_host_cfg="$(awk -F= '/^ANCHOR_HOST=/ {print $2}' "$swarm_cfg" | tr -d '"'\'' ')"
+    [ -n "$a_id_cfg" ] && anchor_target="$a_id_cfg"
+    [ -n "$a_host_cfg" ] && anchor_host="$a_host_cfg"
+  fi
+
+  local resolved_ip=""
+  local knot_cli=""
+  if command -v knot >/dev/null; then
+    knot_cli="$(command -v knot)"
+  elif [ -x "$home/.local/bin/knot" ]; then
+    knot_cli="$home/.local/bin/knot"
+  fi
+
+  if [ -n "$knot_cli" ]; then
+    local r_cand=""
+    if r_cand="$("$knot_cli" resolve "$anchor_target" 24800 2>&1)"; then
+      resolved_ip="$r_cand"
+    elif [ "$anchor_host" != "$anchor_target" ]; then
+      if r_cand="$("$knot_cli" resolve "$anchor_host" 24800 2>&1)"; then
+        resolved_ip="$r_cand"
+      fi
+    fi
+  fi
+
+  if [ -z "$resolved_ip" ] && [ -n "$anchor_host" ]; then
+    resolved_ip="$anchor_host"
+  fi
+
+  local client_name="$my_host"
+  local nodes_dir=""
+  if [ -d "$home/.config/knot/swarms/${active_swarm}/nodes" ]; then
+    nodes_dir="$home/.config/knot/swarms/${active_swarm}/nodes"
+  elif [ -d "/etc/knot/swarms.d/${active_swarm}/nodes" ]; then
+    nodes_dir="/etc/knot/swarms.d/${active_swarm}/nodes"
+  fi
+
+  if [ -n "$nodes_dir" ]; then
+    for mf in "$nodes_dir/"*.json; do
+      [ -r "$mf" ] || continue
+      local m_host m_id m_user
+      m_host="$(awk -F'"' '/"hostname":/ {print $4}' "$mf")"
+      m_id="$(awk -F'"' '/"id":/ {print $4}' "$mf")"
+      m_user="$(awk -F'"' '/"user":/ {print $4}' "$mf")"
+      if [ "$m_host" = "$my_host" ] || [ "$m_id" = "$my_host" ]; then
+        client_name="${m_host:-$my_host}"
+        break
+      fi
+      if [ "$m_user" = "${USER:-}" ] && [ "$m_id" != "$anchor_target" ]; then
+        client_name="${m_host:-$m_id}"
+      fi
+    done
+  fi
+
+  cat << CONF_EOF > "$cfg_dir/Deskflow.conf"
+[core]
+computerName=${client_name:-localhost}
+
+[client]
+remoteHost=${resolved_ip:-$anchor_host}
+CONF_EOF
+
+  return 0
 }
 
 deskflow_sync_display_layout() {
