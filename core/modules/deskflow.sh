@@ -479,10 +479,10 @@ else
 
   RESOLVED_IP=""
   if [ -n "$KNOT_CLI" ]; then
-    if resolved_candidate="$("$KNOT_CLI" resolve "$ANCHOR_TARGET" 24800 2>&1)"; then
+    if resolved_candidate="$("$KNOT_CLI" resolve "$ANCHOR_TARGET" 24800)"; then
       RESOLVED_IP="$resolved_candidate"
     elif [ "$ANCHOR_HOST" != "$ANCHOR_TARGET" ]; then
-      if host_candidate="$("$KNOT_CLI" resolve "$ANCHOR_HOST" 24800 2>&1)"; then
+      if host_candidate="$("$KNOT_CLI" resolve "$ANCHOR_HOST" 24800)"; then
         RESOLVED_IP="$host_candidate"
       fi
     fi

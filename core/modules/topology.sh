@@ -108,9 +108,14 @@ topology_refresh() {
         shift
         ;;
       *)
-        knot_log_err "Unknown option: $1"
-        echo "Usage: knot topology refresh --photo <path> [--mode auto|swarm|offline] [--apply]"
-        return 1
+        if [ -f "$1" ] && [ -z "$photo_path" ]; then
+          photo_path="$1"
+          shift
+        else
+          knot_log_err "Unknown option: $1"
+          echo "Usage: knot topology refresh [--photo] <path> [--mode auto|swarm|offline] [--apply]"
+          return 1
+        fi
         ;;
     esac
   done
@@ -401,7 +406,7 @@ cmd_topology() {
     show|status|map)
       topology_show "$@"
       ;;
-    refresh|analyze)
+    refresh|analyze|photo)
       topology_refresh "$@"
       ;;
     align-internal|align)

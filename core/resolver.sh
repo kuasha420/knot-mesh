@@ -98,7 +98,8 @@ is_port_open() {
   local ip="$1"
   local port="$2"
   if command -v nc >/dev/null; then
-    if nc -z -n -w 1 "$ip" "$port" </dev/null; then
+    local nc_out=""
+    if nc_out="$(nc -z -n -w 1 "$ip" "$port" </dev/null 2>&1)"; then
       return 0
     else
       return 1

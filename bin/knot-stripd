@@ -281,66 +281,70 @@ class KnotStripDaemon(QObject):
 
         for edge_dir, edge_spec in anchor_layout.items():
             norm_edge = edge_dir.lower().strip()
-            target_node = edge_spec.get("node", edge_spec.get("target", ""))
-            if not target_node:
-                continue
+            specs = edge_spec if isinstance(edge_spec, list) else [edge_spec]
+            for spec in specs:
+                if not isinstance(spec, dict):
+                    continue
+                target_node = spec.get("node", spec.get("target", ""))
+                if not target_node:
+                    continue
 
-            span = edge_spec.get("span", [0, 100])
-            node_data = all_nodes.get(target_node, {})
+                span = spec.get("span", [0, 100])
+                node_data = all_nodes.get(target_node, {})
 
-            # Collect all known names & aliases for the target node
-            idents: Set[str] = {target_node.lower()}
-            if node_data.get("hostname"):
-                idents.add(node_data["hostname"].lower())
-            for a in node_data.get("aliases", []):
-                idents.add(a.lower())
+                # Collect all known names & aliases for the target node
+                idents: Set[str] = {target_node.lower()}
+                if node_data.get("hostname"):
+                    idents.add(node_data["hostname"].lower())
+                for a in node_data.get("aliases", []):
+                    idents.add(a.lower())
 
-            # Collect known IPs
-            ips: Set[str] = set()
-            if node_data.get("ip_hint"):
-                ips.add(node_data["ip_hint"])
-            if node_data.get("ip"):
-                ips.add(node_data["ip"])
+                # Collect known IPs
+                ips: Set[str] = set()
+                if node_data.get("ip_hint"):
+                    ips.add(node_data["ip_hint"])
+                if node_data.get("ip"):
+                    ips.add(node_data["ip"])
 
-            # Check cached leases
-            cache_dir = os.path.expanduser("~/.cache/knot/leases")
-            if os.path.isdir(cache_dir):
-                for lfile in os.listdir(cache_dir):
-                    if lfile == target_node or lfile.endswith(f"_{target_node}"):
-                        try:
-                            with open(os.path.join(cache_dir, lfile), "r") as lf:
-                                cached_ip = lf.read().strip()
-                                if cached_ip:
-                                    ips.add(cached_ip)
-                        except Exception as e:
-                            sys.stderr.write(f"[knot-stripd] Error reading lease {lfile}: {e}\n")
+                # Check cached leases
+                cache_dir = os.path.expanduser("~/.cache/knot/leases")
+                if os.path.isdir(cache_dir):
+                    for lfile in os.listdir(cache_dir):
+                        if lfile == target_node or lfile.endswith(f"_{target_node}"):
+                            try:
+                                with open(os.path.join(cache_dir, lfile), "r") as lf:
+                                    cached_ip = lf.read().strip()
+                                    if cached_ip:
+                                        ips.add(cached_ip)
+                            except Exception as e:
+                                sys.stderr.write(f"[knot-stripd] Error reading lease {lfile}: {e}\n")
 
-            # Determine color
-            if node_data.get("strip_color"):
-                color = node_data["strip_color"]
-            elif node_data.get("color"):
-                color = node_data["color"]
-            elif "deck" in target_node.lower() or "handheld" in target_node.lower():
-                color = "#ffaa00"
-            elif "purrfect" in target_node.lower():
-                color = "#a855f7"
-            elif "devbox" in target_node.lower():
-                color = "#00f0ff"
-            else:
-                color = DEFAULT_PALETTE[color_index % palette_len]
-                color_index += 1
+                # Determine color
+                if node_data.get("strip_color"):
+                    color = node_data["strip_color"]
+                elif node_data.get("color"):
+                    color = node_data["color"]
+                elif "deck" in target_node.lower() or "handheld" in target_node.lower():
+                    color = "#ffaa00"
+                elif "purrfect" in target_node.lower():
+                    color = "#a855f7"
+                elif "devbox" in target_node.lower():
+                    color = "#00f0ff"
+                else:
+                    color = DEFAULT_PALETTE[color_index % palette_len]
+                    color_index += 1
 
-            ctrl = KnotEdgeController(
-                node_id=target_node,
-                edge=norm_edge,
-                color=color,
-                span=span,
-                identifiers=idents,
-                ips=ips,
-                parent=self
-            )
-            self.controllers.append(ctrl)
-            sys.stderr.write(f"[knot-stripd] Registered edge '{norm_edge}' for node '{target_node}' (color: {color}, span: {span})\n")
+                ctrl = KnotEdgeController(
+                    node_id=target_node,
+                    edge=norm_edge,
+                    color=color,
+                    span=span,
+                    identifiers=idents,
+                    ips=ips,
+                    parent=self
+                )
+                self.controllers.append(ctrl)
+                sys.stderr.write(f"[knot-stripd] Registered edge '{norm_edge}' for node '{target_node}' (color: {color}, span: {span})\n")
 
     def is_local_anchor(self, name: str) -> bool:
         if not name:
