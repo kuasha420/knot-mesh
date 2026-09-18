@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Knot Swarm Blackboard Hub CLI Wrapper
+KNOT_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+export PYTHONPATH="$KNOT_ROOT:${PYTHONPATH:-}"
+exec python3 "$KNOT_ROOT/core/hub/hub.py" "$@"

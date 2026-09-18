@@ -4,7 +4,7 @@ After=network.target default.target
 
 [Service]
 Type=simple
-ExecStart=%h/Dev/knot/core/hub/hub.py
+ExecStart=%h/.local/bin/knot-hub
 Restart=always
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1
