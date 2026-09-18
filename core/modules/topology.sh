@@ -301,6 +301,45 @@ topology_identify() {
     esac
   done
 
+  # Guarantee GUI compositor environment variables in non-interactive sessions
+  if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+    export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+  fi
+  if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -S "$XDG_RUNTIME_DIR/wayland-0" ]; then
+    export WAYLAND_DISPLAY="wayland-0"
+  fi
+  if [ -z "${DISPLAY:-}" ]; then
+    export DISPLAY=":0"
+  fi
+
+  # Wake display from DPMS power-save and simulate user activity
+  if command -v kscreen-doctor >/dev/null; then
+    kscreen-doctor --dpms on >/dev/null 2>&1 || true
+  fi
+  if command -v qdbus6 >/dev/null; then
+    qdbus6 org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.SimulateUserActivity >/dev/null 2>&1 || true
+  elif command -v qdbus >/dev/null; then
+    qdbus org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.SimulateUserActivity >/dev/null 2>&1 || true
+  fi
+
+  # Auto-unlock graphical session if locked so overlay is not obscured by lockscreen
+  if command -v loginctl >/dev/null; then
+    local u_name
+    u_name="$(knot_detect_user)"
+    local s_id
+    s_id="$(loginctl show-user "$u_name" -p Display --value 2>/dev/null || true)"
+    if [ -z "$s_id" ]; then
+      s_id="$(loginctl list-sessions --no-legend 2>/dev/null | awk -v u="$u_name" '$3==u && $4~/seat/ {print $1; exit}')"
+    fi
+    if [ -n "$s_id" ]; then
+      local is_locked
+      is_locked="$(loginctl show-session "$s_id" -p LockedHint --value 2>/dev/null || true)"
+      if [ "$is_locked" = "yes" ]; then
+        loginctl unlock-session "$s_id" >/dev/null 2>&1 || true
+      fi
+    fi
+  fi
+
   if [ "$broadcast_all" -eq 1 ]; then
     knot_log_info "Flashing display calibration pattern swarm-wide across all mesh nodes..."
     curl -k -s -X POST https://127.0.0.1:4242/topology/identify \
