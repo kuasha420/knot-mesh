@@ -20,6 +20,8 @@ echo "=== [Test 2] Help and Version Subcommands ==="
 "$INSTALLER" --help | grep -q "USAGE:"
 "$INSTALLER" init --help | grep -q "Initialize this workstation as an Anchor"
 "$INSTALLER" invite --help | grep -q "Generate a secure pairing token"
+"$INSTALLER" --help | grep -q "update"
+"$INSTALLER" update --help | grep -q "knot update"
 echo "  -> Top-level and subcommand help outputs: OK"
 
 echo "=== [Test 3] Subcommand: init (Anchor Swarm Profile Initialization) ==="
