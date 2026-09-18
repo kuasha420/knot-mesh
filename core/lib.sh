@@ -349,11 +349,6 @@ knot_get_nodes_dir() {
     fi
   fi
 
-  if [ -d "$KNOT_ROOT/registry/nodes" ]; then
-    echo "$KNOT_ROOT/registry/nodes"
-    return 0
-  fi
-
   echo ""
   return 1
 }

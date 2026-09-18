@@ -60,8 +60,16 @@ cmd_onboard() {
     ip_hint="$(echo "$ip_out" | grep -v ' 127\.' | grep -v 'docker' | grep -v 'virbr' | grep -v 'waydroid' | awk '{print $4}' | cut -d/ -f1 | head -n1)"
   fi
 
-  mkdir -p "$KNOT_ROOT/registry/nodes"
-  local manifest="$KNOT_ROOT/registry/nodes/${node_id}.json"
+  local active_swarm
+  active_swarm="$(knot_get_active_swarm)"
+  local nodes_dir=""
+  if ! nodes_dir="$(knot_get_nodes_dir)"; then
+    local home
+    home="$(knot_detect_user_home)"
+    nodes_dir="$home/.config/knot/swarms/${active_swarm:-home}/nodes"
+  fi
+  mkdir -p "$nodes_dir"
+  local manifest="$nodes_dir/${node_id}.json"
 
   local iface_json=""
   local first=1
@@ -87,9 +95,7 @@ cmd_onboard() {
 }
 JSON_EOF
 
-  knot_log_ok "Node manifest registered at registry/nodes/${node_id}.json"
-
-  gitops_commit "node" "onboard" "enroll $node_id into knot mesh" "registry/nodes/${node_id}.json"
+  knot_log_ok "Node manifest registered at $manifest"
 
   cmd_sync
 
@@ -218,7 +224,8 @@ cmd_exec() {
   if [ "$target" = "--all" ]; then
     local nodes_dir=""
     if ! nodes_dir="$(knot_get_nodes_dir)"; then
-      nodes_dir="$KNOT_ROOT/registry/nodes"
+      knot_log_warn "No active swarm nodes directory found."
+      return 1
     fi
     for manifest in "$nodes_dir/"*.json; do
       [ -e "$manifest" ] || continue
@@ -266,12 +273,12 @@ cmd_kvm() {
         sleep 1.5
 
         local nodes_dir=""
-        local home
-        home="$(knot_detect_user_home)"
-        if [ -d "$home/.config/knot/swarms/${active_swarm}/nodes" ]; then
-          nodes_dir="$home/.config/knot/swarms/${active_swarm}/nodes"
-        elif [ -d "$KNOT_ROOT/registry/nodes" ]; then
-          nodes_dir="$KNOT_ROOT/registry/nodes"
+        if ! nodes_dir="$(knot_get_nodes_dir)"; then
+          local home
+          home="$(knot_detect_user_home)"
+          if [ -d "$home/.config/knot/swarms/${active_swarm}/nodes" ]; then
+            nodes_dir="$home/.config/knot/swarms/${active_swarm}/nodes"
+          fi
         fi
 
         if [ -n "$nodes_dir" ]; then
@@ -605,16 +612,19 @@ cmd_mcp() {
       if [ "$target" = "--all" ] || [ "$target" = "all" ]; then
         knot_log_info "Synchronizing Knot MCP suite across all mesh nodes..."
         python3 "$KNOT_ROOT/core/mcp/sync.py"
-        for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
-          [ -e "$manifest" ] || continue
-          local id host
-          id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-          host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
-          if [ "$host" != "$(knot_detect_hostname)" ] && [ "$id" != "desktop" ]; then
-            knot_log_info "Synchronizing MCP on remote node: $id ($host)..."
-            knot exec "$id" "python3 $KNOT_ROOT/core/mcp/sync.py" || knot_log_warn "Failed to sync MCP on $id"
-          fi
-        done
+        local nodes_dir=""
+        if nodes_dir="$(knot_get_nodes_dir)"; then
+          for manifest in "$nodes_dir/"*.json; do
+            [ -e "$manifest" ] || continue
+            local id host
+            id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+            host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+            if [ "$host" != "$(knot_detect_hostname)" ] && [ "$id" != "desktop" ]; then
+              knot_log_info "Synchronizing MCP on remote node: $id ($host)..."
+              knot exec "$id" "python3 $KNOT_ROOT/core/mcp/sync.py" || knot_log_warn "Failed to sync MCP on $id"
+            fi
+          done
+        fi
         knot_log_ok "Mesh-wide MCP synchronization complete."
       elif [ "$target" = "local" ] || [ "$target" = "$(knot_detect_hostname)" ]; then
         python3 "$KNOT_ROOT/core/mcp/sync.py"

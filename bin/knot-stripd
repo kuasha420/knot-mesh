@@ -251,18 +251,7 @@ class KnotStripDaemon(QObject):
                     except Exception as e:
                         sys.stderr.write(f"[knot-stripd] Error loading node {fname}: {e}\n")
 
-        # Fallback to registry/nodes if empty
-        if not all_nodes:
-            reg_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "registry", "nodes"))
-            if os.path.isdir(reg_dir):
-                for fname in os.listdir(reg_dir):
-                    if fname.endswith(".json"):
-                        nid = fname[:-5]
-                        try:
-                            with open(os.path.join(reg_dir, fname), "r") as nf:
-                                all_nodes[nid] = json.load(nf)
-                        except Exception as e:
-                            sys.stderr.write(f"[knot-stripd] Error loading registry node {fname}: {e}\n")
+
 
         # Resolve anchor identifiers
         self.anchor_identifiers.add(anchor_id.lower())

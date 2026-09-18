@@ -88,7 +88,6 @@ The client automatically detects screen resolution via `kscreen-doctor`, establi
 | `knot-installer init` | Initialize local host as a Swarm Anchor |
 | `knot-installer join` | Enroll local host as a Strand to an Anchor |
 | `knot-installer invite` | Generate 6-digit pairing token and wait for rendezvous |
-| `knot-installer migrate` | Migrate legacy v1.0 configs into multi-swarm profiles |
 | `knot-installer doctor` | Comprehensive diagnostic check for Wayland, portals, and PAM |
 | `knot-installer uninstall` | Clean, non-destructive removal of hooks and services |
 

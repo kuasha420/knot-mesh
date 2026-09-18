@@ -35,8 +35,6 @@ deskflow_compile_server_config() {
     nodes_dir="/etc/knot/swarms.d/${active_swarm}/nodes"
   elif [ -d "$KNOT_ROOT/templates/nodes" ]; then
     nodes_dir="$KNOT_ROOT/templates/nodes"
-  elif [ -d "$KNOT_ROOT/registry/nodes" ]; then
-    nodes_dir="$KNOT_ROOT/registry/nodes"
   fi
 
   if [ -n "$topo_file" ] && [ -n "$nodes_dir" ] && [ -x "$KNOT_ROOT/core/modules/compile_deskflow.py" ]; then
@@ -163,14 +161,6 @@ deskflow_configure() {
       source "/etc/knot/swarms.d/${active_swarm}.conf"
       anchor_host="${ANCHOR_HOST:-$ANCHOR_ID}"
     fi
-  fi
-  if [ -z "$anchor_host" ] && [ -d "$KNOT_ROOT/registry/nodes" ]; then
-    for manifest in "$KNOT_ROOT/registry/nodes/"*.json; do
-      [ -e "$manifest" ] || continue
-      if grep -q '"id":[[:space:]]*"desktop"' "$manifest"; then
-        anchor_host="$(grep -o '"hostname":[[:space:]]*"[^"]*"' "$manifest" | cut -d'"' -f4)"
-      fi
-    done
   fi
 
   # 0. Ensure Deskflow package is installed
