@@ -227,20 +227,47 @@ cmd_exec() {
       knot_log_warn "No active swarm nodes directory found."
       return 1
     fi
+    local my_host
+    my_host="$(knot_detect_hostname)"
     for manifest in "$nodes_dir/"*.json; do
       [ -e "$manifest" ] || continue
-      local id
+      local id host
       id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+      host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
       echo -e "\n${C_CYAN}=== [$id] ===${C_RESET}"
       local e_out=""
-      if e_out="$(ssh -o BatchMode=yes -o ConnectTimeout=3 "$id" "$remote_cmd" 2>&1)"; then
+      if [ "$id" = "$my_host" ] || [ "$host" = "$my_host" ]; then
+        if e_out="$(bash -c "$remote_cmd" 2>&1)"; then
+          echo "$e_out"
+        else
+          knot_log_warn "Notice: Command failed locally on $id: $e_out"
+        fi
+      elif e_out="$(ssh -o BatchMode=yes -o ConnectTimeout=3 "$id" "$remote_cmd" 2>&1)"; then
         echo "$e_out"
       else
         knot_log_warn "Notice: Command failed on $id: $e_out"
       fi
     done
   else
-    ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$remote_cmd"
+    local my_host
+    my_host="$(knot_detect_hostname)"
+    local nodes_dir=""
+    nodes_dir="$(knot_get_nodes_dir 2>/dev/null || true)"
+    local is_local=0
+    if [ "$target" = "$my_host" ] || [ "$target" = "local" ] || [ "$target" = "localhost" ]; then
+      is_local=1
+    elif [ -n "$nodes_dir" ] && [ -f "$nodes_dir/${target}.json" ]; then
+      local t_host
+      t_host="$(awk -F'"' '/"hostname":/ {print $4}' "$nodes_dir/${target}.json")"
+      if [ "$t_host" = "$my_host" ]; then
+        is_local=1
+      fi
+    fi
+    if [ "$is_local" -eq 1 ]; then
+      bash -c "$remote_cmd"
+    else
+      ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$remote_cmd"
+    fi
   fi
 }
 
@@ -248,24 +275,25 @@ cmd_kvm() {
   local action="${1:-status}"
   [ $# -gt 0 ] && shift
 
+  local my_host
+  my_host="$(knot_detect_hostname)"
+  local active_swarm
+  active_swarm="$(knot_get_active_swarm)"
+  local anchor_host="desktop"
+  local anchor_id="desktop"
+  if knot_load_swarm_profile "$active_swarm"; then
+    anchor_id="${ANCHOR_ID:-desktop}"
+    anchor_host="${ANCHOR_HOST:-desktop}"
+  fi
+
+  local is_anchor=0
+  if [ "$my_host" = "$anchor_host" ] || [ "$my_host" = "$anchor_id" ]; then
+    is_anchor=1
+  fi
+
   case "$action" in
     restart)
       knot_log_info "Restarting Deskflow KVM across the Knot mesh..."
-      local my_host
-      my_host="$(knot_detect_hostname)"
-      local active_swarm
-      active_swarm="$(knot_get_active_swarm)"
-      local anchor_host="desktop"
-      local anchor_id="desktop"
-      if knot_load_swarm_profile "$active_swarm"; then
-        anchor_id="${ANCHOR_ID:-desktop}"
-        anchor_host="${ANCHOR_HOST:-desktop}"
-      fi
-
-      local is_anchor=0
-      if [ "$my_host" = "$anchor_host" ] || [ "$my_host" = "$anchor_id" ]; then
-        is_anchor=1
-      fi
 
       if [ "$is_anchor" -eq 1 ]; then
         knot_log_info "Restarting KVM Server locally on Anchor ($anchor_host)..."

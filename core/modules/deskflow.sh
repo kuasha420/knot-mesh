@@ -171,6 +171,8 @@ deskflow_configure() {
 
   # 1. Compile server configuration layout (Screens, Links, Aliases, Options)
   deskflow_write_server_conf "unlocked"
+  mkdir -p "$home/.local/state/knot"
+  echo "unlocked" > "$home/.local/state/knot/kvm_lock"
 
   # 3. Configure notifyrc and portal pre-authorization across all nodes
   cat << 'NOTIFY_EOF' > "$home/.config/xdg-desktop-portal-kde.notifyrc"
