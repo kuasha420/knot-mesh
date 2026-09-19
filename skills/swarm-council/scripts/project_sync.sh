@@ -105,8 +105,8 @@ for node in nodes:
             node_res["folders"][folder_name] = {"path": folder, "exists": exists, "branch": branch, "commit": commit}
         else:
             # Probe remote node
-            pull_subcmd = "git pull --ff-only 2>/dev/null" if do_pull else ""
-            remote_cmd = f"test -d ~/Dev/{folder_name} && (cd ~/Dev/{folder_name} && {pull_subcmd} git rev-parse --abbrev-ref HEAD && git rev-parse --short HEAD) || echo 'MISSING'"
+            pull_subcmd = "git pull --ff-only >/dev/null 2>&1 && " if do_pull else ""
+            remote_cmd = f"test -d ~/Dev/{folder_name} && (cd ~/Dev/{folder_name} && {pull_subcmd}git rev-parse --abbrev-ref HEAD && git rev-parse --short HEAD) || echo 'MISSING'"
             try:
                 rout = subprocess.check_output([knot_bin, "exec", node, remote_cmd], text=True, stderr=subprocess.DEVNULL).strip().splitlines()
                 if rout and rout[0] != "MISSING":
