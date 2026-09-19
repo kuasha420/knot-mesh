@@ -1,18 +1,19 @@
-# 🏆 OPERATION PING-PONG: 3-NODE SWARM CRYPTO TOURNAMENT REPORT 🏓⚡
+# 🏆 OPERATION PING-PONG: 4-NODE SWARM CRYPTO TOURNAMENT REPORT 🏓⚡
 
-> **Tournament Mission:** `run_20260920_034427_40b66b2c`  
-> **Arena:** Knot Mesh Confluence Cockpit (3 Nodes: `desktop`, `laptop`, `rog-ally`)  
+> **Tournament Mission:** `run_20260920_043222_01bcc59e`  
+> **Arena:** Knot Mesh Confluence Cockpit (4 Nodes: `desktop`, `laptop`, `rog-ally`, `steamdeck`)  
 > **Total Execution Time:** 0s / 300s  
-> **Total Verified Hash Proofs:** 40 / 15 target  
-> **Peak Flawless Rally Streak:** 40 clean volleys (3.6x)
+> **Total Verified Hash Proofs:** 19 / 20 target  
+> **Peak Flawless Rally Streak:** 19 clean volleys (1.8x)
 
 ## 1. 🏆 Championship Podium Rankings
 
 | Rank | Badge | Workstation | Role / Hardware | Final Score | Total Volleys | Aces (<10s) | Power Smashes (<5s) | Elegance |
 | :--- | :---: | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| **1** | 🥇 Gold Medal | `laptop` 👑 | Rally Player (AMD Ryzen 7 5800H) | **8,050 pts** | 14 | 0 | 14 | 14 |
-| **2** | 🥈 Silver Medal | `desktop` ⚡ | Tournament Master (Intel Core i7 (Desktop)) | **7,150 pts** | 13 | 0 | 13 | 13 |
-| **3** | 🥉 Bronze Medal | `rog-ally` 🔥 | Rally Player (AMD Ryzen Z1 Extreme) | **7,150 pts** | 13 | 0 | 13 | 13 |
+| **1** | 🥇 Gold Medal | `laptop` 👑 | Rally Player (RTX 3050) | **1,750 pts** | 5 | 0 | 5 | 5 |
+| **2** | 🥈 Silver Medal | `rog-ally` ⚡ | Rally Player (Ryzen Z1 Extreme) | **1,750 pts** | 5 | 0 | 5 | 5 |
+| **3** | 🥉 Bronze Medal | `steamdeck` 🔥 | Rally Player (AMD Custom APU 0405) | **1,750 pts** | 5 | 0 | 5 | 5 |
+| **4** | Rank 4 | `desktop` 🛰️ | Tournament Master (AMD RX 6600 XT / Intel Core i7 16-thread) | **1,300 pts** | 4 | 0 | 4 | 4 |
 
 ---
 
@@ -20,9 +21,10 @@
 
 | Node ID | Fastest Return | Average Latency | Verified Proofs | Faults | Status |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| `@laptop` | **10.8ms** | 550.6ms | 14 | 0 | ✅ FLAWLESS |
-| `@desktop` | **44.6ms** | 802.7ms | 13 | 0 | ✅ FLAWLESS |
-| `@rog-ally` | **23.3ms** | 556.2ms | 13 | 0 | ✅ FLAWLESS |
+| `@laptop` | **94.0ms** | 456.2ms | 5 | 0 | ✅ FLAWLESS |
+| `@rog-ally` | **3.6ms** | 229.9ms | 5 | 0 | ✅ FLAWLESS |
+| `@steamdeck` | **18.6ms** | 874.4ms | 5 | 0 | ✅ FLAWLESS |
+| `@desktop` | **103.2ms** | 349.1ms | 4 | 0 | ✅ FLAWLESS |
 
 ---
 
@@ -34,7 +36,7 @@ $$\text{Score} = \left( 100_{\text{base}} + \text{SpeedBonus} + \text{EleganceBo
 - **Power Smash Bonus**: +100 PTS for rapid solves under 5 seconds.
 - **Elegance Bonus**: +50 PTS for solves completed on turn 1 without syntax retries.
 - **Rally Streak Multiplier**: Incremented by $+0.2\times$ per clean round.
-- **Peak Swarm Streak Multiplier**: **3.6x**.
+- **Peak Swarm Streak Multiplier**: **1.8x**.
 
 ---
 
