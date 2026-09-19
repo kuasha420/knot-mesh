@@ -1050,6 +1050,7 @@ class KnotMCPGateway:
 
         tags = args.get("tags") or []
         importance = float(args.get("importance", 1.0))
+        pool = args.get("pool", "shared")
         art_content = args.get("artifact_content")
         art_name = args.get("artifact_name") or f"{title.lower().replace(' ', '_')}.txt"
 
@@ -1063,7 +1064,7 @@ class KnotMCPGateway:
                     meta={"wing": wing, "hall": hall, "drawer": drawer, "title": title}
                 )
             except Exception as e:
-                return f"Error archiving artifact to PocketBase: {e}", True
+                return f"Error archiving artifact to closet: {e}", True
 
         try:
             mem = self.memory.store(
@@ -1074,13 +1075,16 @@ class KnotMCPGateway:
                 content=content,
                 tags=tags,
                 importance=importance,
-                artifact_id=art_id
+                artifact_id=art_id,
+                pool=pool
             )
             mid = mem.get("id", "stored")
+            mem_pool = mem.get("pool", pool)
             out = (
                 f"Memory successfully stored in Knot Cognitive Palace!\n"
                 f"  Record ID:    {mid}\n"
                 f"  Location:     🏛️ {wing} > 🏢 {hall} > 📂 {drawer}\n"
+                f"  Pool:         {mem_pool}\n"
                 f"  Title:        {title}\n"
                 f"  Importance:   ⭐ {importance}\n"
                 f"  Tags:         {', '.join(tags) if tags else 'none'}\n"
@@ -1089,7 +1093,7 @@ class KnotMCPGateway:
                 out += f"  Vault Closet: {art_id} ({art_name})\n"
             return out, False
         except Exception as e:
-            return f"Error storing memory in SurrealDB: {e}", True
+            return f"Error storing memory in Knot Palace: {e}", True
 
     def _call_knot_memory_recall(self, args: dict) -> tuple[str, bool]:
         query = args.get("query")
@@ -1097,10 +1101,11 @@ class KnotMCPGateway:
         hall = args.get("hall")
         drawer = args.get("drawer")
         tags = args.get("tags")
+        pool = args.get("pool")
         limit = int(args.get("limit", 5))
 
         try:
-            mems = self.memory.recall(query=query, wing=wing, hall=hall, drawer=drawer, tags=tags, limit=limit)
+            mems = self.memory.recall(query=query, wing=wing, hall=hall, drawer=drawer, tags=tags, limit=limit, pool=pool)
             if not mems:
                 return "No matching memories found in Palace.", False
 
@@ -1110,11 +1115,12 @@ class KnotMCPGateway:
                 title = m.get("title", "Untitled")
                 imp = m.get("importance", 1.0)
                 recs = m.get("recall_count", 0)
+                m_pool = m.get("pool", "shared")
                 content = m.get("content", "")
                 m_tags = m.get("tags") or []
                 art_id = m.get("artifact_id")
 
-                out += f"\n💡 [{mid}] {title} (⭐ {imp}, recalled: {recs})\n"
+                out += f"\n💡 [{mid}] {title} (⭐ {imp}, recalled: {recs}, pool: {m_pool})\n"
                 out += f"   Content: {content}\n"
                 if m_tags:
                     out += f"   Tags: {', '.join(m_tags)}\n"
@@ -1122,7 +1128,7 @@ class KnotMCPGateway:
                     out += f"   Artifact Vault ID: {art_id}\n"
             return out.strip(), False
         except Exception as e:
-            return f"Error recalling memory from SurrealDB: {e}", True
+            return f"Error recalling memory from Knot Palace: {e}", True
 
     def _call_knot_memory_palace_map(self, args: dict) -> tuple[str, bool]:
         try:
@@ -1137,8 +1143,9 @@ class KnotMCPGateway:
         if not memory_id:
             return "Error: 'memory_id' is required for knot_memory_promote", True
         boost = float(args.get("boost", 1.0))
+        to_shared = bool(args.get("to_shared", True))
         try:
-            res = self.memory.promote(memory_id, boost)
+            res = self.memory.promote(memory_id, boost, to_shared=to_shared)
             return f"Successfully promoted {memory_id} (boost: +{boost}): {res}", False
         except Exception as e:
             return f"Error promoting memory: {e}", True
@@ -1824,7 +1831,9 @@ class MockMemoryPalaceClient(MemoryPalaceClient):
         content: str,
         tags: list | None = None,
         importance: float = 1.0,
-        artifact_id: str | None = None
+        artifact_id: str | None = None,
+        pool: str = "shared",
+        meta: dict | None = None
     ) -> dict:
         mid = f"memory:mock{len(self.memories)+1}"
         rec = {
@@ -1835,7 +1844,9 @@ class MockMemoryPalaceClient(MemoryPalaceClient):
             "title": title,
             "content": content,
             "importance": importance,
-            "artifact_id": artifact_id
+            "artifact_id": artifact_id,
+            "pool": pool,
+            "meta": meta or {}
         }
         self.memories[mid] = rec
         return rec
@@ -1847,7 +1858,8 @@ class MockMemoryPalaceClient(MemoryPalaceClient):
         hall: str | None = None,
         drawer: str | None = None,
         tags: list | None = None,
-        limit: int = 5
+        limit: int = 5,
+        pool: str | None = None
     ) -> list:
         return [{
             "id": "memory:mock1",
@@ -1856,19 +1868,20 @@ class MockMemoryPalaceClient(MemoryPalaceClient):
             "score": 1.0,
             "importance": 1.0,
             "recall_count": 1,
+            "pool": pool or "shared",
             "wing": wing or "architecture",
             "hall": hall or "mesh_core",
             "drawer": drawer or "decisions"
         }]
 
-    def palace_map(self) -> dict:
+    def palace_map(self, pool: str | None = None) -> dict:
         return {
             "wings": {
                 "architecture": {
                     "halls": {
                         "mesh_core": {
                             "drawers": {
-                                "decisions": [{"id": "memory:mock1", "title": "Mock", "importance": 1.0, "recall_count": 0}]
+                                "decisions": [{"id": "memory:mock1", "title": "Mock", "importance": 1.0, "recall_count": 0, "pool": pool or "shared"}]
                             }
                         }
                     }
@@ -1876,7 +1889,7 @@ class MockMemoryPalaceClient(MemoryPalaceClient):
             }
         }
 
-    def promote(self, memory_id: str, boost: float = 1.0) -> float:
+    def promote(self, memory_id: str, boost: float = 1.0, to_shared: bool = True) -> float:
         return 2.0
 
     def relate(self, source: str, target: str, rel_type: str = "relates_to", weight: float = 1.0) -> dict:
