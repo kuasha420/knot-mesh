@@ -200,10 +200,12 @@ def main():
     args = parser.parse_args()
 
     if args.cmd == "create":
-        res = create_thread(args.owner, args.repo, args.title, args.body, args.category)
+        body = args.body.replace('\\n', '\n')
+        res = create_thread(args.owner, args.repo, args.title, body, args.category)
         print(json.dumps(res, indent=2))
     elif args.cmd == "reply":
-        res = post_reply(args.discussion_id, args.body, args.node_id, args.run_id, args.status)
+        body = args.body.replace('\\n', '\n')
+        res = post_reply(args.discussion_id, body, args.node_id, args.run_id, args.status)
         print(json.dumps(res, indent=2))
     elif args.cmd == "poll_delta":
         res = poll_delta(args.discussion_id, args.last_count)

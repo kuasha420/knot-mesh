@@ -109,7 +109,14 @@ council_start() {
   local run_id="run_$(date +%Y%m%d_%H%M%S)_$(head -c 4 /dev/urandom | xxd -p)"
 
   if [ $dry_run -eq 0 ]; then
-    local disc_body="## Knot Swarm Council Mission Registry\n\n- **Run ID**: \`$run_id\`\n- **Initiated**: $(date -u)\n- **Project**: \`$proj_name\`\n- **Pack**: \`$pack\`\n\nAll node checkpoints and final audit deliverables will be posted here."
+    local disc_body="## Knot Swarm Council Mission Registry
+
+- **Run ID**: \`$run_id\`
+- **Initiated**: $(date -u)
+- **Project**: \`$proj_name\`
+- **Pack**: \`$pack\`
+
+All node checkpoints and final audit deliverables will be posted here."
     disc_res="$(python3 "$SCRIPTS_DIR/gh_discussion.py" create --title "Swarm Council Mission: $run_id" --body "$disc_body" 2>&1)" || {
       knot_log_err "Could not create discussion thread: $disc_res"
       return 1

@@ -31,13 +31,30 @@ fi
 
 case "$MODE" in
   confluence)
-    echo "==> Staging prompt files across mesh..."
+    echo "==> Staging prompt files and launchers across mesh..."
     for pfile in "$MISSIONS_DIR"/*_prompt.md; do
       [ -f "$pfile" ] || continue
       node_id="$(basename "$pfile" | sed 's/_prompt.md//')"
-      if [ "$node_id" != "desktop" ] && [ "$node_id" != "localhost" ] && [ "$node_id" != "$(hostname -s)" ]; then
+      
+      launcher_script="$MISSIONS_DIR/${node_id}_launch.sh"
+      cat << 'EOF_LAUNCH' > "$launcher_script"
+#!/usr/bin/env bash
+trap '' HUP
+export PATH="$HOME/.local/bin:$PATH"
+PROMPT_FILE="$HOME/.config/knot/missions/RUN_ID_PLACEHOLDER/prompt.md"
+exec agy --project PROJECT_PLACEHOLDER --dangerously-skip-permissions -i "$(< "$PROMPT_FILE")"
+EOF_LAUNCH
+      sed -i "s|RUN_ID_PLACEHOLDER|$RUN_ID|g" "$launcher_script"
+      sed -i "s|PROJECT_PLACEHOLDER|$PROJECT|g" "$launcher_script"
+      chmod +x "$launcher_script"
+
+      if [ "$node_id" = "desktop" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(hostname -s)" ]; then
+        cp "$pfile" "$MISSIONS_DIR/prompt.md"
+        cp "$launcher_script" "$MISSIONS_DIR/launch.sh"
+      else
         "$KNOT_ROOT/bin/knot" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
         cat "$pfile" | "$KNOT_ROOT/bin/knot" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
+        cat "$launcher_script" | "$KNOT_ROOT/bin/knot" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/launch.sh && chmod +x ~/.config/knot/missions/$RUN_ID/launch.sh"
       fi
     done
     echo "==> Spawning Confluence Spatial Cockpit in Kitty..."

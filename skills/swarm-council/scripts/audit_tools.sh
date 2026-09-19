@@ -44,6 +44,15 @@ for node in "${nodes[@]}"; do
   models_ok=true
 
   if [ $is_local -eq 1 ]; then
+    if command -v secret-tool >/dev/null 2>&1; then
+      if sec_out="$(secret-tool search service gemini 2>/dev/null)"; then
+        sec_token="$(echo "$sec_out" | awk -F'secret = ' '/^secret = / {print $2}' | head -n1)"
+        if [ -n "$sec_token" ]; then
+          echo "$sec_token" > "$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
+          chmod 600 "$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
+        fi
+      fi
+    fi
     command -v gh >/dev/null 2>&1 || { gh_ok=false; status="DEGRADED"; }
     command -v git >/dev/null 2>&1 || { git_ok=false; status="DEGRADED"; }
     command -v knot >/dev/null 2>&1 || [ -x "$KNOT_ROOT/bin/knot" ] || { knot_ok=false; status="DEGRADED"; }
