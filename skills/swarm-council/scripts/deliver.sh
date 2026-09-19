@@ -58,8 +58,13 @@ case "$MODE" in
     else
       echo "==> Staging prompt files and launchers across mesh..."
       pack=""
+      opening_node=""
       if [ -f "$MISSIONS_DIR/meta.json" ]; then
-        pack="$(jq -r '.pack // ""' "$MISSIONS_DIR/meta.json")"
+        pack="$(jq -r '.pack // ""' "$MISSIONS_DIR/meta.json" 2>/dev/null)"
+        opening_node="$(jq -r '.opening_node // .ring[0] // ""' "$MISSIONS_DIR/meta.json" 2>/dev/null)"
+      fi
+      if [ -z "$opening_node" ]; then
+        opening_node="$(hostname -s)"
       fi
 
       for pfile in "$MISSIONS_DIR"/*_prompt.md; do
@@ -67,7 +72,7 @@ case "$MODE" in
         node_id="$(basename "$pfile" | sed 's/_prompt.md//')"
         
         launcher_script="$MISSIONS_DIR/${node_id}_launch.sh"
-        if [ "$pack" = "tournament" ] && [ "$node_id" != "desktop" ] && [ "$node_id" != "localhost" ] && [ "$node_id" != "$(hostname -s)" ]; then
+        if [ "$pack" = "tournament" ] && [ "$node_id" != "$opening_node" ]; then
           cat << 'EOF_LAUNCH' > "$launcher_script"
 #!/usr/bin/env bash
 trap '' HUP
@@ -223,7 +228,7 @@ EOF_LAUNCH
       
       resolve_cmd="python3 -c 'import sys, os, glob, json; home=os.path.expanduser(\"~\"); pname=sys.argv[1].lower(); pdir=os.path.join(home, \".gemini/config/projects\"); res=\"\"; [None for f in glob.glob(os.path.join(pdir, \"*.json\")) if not res and (lambda d: [setattr(sys.modules[__name__], \"res\", p if os.path.isdir(p) else next((c for b in [os.path.basename(p)] for c in [os.path.join(home, \"Dev\", b), os.path.join(home, b), os.path.join(home, \".local/share\", b)] if os.path.isdir(c)), \"\")) for r in d.get(\"projectResources\",{}).get(\"resources\",[]) for u in [r.get(\"gitFolder\",{}).get(\"folderUri\",\"\")] if u.startswith(\"file://\") for p in [u[7:].rstrip(\"/\")] if res==\"\"])(json.load(open(f))) if (lambda d: d.get(\"name\",\"\").lower()==pname or d.get(\"id\",\"\").lower()==pname)(json.load(open(f)))]; print(res or next((c for c in [os.path.join(home, \"Dev\", pname), os.path.join(home, pname), os.path.join(home, \".local/share\", pname)] if os.path.isdir(c)), os.getcwd()))' '$PROJECT'"
 
-      if [ "$node_id" = "desktop" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(hostname -s)" ]; then
+      if [ "$node_id" = "$(hostname -s)" ] || [ "$node_id" = "localhost" ]; then
         local_pdir="$(python3 "$SCRIPT_DIR/resolve_project.py" "$PROJECT")"
         WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 nohup konsole --hold --workdir "$local_pdir" -e bash -c "export KNOT_NODE_ID='$node_id'; exec agy --project '$PROJECT' --dangerously-skip-permissions -i \"\$(cat '$pfile')\"" >/dev/null 2>&1 &
       else
@@ -231,9 +236,7 @@ EOF_LAUNCH
         "$KNOT_BIN" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
         cat "$pfile" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
         
-        uid="1000"
-        if [ "$node_id" = "steamdeck" ]; then uid="1001"; fi
-        "$KNOT_BIN" exec "$node_id" "PDIR=\\\$\($resolve_cmd\); WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/$uid nohup konsole --hold --workdir \\\"\\\$PDIR\\\" -e bash -c \\\"export KNOT_NODE_ID='$node_id'; exec agy --project $PROJECT --dangerously-skip-permissions -i \\\$\(cat ~/.config/knot/missions/$RUN_ID/prompt.md\)\\\" >/dev/null 2>&1 &"
+        "$KNOT_BIN" exec "$node_id" "PDIR=\\\$\($resolve_cmd\); WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/\\\$\(id -u\) nohup konsole --hold --workdir \\\"\\\$PDIR\\\" -e bash -c \\\"export KNOT_NODE_ID='$node_id'; exec agy --project $PROJECT --dangerously-skip-permissions -i \\\$\(cat ~/.config/knot/missions/$RUN_ID/prompt.md\)\\\" >/dev/null 2>&1 &"
       fi
     done
     echo "[✓] Interactive TUI windows open on fleet displays."
@@ -246,10 +249,10 @@ EOF_LAUNCH
       node_id="$(basename "$pfile" | sed 's/_prompt.md//')"
       echo "  [•] Staging prompt on $node_id..."
       
-      if [ "$node_id" = "desktop" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(hostname -s)" ]; then
+      if [ "$node_id" = "$(hostname -s)" ] || [ "$node_id" = "localhost" ]; then
         mkdir -p "$HOME/.config/knot/missions/staged"
         if command -v notify-send >/dev/null 2>&1; then
-          notify-send -u normal "Knot Swarm Council" "Prompt staged for desktop. Run 'knot council copy' to load clipboard."
+          notify-send -u normal "Knot Swarm Council" "Prompt staged for $node_id. Run 'knot council copy' to load clipboard."
         fi
       else
         "$KNOT_BIN" exec "$node_id" "mkdir -p ~/.config/knot/missions/staged"

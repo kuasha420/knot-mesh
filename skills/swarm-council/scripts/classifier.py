@@ -24,7 +24,7 @@ def score_rubric(prompt, dataset):
         "generative_ui": ["generative ui", "interactive widget", "svg canvas", "artifact feedback"],
         "browser_devtools": ["browser", "devtools", "a11y", "accessibility", "dom", "screenshot"],
         "interactive_plan": ["plan approval", "user feedback", "interview", "step by step review"],
-        "multi_node": ["all nodes", "fleet", "mesh", "swarm", "desktop", "laptop", "rog-ally", "steamdeck", "cross-node", "parallel"],
+        "multi_node": ["all nodes", "fleet", "mesh", "swarm", "cluster", "multi-node", "cross-node", "parallel"],
         "interactive_monitoring": ["monitor", "watch", "live stream", "supervise", "tui", "cockpit", "observe"],
         "cross_mesh_sync": ["sync", "parity", "audit", "compiler", "handshake", "kvm", "deskflow"],
         "unattended_batch": ["unattended", "headless", "batch", "nightly", "cron", "scheduled", "background", "overnight", "ci/cd"],

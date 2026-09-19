@@ -37,7 +37,7 @@
         "callout:markup": "@[node:{node_id}]",
         "execution:autonomous": true,
         "coordination:bridge": "kitty-socket",
-        "turn:ring": ["desktop", "laptop", "rog-ally", "steamdeck"]
+        "turn:ring": "auto"
       }
     }
   }

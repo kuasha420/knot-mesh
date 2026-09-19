@@ -251,7 +251,9 @@ All node checkpoints and final audit deliverables will be posted here."
   # Save run metadata
   local missions_dir="$HOME/.config/knot/missions/$run_id"
   mkdir -p "$missions_dir"
-  echo "{\"run_id\":\"$run_id\",\"disc_id\":\"$disc_id\",\"disc_url\":\"$disc_url\",\"mode\":\"$mode\",\"project\":\"$proj_name\",\"db\":\"$db\",\"tiling\":\"$tiling\",\"pack\":\"$pack\",\"anchor\":\"desktop\",\"interactive\":$interactive,\"nodes\":\"$nodes\",\"status\":\"ACTIVE\",\"created_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$missions_dir/meta.json"
+  local local_host
+  local_host="$(hostname -s)"
+  echo "{\"run_id\":\"$run_id\",\"disc_id\":\"$disc_id\",\"disc_url\":\"$disc_url\",\"mode\":\"$mode\",\"project\":\"$proj_name\",\"db\":\"$db\",\"tiling\":\"$tiling\",\"pack\":\"$pack\",\"anchor\":\"$local_host\",\"opening_node\":\"$local_host\",\"interactive\":$interactive,\"nodes\":\"$nodes\",\"status\":\"ACTIVE\",\"created_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$missions_dir/meta.json"
 
   if [ $dry_run -eq 1 ]; then
     if [ $interactive -eq 1 ]; then

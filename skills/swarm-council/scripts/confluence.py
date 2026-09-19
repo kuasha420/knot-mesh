@@ -86,10 +86,7 @@ def calculate_cockpit_font_size(scale: float) -> float:
 
 def load_topology(knot_root):
     home = os.path.expanduser("~")
-    top_candidates = [
-        os.path.join(home, ".config/knot/swarms/home/topology.json"),
-        os.path.join(home, ".config/knot/swarms/office/topology.json")
-    ]
+    top_candidates = glob.glob(os.path.join(home, ".config/knot/swarms/*/topology.json"))
     for c in top_candidates:
         if os.path.exists(c):
             try:
@@ -97,9 +94,13 @@ def load_topology(knot_root):
                     return json.load(f)
             except Exception:
                 pass
+    try:
+        local_host = subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip()
+    except Exception:
+        local_host = "localhost"
     return {
-        "anchor": "desktop",
-        "screens": ["desktop", "laptop", "rog-ally", "steamdeck"]
+        "anchor": local_host,
+        "screens": [local_host]
     }
 
 
@@ -142,11 +143,14 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
         ""
     ]
 
-    priority = ["desktop", "laptop", "rog-ally", "steamdeck"]
+    try:
+        local_host = subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip()
+    except Exception:
+        local_host = ""
+
     ordered_nodes = []
-    for p in priority:
-        if p in nodes:
-            ordered_nodes.append(p)
+    if local_host and local_host in nodes:
+        ordered_nodes.append(local_host)
     for n in nodes:
         if n not in ordered_nodes:
             ordered_nodes.append(n)
@@ -158,11 +162,6 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
         "steamdeck": "Gaming Handheld (SteamOS APU)"
     }
 
-    try:
-        local_host = subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip()
-    except Exception:
-        local_host = "desktop"
-
     for node in ordered_nodes:
         if node in dynamic_palette:
             c = dynamic_palette[node]
@@ -170,7 +169,12 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
         else:
             emoji = "⚪"
 
-        desc = role_hints.get(node, "Strand Worker")
+        if node in role_hints:
+            desc = role_hints[node]
+        elif ordered_nodes and node == ordered_nodes[0]:
+            desc = "Opening Server & Master"
+        else:
+            desc = "Rally Player Strand"
         lines.append(f"title {emoji} {node} ({desc})")
 
         # Create isolated per-pane wrapper script to eliminate nested quote-escaping fragility
@@ -261,7 +265,13 @@ def main():
         if prompts:
             nodes = [re.sub(r"_prompt\.md$", "", os.path.basename(p)) for p in prompts]
         else:
-            nodes = ["desktop", "laptop", "rog-ally", "steamdeck"]
+            try:
+                sys.path.insert(0, script_dir)
+                from scaffolder import discover_online_nodes
+                nodes = discover_online_nodes(knot_root)
+            except Exception:
+                local_h = subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip() or "localhost"
+                nodes = [local_h]
 
     os.makedirs(missions_dir, exist_ok=True)
 

@@ -81,38 +81,39 @@ def calculate_volley_points(solve_ms: float, is_first_try: bool = True):
 
     return (base + bonus), is_ace, is_smash, is_elegance
 
-def generate_leaderboard_md(state: TournamentState, project_root: str) -> str:
+def generate_leaderboard_md(state: TournamentState, project_root: str, opening_node: str = "", target_rounds: int = 5) -> str:
     sorted_nodes = sorted(
         state.nodes.values(),
         key=lambda n: n.total_points,
         reverse=True
     )
+    target_volleys = target_rounds * max(1, len(state.nodes))
 
-    medals = ["🥇 Gold Medal", "🥈 Silver Medal", "🥉 Bronze Medal", "🎖️ 4th Place"]
-    badges = {"desktop": "🖥️", "laptop": "💻", "rog-ally": "🎮", "steamdeck": "🕹️"}
-    roles = {
-        "desktop": "The Anchor / High-Entropy Server",
-        "laptop": "Worker Alpha / RTX 3050 CUDA Speedster",
-        "rog-ally": "Worker Beta / AMD Z1 Extreme Burst Returner",
-        "steamdeck": "Worker Gamma / SteamOS Low-Power Precision Volleyer"
-    }
+    medals = ["🥇 Gold Medal", "🥈 Silver Medal", "🥉 Bronze Medal"]
+    badges = ["👑", "⚡", "🔥", "🛰️", "🎮", "🕹️", "💻", "🖥️"]
 
     lines = [
-        "# 🏆 OPERATION PING-PONG: 4-NODE SWARM CRYPTO TOURNAMENT REPORT 🏓⚡\n",
+        f"# 🏆 OPERATION PING-PONG: {len(state.nodes)}-NODE SWARM CRYPTO TOURNAMENT REPORT 🏓⚡\n",
         f"> **Tournament Mission:** `{state.run_id}`  ",
-        f"> **Arena:** Knot Mesh Confluence Cockpit (4 Nodes: `desktop`, `laptop`, `rog-ally`, `steamdeck`)  ",
+        f"> **Arena:** Knot Mesh Confluence Cockpit ({len(state.nodes)} Nodes: {', '.join(f'`{n}`' for n in state.nodes.keys())})  ",
         f"> **Total Execution Time:** {int(time.time() - state.start_time)}s / {state.duration_sec}s  ",
-        f"> **Total Verified Hash Proofs:** {state.total_volleys}  ",
-        f"> **Peak Flawless Rally Streak:** {state.flawless_streak} clean rounds ({state.streak_multiplier:.1f}x)\n",
+        f"> **Total Verified Hash Proofs:** {state.total_volleys} / {target_volleys} target  ",
+        f"> **Peak Flawless Rally Streak:** {state.flawless_streak} clean volleys ({state.streak_multiplier:.1f}x)\n",
         "## 1. 🏆 Championship Podium Rankings\n",
-        "| Rank | Badge | Workstation | Role | Final Score | Total Volleys | Aces (<10s) | Power Smashes (<5s) | Elegance |",
+        "| Rank | Badge | Workstation | Role / Hardware | Final Score | Total Volleys | Aces (<10s) | Power Smashes (<5s) | Elegance |",
         "| :--- | :---: | :--- | :--- | :---: | :---: | :---: | :---: | :---: |"
     ]
 
     for idx, node in enumerate(sorted_nodes):
         medal = medals[idx] if idx < len(medals) else f"Rank {idx+1}"
-        badge = badges.get(node.node_id, "⚪")
-        role = roles.get(node.node_id, "Swarm Strand")
+        badge = badges[idx] if idx < len(badges) else "🎖️"
+        
+        hw_desc = f" ({node.last_hardware})" if node.last_hardware else ""
+        if node.node_id == opening_node or (not opening_node and idx == 0):
+            role = f"Tournament Master{hw_desc}"
+        else:
+            role = f"Rally Player{hw_desc}"
+
         lines.append(
             f"| **{idx+1}** | {medal} | `{node.node_id}` {badge} | {role} | "
             f"**{node.total_points:,} pts** | {node.volleys_played} | {node.aces} | {node.power_smashes} | {node.elegance_bonuses} |"
@@ -141,7 +142,7 @@ def generate_leaderboard_md(state: TournamentState, project_root: str) -> str:
         "- **Ace Bonus**: +50 PTS for cognitive solves under 10 seconds.",
         "- **Power Smash Bonus**: +100 PTS for rapid solves under 5 seconds.",
         "- **Elegance Bonus**: +50 PTS for solves completed on turn 1 without syntax retries.",
-        "- **Rally Streak Multiplier**: Incremented by $+0.2\\times$ per clean 4-node ring round.",
+        "- **Rally Streak Multiplier**: Incremented by $+0.2\\times$ per clean round.",
         f"- **Peak Swarm Streak Multiplier**: **{state.streak_multiplier:.1f}x**.",
         "\n---",
         "\n### Tournament Ledger & Publication Targets:\n",
@@ -155,28 +156,68 @@ def main():
     parser = argparse.ArgumentParser(description="Knot Tournament Referee")
     parser.add_argument("--run-id", required=True, help="Council run ID")
     parser.add_argument("--duration", type=int, default=300, help="Tournament duration in seconds")
+    parser.add_argument("--target-rounds", type=int, default=5, help="Target tournament rounds (default: 5)")
     parser.add_argument("--project-root", default=os.getcwd(), help="Root directory of repository")
     parser.add_argument("--once", action="store_true", help="Run a single evaluation and exit")
     args = parser.parse_args()
 
-    nodes = ["desktop", "laptop", "rog-ally", "steamdeck"]
+    # Discover nodes from meta.json if available
+    nodes = []
+    meta_file = os.path.join(os.path.expanduser("~/.config/knot/missions"), args.run_id, "meta.json")
+    opening_node = ""
+    target_rounds = args.target_rounds
+    if os.path.exists(meta_file):
+        try:
+            with open(meta_file) as mf:
+                mdata = json.load(mf)
+                nodes = mdata.get("ring") or mdata.get("nodes") or []
+                if isinstance(nodes, str):
+                    nodes = [n.strip() for n in nodes.split(",") if n.strip()]
+                opening_node = mdata.get("opening_node") or (nodes[0] if nodes else "")
+                target_rounds = mdata.get("target_rounds") or target_rounds
+        except Exception:
+            pass
+
+    db_path = get_mesh_db_path()
+    if not nodes and os.path.exists(db_path):
+        try:
+            conn = sqlite3.connect(db_path, timeout=5)
+            cur = conn.cursor()
+            cur.execute("SELECT DISTINCT node_id FROM council_messages WHERE run_id = ?", (args.run_id,))
+            nodes = [r[0] for r in cur.fetchall() if r[0]]
+            conn.close()
+        except Exception:
+            pass
+
+    if not nodes:
+        try:
+            import subprocess
+            local_host = subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip()
+        except Exception:
+            local_host = "localhost"
+        nodes = [local_host]
+
+    if not opening_node and nodes:
+        opening_node = nodes[0]
+
     state = TournamentState(run_id=args.run_id, duration_sec=args.duration)
     for n in nodes:
         state.nodes[n] = NodeScore(node_id=n)
 
-    db_path = get_mesh_db_path()
     seen_ids = set()
-
     docs_dir = os.path.join(args.project_root, "docs")
     os.makedirs(docs_dir, exist_ok=True)
     leaderboard_file = os.path.join(docs_dir, "LEADERBOARD.md")
 
-    print(f"🏓 [REFEREE ACTIVE] Monitoring run {args.run_id} on {db_path}...")
+    target_volleys = target_rounds * len(nodes)
+    tournament_concluded = False
+
+    print(f"🏓 [REFEREE ACTIVE] Monitoring run {args.run_id} ({len(nodes)} nodes, target {target_volleys} volleys) on {db_path}...")
 
     while True:
         elapsed = time.time() - state.start_time
         if elapsed >= state.duration_sec and not args.once:
-            print("🔔 [WHISTLE BLOWN] 5-minute tournament concluded!")
+            print("🔔 [WHISTLE BLOWN] Time limit reached!")
             break
 
         # Poll Mesh DB for council messages
@@ -195,7 +236,18 @@ def main():
                         continue
                     seen_ids.add(msg_id)
 
-                    if node_id in state.nodes and "Volley Returned" in body:
+                    if node_id not in state.nodes:
+                        state.nodes[node_id] = NodeScore(node_id=node_id)
+
+                    # Dynamic hardware extraction
+                    hw_match = re.search(r"HW:\s*([^|\n]+)", body)
+                    if hw_match:
+                        state.nodes[node_id].last_hardware = hw_match.group(1).strip()
+
+                    if status == "COMPLETE" or "TOURNAMENT CONCLUDED" in body:
+                        tournament_concluded = True
+
+                    if "Volley Returned" in body:
                         ms_match = re.search(r"Solve Time:\s*([\d\.]+)\s*(?:ms)?", body)
                         proof_match = re.search(r"(?:Nonce/Proof|Nonce|Proof):\s*(\S+)", body)
                         solve_ms = float(ms_match.group(1)) if ms_match else 500.0
@@ -216,7 +268,7 @@ def main():
 
                         state.total_volleys += 1
                         state.flawless_streak += 1
-                        if state.total_volleys % 4 == 0:
+                        if state.total_volleys % max(1, len(nodes)) == 0:
                             state.streak_multiplier = min(25.0, round(state.streak_multiplier + 0.2, 1))
 
                         print(f"  [VOLLEY VERIFIED] @{node_id} solved in {solve_ms:.1f}ms (+{pts_awarded} pts, Streak: {state.streak_multiplier}x)")
@@ -225,12 +277,17 @@ def main():
             except Exception as e:
                 print(f"  [DB ERROR]: {e}")
 
-        md = generate_leaderboard_md(state, args.project_root)
+        md = generate_leaderboard_md(state, args.project_root, opening_node=opening_node, target_rounds=target_rounds)
         with open(leaderboard_file, "w") as f:
             f.write(md)
 
         if args.once:
             break
+
+        if (state.total_volleys >= target_volleys or tournament_concluded) and state.total_volleys > 0:
+            print(f"🔔 [WHISTLE BLOWN] Target {target_volleys} volleys achieved across {len(nodes)} nodes! Tournament concluded.")
+            break
+
         time.sleep(2)
 
     print(f"📄 Leaderboard finalized at {leaderboard_file}")
