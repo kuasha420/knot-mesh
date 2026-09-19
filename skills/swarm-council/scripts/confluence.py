@@ -8,6 +8,8 @@ and launches a GPU-accelerated fullscreen Kitty cockpit.
 import os
 import sys
 import json
+import glob
+import re
 import argparse
 import subprocess
 
@@ -94,7 +96,11 @@ def main():
     if args.nodes:
         nodes = [n.strip() for n in args.nodes.split(",") if n.strip()]
     else:
-        nodes = ["desktop", "laptop", "rog-ally", "steamdeck"]
+        prompts = glob.glob(os.path.join(missions_dir, "*_prompt.md"))
+        if prompts:
+            nodes = [re.sub(r"_prompt\.md$", "", os.path.basename(p)) for p in prompts]
+        else:
+            nodes = ["desktop", "laptop", "rog-ally", "steamdeck"]
 
     session_content = generate_session_conf(
         run_id=args.run_id,

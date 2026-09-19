@@ -96,7 +96,12 @@ EOF_LAUNCH
       fi
     done
     echo "==> Spawning Confluence Spatial Cockpit in Kitty..."
-    python3 "$SCRIPT_DIR/confluence.py" --run-id "$RUN_ID" --project "$PROJECT"
+    ACTIVE_NODES="$(python3 -c 'import glob, os, sys, re; p=glob.glob(os.path.join(sys.argv[1], "*_prompt.md")); print(",".join(re.sub(r"_prompt\.md$", "", os.path.basename(x)) for x in p))' "$MISSIONS_DIR")"
+    if [ -n "$ACTIVE_NODES" ]; then
+      python3 "$SCRIPT_DIR/confluence.py" --run-id "$RUN_ID" --project "$PROJECT" --nodes "$ACTIVE_NODES"
+    else
+      python3 "$SCRIPT_DIR/confluence.py" --run-id "$RUN_ID" --project "$PROJECT"
+    fi
     ;;
 
   headless)
