@@ -449,8 +449,11 @@ cmd_project() {
       count="$(echo "$resp" | jq -r 'length // 0')"
       knot_log_ok "Hub registered $count native Antigravity projects."
       ;;
+    worktree)
+      cmd_worktree "$@"
+      ;;
     *)
-      echo "Usage: knot project <list|get|sync>"
+      echo "Usage: knot project <list|get|sync|worktree>"
       exit 1
       ;;
   esac
@@ -523,7 +526,7 @@ cmd_chat() {
         --arg p "$project_id" \
         --arg t "$title" \
         --arg d "$desc" \
-        --arg cb "$(hostname)" \
+        --arg cb "$(knot_detect_node_id)" \
         '{id: $id, project_id: $p, title: $t, description: $d, created_by: $cb}')"
 
       local resp
@@ -552,7 +555,7 @@ cmd_chat() {
         exit 1
       fi
       if [ -z "$sender" ]; then
-        sender="$(hostname)"
+        sender="$(knot_detect_node_id)"
       fi
       local payload
       payload="$(jq -n --arg s "$sender" --arg c "$content" --arg ch "$conv_id" \
@@ -623,7 +626,7 @@ cmd_artifact() {
       local name="$1" ttl=120
       if [ "${2:-}" = "--ttl" ]; then ttl="${3:-120}"; fi
       local node
-      node="$(hostname)"
+      node="$(knot_detect_node_id)"
       local payload
       payload="$(jq -n --arg n "$name" --arg nd "$node" --argjson t "$ttl" \
         '{name: $n, node_id: $nd, ttl: $t, state: "LOCKED_SURGERY"}')"
@@ -644,7 +647,7 @@ cmd_artifact() {
       local name="$1" state="VERIFIED_COMMITTED"
       if [ "${2:-}" = "--state" ]; then state="${3:-VERIFIED_COMMITTED}"; fi
       local node
-      node="$(hostname)"
+      node="$(knot_detect_node_id)"
       local payload
       payload="$(jq -n --arg n "$name" --arg nd "$node" --arg s "$state" \
         '{name: $n, node_id: $nd, state: $s}')"

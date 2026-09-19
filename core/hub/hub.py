@@ -1610,6 +1610,33 @@ class Database:
     # Multi-Project & Native Antigravity Workspaces
     # -------------------------------------------------------------
 
+    @staticmethod
+    def normalize_home_path(path_or_uri: str, target_home: str | None = None) -> str:
+        """
+        Normalizes paths between different user home directories
+        (/home/kuasha <-> /home/psl <-> /home/jimha).
+        Preserves file:// prefix if present.
+        """
+        if not path_or_uri:
+            return path_or_uri
+        home = target_home or os.path.expanduser("~")
+        prefix = ""
+        target = path_or_uri
+        if target.startswith("file://"):
+            prefix = "file://"
+            target = target[7:]
+
+        # Replace /home/<username> with target home
+        if target.startswith("/home/"):
+            parts = target.split("/", 3)
+            if len(parts) >= 3:
+                rel = parts[3] if len(parts) > 3 else ""
+                target = os.path.join(home, rel) if rel else home
+        elif target.startswith("~/"):
+            target = os.path.join(home, target[2:])
+
+        return f"{prefix}{target}"
+
     def sync_native_antigravity_projects(self, conn=None):
         """
         Scans native Antigravity project definitions in ~/.gemini/config/projects/*.json
@@ -1639,8 +1666,10 @@ class Database:
                     folders = []
                     for r in resources:
                         furi = r.get("gitFolder", {}).get("folderUri") or r.get("folderUri")
-                        if furi and furi not in folders:
-                            folders.append(furi)
+                        if furi:
+                            norm_furi = self.normalize_home_path(furi)
+                            if norm_furi not in folders:
+                                folders.append(norm_furi)
 
                     folders_json = json.dumps(folders)
                     with conn:
@@ -1738,7 +1767,8 @@ class Database:
             target_json = os.path.join(projects_dir, f"{project_id}.json")
             resources = []
             for furi in folders_list:
-                resources.append({"gitFolder": {"folderUri": furi, "defaultBranch": "main"}})
+                norm_furi = self.normalize_home_path(furi)
+                resources.append({"gitFolder": {"folderUri": norm_furi, "defaultBranch": "main"}})
             native_spec = {
                 "id": project_id,
                 "name": name,

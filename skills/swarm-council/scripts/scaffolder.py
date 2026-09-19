@@ -93,10 +93,16 @@ def discover_online_nodes(knot_root):
     except Exception:
         pass
     if not nodes:
+        local_host = "localhost"
         try:
-            local_host = subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip()
+            from resolve_node import resolve_local_node_id
+            local_host = resolve_local_node_id()
         except Exception:
-            local_host = "localhost"
+            try:
+                import socket
+                local_host = socket.gethostname().strip().split(".")[0]
+            except Exception:
+                local_host = "localhost"
         nodes = [local_host]
     return nodes
 

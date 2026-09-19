@@ -30,10 +30,10 @@ if [ -n "$KNOT_BIN" ] && [ -x "$KNOT_BIN" ]; then
   while read -r node_id; do
     [ -n "$node_id" ] || continue
     nodes+=("$node_id")
-  done < <("$KNOT_BIN" status 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | awk '$5 == "ONLINE" {print $1}')
+  done < <("$KNOT_BIN" status | sed 's/\x1b\[[0-9;]*m//g' | awk '$5 == "ONLINE" {print $1}')
 fi
 
-local_node="$(python3 "$SCRIPT_DIR/resolve_node.py" 2>/dev/null || hostname -s)"
+local_node="$(python3 "$SCRIPT_DIR/resolve_node.py")"
 if [ ${#nodes[@]} -eq 0 ]; then
   nodes=("$local_node")
 fi
@@ -47,10 +47,11 @@ idx=0
 
 sync_settings_cmd="python3 -c 'import json, os; p1=os.path.expanduser(\"~/.gemini/config/config.json\"); p2=os.path.expanduser(\"~/.gemini/antigravity-cli/settings.json\"); [json.dump((lambda d: (d.setdefault(\"userSettings\",{}).update({\"useAiCredits\":False,\"useG1Credits\":False,\"themeMode\":\"THEME_MODE_DARK\"}), d)[1])(json.load(open(p1))), open(p1,\"w\"), indent=2) for _ in [1] if os.path.exists(p1)]; [json.dump((lambda d: (d.update({\"useAiCredits\":False,\"useG1Credits\":False,\"accepted_latest_terms_of_service\":True,\"theme\":\"dark\",\"theme_mode\":\"THEME_MODE_DARK\"}), d)[1])(json.load(open(p2))), open(p2,\"w\"), indent=2) for _ in [1] if os.path.exists(p2)]'"
 
+cur_host="$(uname -n | cut -d. -f1)"
 for node in "${nodes[@]}"; do
   idx=$((idx + 1))
   is_local=0
-  if [ "$node" = "$local_node" ] || [ "$node" = "$(hostname -s)" ] || [ "$node" = "localhost" ]; then
+  if [ "$node" = "$local_node" ] || [ "$node" = "$cur_host" ] || [ "$node" = "localhost" ]; then
     is_local=1
   fi
 

@@ -159,7 +159,11 @@ ssh_sync_client_config() {
 
         if [ -n "$node_id" ] && [ -n "$remote_user" ]; then
           # Scoped Host: e.g. desktop.home
-          knot_config+="Host ${node_id}.${swarm_id}"$'\n'
+          local scoped_host="Host ${node_id}.${swarm_id}"
+          if [ -n "$hostname_val" ] && [ "$hostname_val" != "$node_id" ]; then
+            scoped_host+=" ${hostname_val}.${swarm_id}"
+          fi
+          knot_config+="$scoped_host"$'\n'
           if [ -n "$hostname_val" ]; then
             knot_config+="    HostName $hostname_val"$'\n'
           fi
@@ -199,7 +203,11 @@ ssh_sync_client_config() {
       if [ -z "$port" ]; then port="22"; fi
 
       if [ -n "$node_id" ] && [ -n "$remote_user" ]; then
-        knot_config+="Host $node_id"$'\n'
+        local host_line="Host $node_id"
+        if [ -n "$hostname_val" ] && [ "$hostname_val" != "$node_id" ]; then
+          host_line+=" $hostname_val"
+        fi
+        knot_config+="$host_line"$'\n'
         if [ -n "$hostname_val" ] && [ "$hostname_val" != "$node_id" ]; then
           knot_config+="    HostName $hostname_val"$'\n'
         fi
