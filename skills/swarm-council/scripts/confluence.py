@@ -15,8 +15,8 @@ import re
 import subprocess
 import sys
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
-knot_root = os.path.abspath(os.path.join(script_dir, "../../.."))
+script_dir = os.path.dirname(os.path.realpath(__file__))
+knot_root = os.path.realpath(os.path.join(script_dir, "../../.."))
 if knot_root not in sys.path:
     sys.path.insert(0, knot_root)
 
@@ -105,6 +105,9 @@ def load_topology(knot_root):
 
 def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="knot-mesh", tiling="grid", interactive=False, resume=False):
     knot_bin = os.path.join(knot_root, "bin/knot")
+    if not os.path.isfile(knot_bin) or not os.access(knot_bin, os.X_OK):
+        import shutil
+        knot_bin = shutil.which("knot") or os.path.expanduser("~/.local/bin/knot")
 
     # Resolve dynamic palette with topological near-neighbor separation
     dynamic_palette = {}
@@ -211,7 +214,7 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
                     remote_cmd = (
                         f"trap '' HUP; "
                         f"export KNOT_NODE_ID='{node}' KNOT_COUNCIL_RUN_ID='{run_id}' KNOT_HUB_URL='https://127.0.0.1:4242' KNOT_COUNCIL_DB='mesh' KNOT_PROJECT='{project_name}' KNOT_PEERS='{','.join(nodes)}' PATH=\"\\$HOME/.local/bin:/usr/local/bin:/usr/bin:\\$PATH\"; "
-                        f"if [ -d \\\"Dev/{project_name}\\\" ]; then cd \\\"Dev/{project_name}\\\"; elif [ -d \\\"{project_name}\\\" ]; then cd \\\"{project_name}\\\"; fi; "
+                        f"TARGET=\"\"; for c in \"\\$HOME/Dev/{project_name}\" \"\\$HOME/{project_name}\" \"\\$HOME/.local/share/{project_name}\" \"Dev/{project_name}\" \"{project_name}\"; do if [ -d \"\\$c\" ]; then TARGET=\"\\$c\"; break; fi; done; if [ -n \"\\$TARGET\" ]; then cd \"\\$TARGET\"; fi; "
                         f"echo -e '\\033[1;36m╔══════════════════════════════════════════════════════════════════════╗\\033[0m'; "
                         f"echo -e '\\033[1;36m║\\033[0m  🛰️  \\033[1mKnot Swarm Interactive Cockpit: @[{node}]\\033[0m ({desc})'; "
                         f"echo -e '\\033[1;36m║\\033[0m  Project:   \\033[33m{project_name}\\033[0m (\\$PWD)'; "
@@ -247,8 +250,8 @@ def main():
 
     args = parser.parse_args()
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    knot_root = os.path.abspath(os.path.join(script_dir, "../../.."))
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    knot_root = os.path.realpath(os.path.join(script_dir, "../../.."))
     missions_dir = os.path.expanduser(f"~/.config/knot/missions/{args.run_id}")
 
     if args.nodes:

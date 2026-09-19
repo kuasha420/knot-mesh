@@ -172,13 +172,27 @@ def get_full_thread(discussion_id):
     out = run_gh(["api", "graphql", "-f", f"query={query}"])
     return json.loads(out)["data"]["node"]
 
+def resolve_repo(owner="", repo=""):
+    if owner and repo:
+        return owner, repo
+    try:
+        url = subprocess.check_output(["git", "config", "--get", "remote.origin.url"], text=True, stderr=subprocess.DEVNULL).strip()
+        import re
+        m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)(?:\.git)?", url)
+        if m:
+            det_owner, det_repo = m.group(1), m.group(2)
+            return owner or det_owner, repo or det_repo
+    except Exception:
+        pass
+    return owner or "kuasha420", repo or "knot-mesh"
+
 def main():
     parser = argparse.ArgumentParser(description="Swarm Council GitHub Discussions Helper")
     subparsers = parser.add_subparsers(dest="cmd")
 
     create_p = subparsers.add_parser("create")
-    create_p.add_argument("--owner", default="kuasha420")
-    create_p.add_argument("--repo", default="knot-mesh")
+    create_p.add_argument("--owner", default="")
+    create_p.add_argument("--repo", default="")
     create_p.add_argument("--title", required=True)
     create_p.add_argument("--body", required=True)
     create_p.add_argument("--category", default="general")
@@ -200,8 +214,9 @@ def main():
     args = parser.parse_args()
 
     if args.cmd == "create":
+        owner, repo = resolve_repo(args.owner, args.repo)
         body = args.body.replace('\\n', '\n')
-        res = create_thread(args.owner, args.repo, args.title, body, args.category)
+        res = create_thread(owner, repo, args.title, body, args.category)
         print(json.dumps(res, indent=2))
     elif args.cmd == "reply":
         body = args.body.replace('\\n', '\n')

@@ -9,8 +9,8 @@ if [ "${1:-}" = "--pull" ]; then
   DO_PULL=1
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KNOT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+KNOT_ROOT="$(cd -P "$SCRIPT_DIR/../../.." && pwd -P)"
 CWD="$(pwd)"
 
 python3 - "$DO_PULL" <<PYEOF
@@ -59,6 +59,9 @@ if not matched_folders:
 
 # 2. Discover online nodes via knot status
 knot_bin = os.path.join("$KNOT_ROOT", "bin/knot")
+if not os.path.isfile(knot_bin) or not os.access(knot_bin, os.X_OK):
+    import shutil
+    knot_bin = shutil.which("knot") or os.path.expanduser("~/.local/bin/knot")
 nodes = []
 try:
     status_out = subprocess.check_output([knot_bin, "status"], text=True, stderr=subprocess.DEVNULL)

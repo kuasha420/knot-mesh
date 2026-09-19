@@ -4,17 +4,33 @@ set -euo pipefail
 # Swarm Council: Stage 0 Tool & Fleet Availability Audit
 # Probes online nodes for gh, git, knot, agy, model connectivity, and repo write access
 
-REPO="${1:-kuasha420/knot-mesh}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KNOT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+REPO="${1:-}"
+if [ -z "$REPO" ]; then
+  if git_remote="$(git config --get remote.origin.url 2>/dev/null)"; then
+    REPO="$(echo "$git_remote" | sed -E 's#.*github\.com[:/]([^/]+/[^/.]+)(\.git)?#\1#')"
+  fi
+  REPO="${REPO:-kuasha420/knot-mesh}"
+fi
+
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+KNOT_ROOT="$(cd -P "$SCRIPT_DIR/../../.." && pwd -P)"
+
+KNOT_BIN=""
+if [ -x "$KNOT_ROOT/bin/knot" ]; then
+  KNOT_BIN="$KNOT_ROOT/bin/knot"
+elif command -v knot >/dev/null 2>&1; then
+  KNOT_BIN="$(command -v knot)"
+elif [ -x "$HOME/.local/bin/knot" ]; then
+  KNOT_BIN="$HOME/.local/bin/knot"
+fi
 
 # Discover online nodes
 nodes=()
-if [ -x "$KNOT_ROOT/bin/knot" ]; then
+if [ -n "$KNOT_BIN" ] && [ -x "$KNOT_BIN" ]; then
   while read -r node_id; do
     [ -n "$node_id" ] || continue
     nodes+=("$node_id")
-  done < <("$KNOT_ROOT/bin/knot" status 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | awk '$5 == "ONLINE" {print $1}')
+  done < <("$KNOT_BIN" status 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | awk '$5 == "ONLINE" {print $1}')
 fi
 
 if [ ${#nodes[@]} -eq 0 ]; then
@@ -61,21 +77,21 @@ for node in "${nodes[@]}"; do
 
     command -v gh >/dev/null 2>&1 || { gh_ok=false; status="DEGRADED"; }
     command -v git >/dev/null 2>&1 || { git_ok=false; status="DEGRADED"; }
-    command -v knot >/dev/null 2>&1 || [ -x "$KNOT_ROOT/bin/knot" ] || { knot_ok=false; status="DEGRADED"; }
+    command -v knot >/dev/null 2>&1 || [ -n "$KNOT_BIN" ] || { knot_ok=false; status="DEGRADED"; }
     command -v agy >/dev/null 2>&1 || { agy_ok=false; status="DEGRADED"; }
     gh auth status >/dev/null 2>&1 || { auth_ok=false; status="DEGRADED"; }
     timeout 5 agy --version >/dev/null 2>&1 || { models_ok=false; status="DEGRADED"; }
   else
-    if ! "$KNOT_ROOT/bin/knot" exec "$node" "$sync_settings_cmd" >/dev/null 2>&1; then
+    if ! "$KNOT_BIN" exec "$node" "$sync_settings_cmd" >/dev/null 2>&1; then
       status="DEGRADED"
     fi
 
-    if ! timeout 5 "$KNOT_ROOT/bin/knot" exec "$node" "which gh >/dev/null 2>&1"; then gh_ok=false; status="DEGRADED"; fi
-    if ! timeout 5 "$KNOT_ROOT/bin/knot" exec "$node" "which git >/dev/null 2>&1"; then git_ok=false; status="DEGRADED"; fi
-    if ! timeout 5 "$KNOT_ROOT/bin/knot" exec "$node" "which knot >/dev/null 2>&1 || [ -x ~/.local/bin/knot ]"; then knot_ok=false; status="DEGRADED"; fi
-    if ! timeout 5 "$KNOT_ROOT/bin/knot" exec "$node" "which agy >/dev/null 2>&1 || [ -x ~/.local/bin/agy ]"; then agy_ok=false; status="DEGRADED"; fi
-    if ! timeout 5 "$KNOT_ROOT/bin/knot" exec "$node" "gh auth status >/dev/null 2>&1"; then auth_ok=false; status="DEGRADED"; fi
-    if ! timeout 8 "$KNOT_ROOT/bin/knot" exec "$node" "PATH=\"\$HOME/.local/bin:\$PATH\" agy --version >/dev/null 2>&1"; then models_ok=false; status="DEGRADED"; fi
+    if ! timeout 5 "$KNOT_BIN" exec "$node" "which gh >/dev/null 2>&1"; then gh_ok=false; status="DEGRADED"; fi
+    if ! timeout 5 "$KNOT_BIN" exec "$node" "which git >/dev/null 2>&1"; then git_ok=false; status="DEGRADED"; fi
+    if ! timeout 5 "$KNOT_BIN" exec "$node" "which knot >/dev/null 2>&1 || [ -x ~/.local/bin/knot ]"; then knot_ok=false; status="DEGRADED"; fi
+    if ! timeout 5 "$KNOT_BIN" exec "$node" "which agy >/dev/null 2>&1 || [ -x ~/.local/bin/agy ]"; then agy_ok=false; status="DEGRADED"; fi
+    if ! timeout 5 "$KNOT_BIN" exec "$node" "gh auth status >/dev/null 2>&1"; then auth_ok=false; status="DEGRADED"; fi
+    if ! timeout 8 "$KNOT_BIN" exec "$node" "PATH=\"\$HOME/.local/bin:\$PATH\" agy --version >/dev/null 2>&1"; then models_ok=false; status="DEGRADED"; fi
   fi
 
   audit_results+="\"$node\":{"

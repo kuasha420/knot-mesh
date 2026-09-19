@@ -103,7 +103,7 @@ def main():
 
     args = parser.parse_args()
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = os.path.dirname(os.path.realpath(__file__))
     dataset_file = os.path.join(script_dir, "../templates/dataset_modes.json")
 
     prompt = ""

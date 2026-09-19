@@ -138,11 +138,15 @@ council_start() {
     echo "$sync_out"
     return 1
   }
-  local proj_name
+  local proj_name proj_folder
   if [ -n "$proj_override" ]; then
     proj_name="$proj_override"
   else
     proj_name="$(echo "$sync_out" | jq -r '.project_name // "knot-mesh"')"
+  fi
+  proj_folder="$(echo "$sync_out" | jq -r '.folders[0] // empty')"
+  if [ -z "$proj_folder" ] || [ ! -d "$proj_folder" ]; then
+    proj_folder="$(pwd)"
   fi
 
   # Stage 2: Create Mission registry thread
@@ -201,7 +205,7 @@ All node checkpoints and final audit deliverables will be posted here."
   # Stage 3: Scaffold prompts (if not interactive)
   if [ $interactive -eq 0 ]; then
     echo -e "  ${C_CYAN}[3/7] Scaffolding tailored node prompts (1.5x coverage)...${C_RESET}"
-    local scaffold_cmd=(python3 "$SCRIPTS_DIR/scaffolder.py" --run-id "$run_id" --pack "$pack" --discussion-url "$disc_url" --db "$db")
+    local scaffold_cmd=(python3 "$SCRIPTS_DIR/scaffolder.py" --run-id "$run_id" --pack "$pack" --discussion-url "$disc_url" --db "$db" --project-dir "$proj_folder")
     if [ -n "$prompt_file" ]; then scaffold_cmd+=(--prompt-file "$prompt_file"); fi
     if [ -n "$prompt_text" ]; then scaffold_cmd+=(--prompt "$prompt_text"); fi
     if [ -n "$nodes" ]; then scaffold_cmd+=(--nodes "$nodes"); fi

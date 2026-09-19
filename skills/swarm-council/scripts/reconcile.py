@@ -13,7 +13,7 @@ import argparse
 import subprocess
 
 def fetch_thread_data(discussion_id, backend="auto", run_id=""):
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = os.path.dirname(os.path.realpath(__file__))
     
     if backend == "auto":
         # Check meta.json if run_id is known

@@ -17,8 +17,16 @@ if [ -z "$RUN_ID" ]; then
   exit 1
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KNOT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+KNOT_ROOT="$(cd -P "$SCRIPT_DIR/../../.." && pwd -P)"
+KNOT_BIN=""
+if [ -x "$KNOT_ROOT/bin/knot" ]; then
+  KNOT_BIN="$KNOT_ROOT/bin/knot"
+elif command -v knot >/dev/null 2>&1; then
+  KNOT_BIN="$(command -v knot)"
+elif [ -x "$HOME/.local/bin/knot" ]; then
+  KNOT_BIN="$HOME/.local/bin/knot"
+fi
 MISSIONS_DIR="$HOME/.config/knot/missions/$RUN_ID"
 
 if [ ! -d "$MISSIONS_DIR" ]; then
@@ -107,9 +115,9 @@ EOF_LAUNCH
           cp "$pfile" "$MISSIONS_DIR/prompt.md"
           cp "$launcher_script" "$MISSIONS_DIR/launch.sh"
         else
-          "$KNOT_ROOT/bin/knot" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
-          cat "$pfile" | "$KNOT_ROOT/bin/knot" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
-          cat "$launcher_script" | "$KNOT_ROOT/bin/knot" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/launch.sh && chmod +x ~/.config/knot/missions/$RUN_ID/launch.sh"
+          "$KNOT_BIN" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
+          cat "$pfile" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
+          cat "$launcher_script" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/launch.sh && chmod +x ~/.config/knot/missions/$RUN_ID/launch.sh"
         fi
       done
       echo "==> Spawning Confluence Spatial Cockpit in Kitty..."
@@ -139,9 +147,9 @@ EOF_LAUNCH
           > "$MISSIONS_DIR/${node_id}_output.json" 2>&1 &
       else
         # Push prompt file to target node and execute via systemd-run
-        "$KNOT_ROOT/bin/knot" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
-        cat "$pfile" | "$KNOT_ROOT/bin/knot" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
-        "$KNOT_ROOT/bin/knot" exec "$node_id" "systemd-run --user --unit=knot-council-$RUN_ID bash -c \"PDIR=\\\$\($resolve_cmd\); if [ -d \\\"\\\$PDIR\\\" ]; then cd \\\"\\\$PDIR\\\"; fi; export KNOT_NODE_ID='$node_id'; export PATH=\\\"\\\$HOME/.local/bin:/usr/local/bin:/usr/bin:\\\$PATH\\\"; agy --project $PROJECT --dangerously-skip-permissions -p \\\"\\\$(cat ~/.config/knot/missions/$RUN_ID/prompt.md)\\\" --output-format json\" > ~/.config/knot/missions/$RUN_ID/output.json 2>&1 &"
+        "$KNOT_BIN" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
+        cat "$pfile" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
+        "$KNOT_BIN" exec "$node_id" "systemd-run --user --unit=knot-council-$RUN_ID bash -c \"PDIR=\\\$\($resolve_cmd\); if [ -d \\\"\\\$PDIR\\\" ]; then cd \\\"\\\$PDIR\\\"; fi; export KNOT_NODE_ID='$node_id'; export PATH=\\\"\\\$HOME/.local/bin:/usr/local/bin:/usr/bin:\\\$PATH\\\"; agy --project $PROJECT --dangerously-skip-permissions -p \\\"\\\$(cat ~/.config/knot/missions/$RUN_ID/prompt.md)\\\" --output-format json\" > ~/.config/knot/missions/$RUN_ID/output.json 2>&1 &"
       fi
     done
     echo "[✓] Fleet runners dispatched headlessly in background."
@@ -161,12 +169,12 @@ EOF_LAUNCH
         WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 nohup konsole --hold --workdir "$local_pdir" -e bash -c "export KNOT_NODE_ID='$node_id'; exec agy --project '$PROJECT' --dangerously-skip-permissions -i \"\$(cat '$pfile')\"" >/dev/null 2>&1 &
       else
         # Push prompt and launch konsole on remote display
-        "$KNOT_ROOT/bin/knot" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
-        cat "$pfile" | "$KNOT_ROOT/bin/knot" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
+        "$KNOT_BIN" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
+        cat "$pfile" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
         
         uid="1000"
         if [ "$node_id" = "steamdeck" ]; then uid="1001"; fi
-        "$KNOT_ROOT/bin/knot" exec "$node_id" "PDIR=\\\$\($resolve_cmd\); WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/$uid nohup konsole --hold --workdir \\\"\\\$PDIR\\\" -e bash -c \\\"export KNOT_NODE_ID='$node_id'; exec agy --project $PROJECT --dangerously-skip-permissions -i \\\$\(cat ~/.config/knot/missions/$RUN_ID/prompt.md\)\\\" >/dev/null 2>&1 &"
+        "$KNOT_BIN" exec "$node_id" "PDIR=\\\$\($resolve_cmd\); WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/$uid nohup konsole --hold --workdir \\\"\\\$PDIR\\\" -e bash -c \\\"export KNOT_NODE_ID='$node_id'; exec agy --project $PROJECT --dangerously-skip-permissions -i \\\$\(cat ~/.config/knot/missions/$RUN_ID/prompt.md\)\\\" >/dev/null 2>&1 &"
       fi
     done
     echo "[✓] Interactive TUI windows open on fleet displays."
@@ -185,9 +193,9 @@ EOF_LAUNCH
           notify-send -u normal "Knot Swarm Council" "Prompt staged for desktop. Run 'knot council copy' to load clipboard."
         fi
       else
-        "$KNOT_ROOT/bin/knot" exec "$node_id" "mkdir -p ~/.config/knot/missions/staged"
-        cat "$pfile" | "$KNOT_ROOT/bin/knot" exec "$node_id" "cat > ~/.config/knot/missions/staged/active_prompt.md"
-        "$KNOT_ROOT/bin/knot" exec "$node_id" "if command -v notify-send >/dev/null 2>&1; then notify-send -u normal 'Knot Swarm Council' 'Prompt staged for $node_id. Run knot council copy to load clipboard.'; fi"
+        "$KNOT_BIN" exec "$node_id" "mkdir -p ~/.config/knot/missions/staged"
+        cat "$pfile" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/staged/active_prompt.md"
+        "$KNOT_BIN" exec "$node_id" "if command -v notify-send >/dev/null 2>&1; then notify-send -u normal 'Knot Swarm Council' 'Prompt staged for $node_id. Run knot council copy to load clipboard.'; fi"
       fi
     done
     echo ""

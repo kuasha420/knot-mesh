@@ -77,6 +77,9 @@ DEFAULT_CHUNKS = [
 
 def discover_online_nodes(knot_root):
     knot_bin = os.path.join(knot_root, "bin/knot")
+    if not os.path.isfile(knot_bin) or not os.access(knot_bin, os.X_OK):
+        import shutil
+        knot_bin = shutil.which("knot") or os.path.expanduser("~/.local/bin/knot")
     nodes = []
     try:
         out = subprocess.check_output([knot_bin, "status"], text=True, stderr=subprocess.DEVNULL)
@@ -90,6 +93,61 @@ def discover_online_nodes(knot_root):
     except Exception:
         nodes = ["desktop", "laptop", "rog-ally", "steamdeck"]
     return nodes if nodes else ["desktop"]
+
+def resolve_chunks(project_dir=None):
+    """
+    Dynamically derive codebase chunks. If project_dir is knot-mesh,
+    returns DEFAULT_CHUNKS. Otherwise discovers files and creates balanced chunks.
+    """
+    pdir = project_dir or os.getcwd()
+    if os.path.exists(os.path.join(pdir, "bin/knot")) and os.path.exists(os.path.join(pdir, "core/lib.sh")):
+        return DEFAULT_CHUNKS
+
+    git_files = []
+    try:
+        out = subprocess.check_output(["git", "-C", pdir, "ls-files"], text=True, stderr=subprocess.DEVNULL)
+        git_files = [line.strip() for line in out.splitlines() if line.strip()]
+    except Exception:
+        pass
+
+    if not git_files and os.path.isdir(pdir):
+        for root, dirs, files in os.walk(pdir):
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("node_modules", "target", "build", "dist")]
+            for f in files:
+                if not f.startswith("."):
+                    rel = os.path.relpath(os.path.join(root, f), pdir)
+                    git_files.append(rel)
+
+    if not git_files:
+        return DEFAULT_CHUNKS
+
+    groups = {}
+    for f in git_files:
+        parts = f.split(os.sep)
+        top = parts[0] if len(parts) > 1 else "root"
+        groups.setdefault(top, []).append(f)
+
+    sorted_groups = sorted(groups.items(), key=lambda x: len(x[1]), reverse=True)
+    chunks = []
+    for name, files in sorted_groups[:3]:
+        chunks.append({
+            "id": f"chunk_{name.lower()}",
+            "name": f"{name.capitalize()} Subsystem",
+            "paths": files[:6]
+        })
+
+    rest = [name for name, _ in sorted_groups[3:]]
+    if rest:
+        rest_files = []
+        for n in rest:
+            rest_files.extend(groups[n][:2])
+        chunks.append({
+            "id": "chunk_supporting",
+            "name": f"Supporting Infrastructure ({', '.join(rest[:4])})",
+            "paths": rest_files[:8]
+        })
+
+    return chunks if chunks else DEFAULT_CHUNKS
 
 def calculate_chunk_distribution(chunks, nodes, target_coverage=1.5):
     """
@@ -214,6 +272,7 @@ def main():
     parser = argparse.ArgumentParser(description="Swarm Council Prompt Scaffolder")
     parser.add_argument("--prompt", help="Base mission prompt text")
     parser.add_argument("--prompt-file", help="Path to file containing base mission prompt")
+    parser.add_argument("--project-dir", default="", help="Target project root directory")
     parser.add_argument("--pack", default="audit-parity", help="Template pack name")
     parser.add_argument("--run-id", default="", help="Optional run identifier")
     parser.add_argument("--discussion-url", default="https://github.com/kuasha420/knot-mesh/discussions", help="Discussion thread URL")
@@ -225,8 +284,9 @@ def main():
 
     args = parser.parse_args()
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    knot_root = os.path.abspath(os.path.join(script_dir, "../../.."))
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    knot_root = os.path.realpath(os.path.join(script_dir, "../../.."))
+    project_dir = args.project_dir or os.getcwd()
 
     # Load prompt
     if args.prompt_file:
@@ -260,8 +320,9 @@ def main():
     run_id = args.run_id or f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
     out_dir = args.out_dir or os.path.expanduser(f"~/.config/knot/missions/{run_id}")
 
-    # Chunk allocation
-    assignments, actual_coverage = calculate_chunk_distribution(DEFAULT_CHUNKS, nodes, coverage_ratio)
+    # Dynamic chunk allocation
+    chunks = resolve_chunks(project_dir)
+    assignments, actual_coverage = calculate_chunk_distribution(chunks, nodes, coverage_ratio)
 
     summary = {
         "run_id": run_id,
@@ -269,7 +330,7 @@ def main():
         "nodes": nodes,
         "target_coverage": coverage_ratio,
         "actual_coverage": round(actual_coverage, 2),
-        "chunk_count": len(DEFAULT_CHUNKS),
+        "chunk_count": len(chunks),
         "prompts_generated": {}
     }
 

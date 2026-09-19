@@ -273,5 +273,54 @@ fi
 rm -rf "$HOME/.config/knot/missions/$mock_run_interactive"
 echo "PASSED"
 
+# 14. Symlinked Skill Script Invocations & Global Hook Contract
+echo -n "14. Testing symlinked skill scripts and global hooks.json contract... "
+symlink_skill_dir="$HOME/.gemini/config/skills/swarm-council/scripts"
+if [ -d "$symlink_skill_dir" ]; then
+  sym_audit="$(bash "$symlink_skill_dir/audit_tools.sh" kuasha420/knot-mesh)"
+  sym_desktop="$(echo "$sym_audit" | jq -r '.nodes.desktop.status // empty')"
+  if [ "$sym_desktop" != "READY" ]; then
+    echo "FAILED (Symlinked audit_tools.sh did not resolve fleet nodes: $sym_audit)"
+    exit 1
+  fi
+
+  if [ -f "$HOME/.gemini/config/hooks.json" ]; then
+    hook_cmd="$(jq -r '.["swarm-council-coordinator"].PreInvocation[0].command' "$HOME/.gemini/config/hooks.json")"
+    hook_test="$(echo '{"invocationNum": 1}' | eval "$hook_cmd")"
+    if [ "$hook_test" != '{"injectSteps": []}' ]; then
+      echo "FAILED (Global hook failed arena isolation check: $hook_test)"
+      exit 1
+    fi
+  fi
+fi
+echo "PASSED"
+
+# 15. Multi-Project Portability & Dynamic Codebase Chunking
+echo -n "15. Testing dynamic chunking and repo auto-detection on external project... "
+purr_dir="/home/kuasha/Dev/purr"
+if [ -d "$purr_dir" ]; then
+  # Test auto-detection in audit_tools.sh
+  purr_audit="$(cd "$purr_dir" && bash "$COUNCIL_SCRIPTS/audit_tools.sh")"
+  purr_repo="$(echo "$purr_audit" | jq -r '.target_repo')"
+  if [ "$purr_repo" != "kuasha420/purr" ]; then
+    echo "FAILED (Expected target_repo kuasha420/purr, got: $purr_repo)"
+    exit 1
+  fi
+
+  # Test dynamic chunking in scaffolder.py
+  purr_scaffold="$(python3 "$COUNCIL_SCRIPTS/scaffolder.py" --project-dir "$purr_dir" --dry-run)"
+  purr_cov="$(echo "$purr_scaffold" | jq -r '.actual_coverage')"
+  if (( $(echo "$purr_cov < 1.4 || $purr_cov > 1.6" | bc -l) )); then
+    echo "FAILED (Actual coverage on purr $purr_cov out of range 1.4-1.6)"
+    exit 1
+  fi
+  # Verify no knot-mesh files leaked into purr chunks
+  if echo "$purr_scaffold" | grep -q "Core Runtime & Network Resolution"; then
+    echo "FAILED (knot-mesh chunk leaked into external project scaffolding)"
+    exit 1
+  fi
+fi
+echo "PASSED"
+
 echo ""
-echo "=== All 13 Swarm Council Tests PASSED Successfully! ==="
+echo "=== All 15 Swarm Council Tests PASSED Successfully! ==="
