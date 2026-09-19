@@ -3,7 +3,9 @@ import {
   Activity,
   ChevronDown,
   FolderGit2,
+  Gamepad2,
   GitBranch,
+  Kanban,
   KeyRound,
   LayoutGrid,
   MessageSquare,
@@ -32,6 +34,9 @@ export interface HeaderProps {
   onReleaseWakeHold?: () => Promise<boolean>;
   models?: SwarmModelsState | null;
   onSelectSwarmModel?: (model: string, nodeId?: string, applyToAll?: boolean) => void;
+  handheldMode?: boolean;
+  onToggleHandheld?: () => void;
+  gamepadConnected?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -49,6 +54,9 @@ export const Header: React.FC<HeaderProps> = ({
   onReleaseWakeHold,
   models,
   onSelectSwarmModel,
+  handheldMode = false,
+  onToggleHandheld,
+  gamepadConnected = false,
 }) => {
   const [isPowerMenuOpen, setIsPowerMenuOpen] = useState(false);
   const powerMenuRef = useRef<HTMLDivElement | null>(null);
@@ -200,6 +208,19 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           <button
+            onClick={() => onViewModeChange('kanban')}
+            title="Blackboard Kanban Board"
+            className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-md transition-all ${
+              viewMode === 'kanban'
+                ? 'bg-night-panel text-night-cyan font-bold shadow-sm border border-night-cyan/40'
+                : 'text-night-muted hover:text-night-text'
+            }`}
+          >
+            <Kanban className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Kanban</span>
+          </button>
+
+          <button
             onClick={() => onViewModeChange('artifacts')}
             title="Artifact Leases Vault"
             className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-md transition-all ${
@@ -253,6 +274,32 @@ export const Header: React.FC<HeaderProps> = ({
             {activeTasks} <span className="hidden md:inline">TASKS</span>
           </span>
         </div>
+
+        {/* Handheld / Gamepad Mode Badge */}
+        {onToggleHandheld && (
+          <button
+            onClick={onToggleHandheld}
+            className={`flex items-center space-x-1 px-1.5 sm:px-2 py-0.5 rounded font-mono text-[10px] sm:text-xs font-semibold border transition-all ${
+              handheldMode
+                ? 'bg-night-surface text-night-cyan border-night-cyan/50 shadow-[0_0_8px_rgba(6,182,212,0.3)]'
+                : 'bg-night-surface text-night-muted border-night-border hover:text-night-text'
+            }`}
+            title={
+              gamepadConnected
+                ? 'Gamepad Connected • Click to toggle 1280x800 Handheld Mode'
+                : 'Click to toggle 1280x800 Handheld Mode'
+            }
+          >
+            <Gamepad2
+              className={`w-3 h-3 ${
+                gamepadConnected ? 'text-night-cyan animate-pulse' : 'text-night-muted'
+              }`}
+            />
+            <span className="hidden lg:inline">
+              {handheldMode ? 'DECK 1280x800' : 'HANDHELD'}
+            </span>
+          </button>
+        )}
 
         {/* Swarm Power & Sleep Inhibitor Lock Badge & Dropdown */}
         <div className="relative" ref={powerMenuRef}>

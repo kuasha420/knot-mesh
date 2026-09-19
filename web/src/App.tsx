@@ -4,8 +4,10 @@ import { TopologyRadar } from './components/radar/TopologyRadar';
 import { SwarmChat } from './components/chat/SwarmChat';
 import { DagMatrix } from './components/dag/DagMatrix';
 import { ArtifactVault } from './components/artifacts/ArtifactVault';
+import { BlackboardKanban } from './components/BlackboardKanban';
 import { useKnotStore } from './hooks/useKnotSSE';
-import { GitBranch, KeyRound } from 'lucide-react';
+import { useGamepadNavigation } from './hooks/useGamepadNavigation';
+import { GitBranch, Kanban, KeyRound } from 'lucide-react';
 import type { CockpitViewMode } from './types/knot';
 
 export const App: React.FC = () => {
@@ -41,7 +43,7 @@ export const App: React.FC = () => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const urlView = params.get('view') as CockpitViewMode | null;
-      if (urlView && ['grid', 'chat', 'radar', 'dag', 'artifacts'].includes(urlView)) {
+      if (urlView && ['grid', 'chat', 'radar', 'dag', 'kanban', 'artifacts'].includes(urlView)) {
         return urlView;
       }
       if (window.innerWidth < 1280) {
@@ -51,11 +53,11 @@ export const App: React.FC = () => {
     return 'grid';
   });
 
-  const [rightTab, setRightTabState] = useState<'dag' | 'artifacts'>(() => {
+  const [rightTab, setRightTabState] = useState<'dag' | 'kanban' | 'artifacts'>(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const urlTab = params.get('tab');
-      if (urlTab === 'dag' || urlTab === 'artifacts') {
+      if (urlTab === 'dag' || urlTab === 'kanban' || urlTab === 'artifacts') {
         return urlTab;
       }
     }
@@ -95,8 +97,8 @@ export const App: React.FC = () => {
     try {
       localStorage.setItem('knot_cockpit_sidebar_left', String(initial));
       localStorage.setItem('knot_cockpit_sidebar_right', String(initial));
-    } catch {
-      // Ignored
+    } catch (err) {
+      console.warn('Failed to save sidebar widths to localStorage:', err);
     }
   };
 
@@ -123,16 +125,16 @@ export const App: React.FC = () => {
         setIsDraggingLeft(false);
         try {
           localStorage.setItem('knot_cockpit_sidebar_left', String(leftWidth));
-        } catch {
-          // Ignored
+        } catch (err) {
+          console.warn('Failed to save left sidebar width:', err);
         }
       }
       if (isDraggingRight) {
         setIsDraggingRight(false);
         try {
           localStorage.setItem('knot_cockpit_sidebar_right', String(rightWidth));
-        } catch {
-          // Ignored
+        } catch (err) {
+          console.warn('Failed to save right sidebar width:', err);
         }
       }
     };
@@ -176,10 +178,41 @@ export const App: React.FC = () => {
     updateUrlParams({ view: mode });
   };
 
-  const setRightTab = (tab: 'dag' | 'artifacts') => {
+  const setRightTab = (tab: 'dag' | 'kanban' | 'artifacts') => {
     setRightTabState(tab);
     updateUrlParams({ tab });
   };
+
+  const ALL_VIEWS: CockpitViewMode[] = ['grid', 'chat', 'radar', 'dag', 'kanban', 'artifacts'];
+
+  const handleNextView = useCallback(() => {
+    setViewModeState((curr) => {
+      const idx = ALL_VIEWS.indexOf(curr);
+      const next = ALL_VIEWS[(idx + 1) % ALL_VIEWS.length];
+      updateUrlParams({ view: next });
+      return next;
+    });
+  }, [updateUrlParams]);
+
+  const handlePrevView = useCallback(() => {
+    setViewModeState((curr) => {
+      const idx = ALL_VIEWS.indexOf(curr);
+      const prev = ALL_VIEWS[(idx - 1 + ALL_VIEWS.length) % ALL_VIEWS.length];
+      updateUrlParams({ view: prev });
+      return prev;
+    });
+  }, [updateUrlParams]);
+
+  const {
+    gamepadConnected,
+    handheldMode,
+    toggleHandheldMode,
+  } = useGamepadNavigation({
+    onNextView: handleNextView,
+    onPrevView: handlePrevView,
+    onRefreshAction: () => void refreshAll(),
+    enabled: true,
+  });
 
   // Initial mount: Restore channel and project from deep linked URL if provided
   const initialDeepLinkHandled = useRef(false);
@@ -216,11 +249,11 @@ export const App: React.FC = () => {
     const handlePopState = () => {
       const params = new URLSearchParams(window.location.search);
       const urlView = params.get('view') as CockpitViewMode | null;
-      if (urlView && ['grid', 'chat', 'radar', 'dag', 'artifacts'].includes(urlView)) {
+      if (urlView && ['grid', 'chat', 'radar', 'dag', 'kanban', 'artifacts'].includes(urlView)) {
         setViewModeState(urlView);
       }
-      const urlTab = params.get('tab');
-      if (urlTab === 'dag' || urlTab === 'artifacts') {
+      const urlTab = params.get('tab') as 'dag' | 'kanban' | 'artifacts' | null;
+      if (urlTab && ['dag', 'kanban', 'artifacts'].includes(urlTab)) {
         setRightTabState(urlTab);
       }
       const urlProject = params.get('project');
@@ -238,7 +271,11 @@ export const App: React.FC = () => {
   }, [activeProjectId, activeConvId, selectProject, selectConversation]);
 
   return (
-    <div className="h-dvh max-h-dvh flex flex-col bg-night-bg text-night-text selection:bg-night-blue selection:text-night-bg overflow-hidden">
+    <div
+      className={`h-dvh max-h-dvh flex flex-col bg-night-bg text-night-text selection:bg-night-blue selection:text-night-bg overflow-hidden ${
+        handheldMode ? 'knot-handheld-scaling' : ''
+      }`}
+    >
       <Header
         connectionState={connectionState}
         nodes={nodes}
@@ -257,6 +294,9 @@ export const App: React.FC = () => {
         onReleaseWakeHold={releaseSwarmWakeHold}
         models={models}
         onSelectSwarmModel={(model, nodeId, applyToAll) => void setSwarmModel(model, nodeId, applyToAll)}
+        handheldMode={handheldMode}
+        onToggleHandheld={toggleHandheldMode}
+        gamepadConnected={gamepadConnected}
       />
 
       {/* Main Responsive Viewport */}
@@ -363,7 +403,7 @@ export const App: React.FC = () => {
                   <div className="flex-none flex border-b border-night-border bg-night-panel/60 p-1">
                     <button
                       onClick={() => setRightTab('dag')}
-                      className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-all truncate ${
+                      className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-mono font-bold flex items-center justify-center gap-1 transition-all truncate ${
                         rightTab === 'dag'
                           ? 'bg-night-surface text-night-cyan shadow-sm border border-night-cyan/30'
                           : 'text-night-muted hover:text-night-text'
@@ -371,11 +411,23 @@ export const App: React.FC = () => {
                       title="Directed Acyclic Graph Task Matrix"
                     >
                       <GitBranch className="w-3.5 h-3.5 shrink-0" />
-                      <span className="truncate">DAG Tasks ({tasks.length})</span>
+                      <span className="truncate">DAG ({tasks.length})</span>
+                    </button>
+                    <button
+                      onClick={() => setRightTab('kanban')}
+                      className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-mono font-bold flex items-center justify-center gap-1 transition-all truncate ${
+                        rightTab === 'kanban'
+                          ? 'bg-night-surface text-night-cyan shadow-sm border border-night-cyan/30'
+                          : 'text-night-muted hover:text-night-text'
+                      }`}
+                      title="Blackboard Kanban Board"
+                    >
+                      <Kanban className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">Kanban</span>
                     </button>
                     <button
                       onClick={() => setRightTab('artifacts')}
-                      className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-all truncate ${
+                      className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-mono font-bold flex items-center justify-center gap-1 transition-all truncate ${
                         rightTab === 'artifacts'
                           ? 'bg-night-surface text-night-yellow shadow-sm border border-night-yellow/30'
                           : 'text-night-muted hover:text-night-text'
@@ -391,6 +443,8 @@ export const App: React.FC = () => {
                   <div className="flex-1 min-h-0 overflow-hidden">
                     {rightTab === 'dag' ? (
                       <DagMatrix tasks={tasks} embedded />
+                    ) : rightTab === 'kanban' ? (
+                      <BlackboardKanban tasks={tasks} nodes={nodes} onRefresh={() => void refreshAll()} embedded />
                     ) : (
                       <ArtifactVault
                         leases={leases}
@@ -408,7 +462,7 @@ export const App: React.FC = () => {
                 <div className="flex-none flex border-b border-night-border bg-night-panel/60 p-1">
                   <button
                     onClick={() => setRightTab('dag')}
-                    className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-all truncate ${
+                    className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-mono font-bold flex items-center justify-center gap-1 transition-all truncate ${
                       rightTab === 'dag'
                         ? 'bg-night-surface text-night-cyan shadow-sm border border-night-cyan/30'
                         : 'text-night-muted hover:text-night-text'
@@ -416,11 +470,23 @@ export const App: React.FC = () => {
                     title="Directed Acyclic Graph Task Matrix"
                   >
                     <GitBranch className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate">DAG Tasks ({tasks.length})</span>
+                    <span className="truncate">DAG ({tasks.length})</span>
+                  </button>
+                  <button
+                    onClick={() => setRightTab('kanban')}
+                    className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-mono font-bold flex items-center justify-center gap-1 transition-all truncate ${
+                      rightTab === 'kanban'
+                        ? 'bg-night-surface text-night-cyan shadow-sm border border-night-cyan/30'
+                        : 'text-night-muted hover:text-night-text'
+                    }`}
+                    title="Blackboard Kanban Board"
+                  >
+                    <Kanban className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">Kanban</span>
                   </button>
                   <button
                     onClick={() => setRightTab('artifacts')}
-                    className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-all truncate ${
+                    className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-mono font-bold flex items-center justify-center gap-1 transition-all truncate ${
                       rightTab === 'artifacts'
                         ? 'bg-night-surface text-night-yellow shadow-sm border border-night-yellow/30'
                         : 'text-night-muted hover:text-night-text'
@@ -434,6 +500,8 @@ export const App: React.FC = () => {
                 <div className="flex-1 min-h-0 overflow-hidden">
                   {rightTab === 'dag' ? (
                     <DagMatrix tasks={tasks} embedded />
+                  ) : rightTab === 'kanban' ? (
+                    <BlackboardKanban tasks={tasks} nodes={nodes} onRefresh={() => void refreshAll()} embedded />
                   ) : (
                     <ArtifactVault
                       leases={leases}
@@ -486,6 +554,16 @@ export const App: React.FC = () => {
         {viewMode === 'dag' && (
           <div className="flex-1 min-h-0 h-full w-full max-w-5xl mx-auto overflow-hidden flex flex-col">
             <DagMatrix tasks={tasks} />
+          </div>
+        )}
+
+        {viewMode === 'kanban' && (
+          <div className="flex-1 min-h-0 h-full w-full max-w-[2560px] 2xl:max-w-[3440px] mx-auto overflow-hidden flex flex-col">
+            <BlackboardKanban
+              tasks={tasks}
+              nodes={nodes}
+              onRefresh={() => void refreshAll()}
+            />
           </div>
         )}
 

@@ -185,3 +185,27 @@ body {
   animation: shimmer 2s infinite linear;
 }
 
+/* Steam Deck & ROG Ally 7-inch Handheld (1280x800) Mode Optimizations */
+@media screen and (max-width: 1280px) and (max-height: 800px), (pointer: coarse) {
+  .knot-handheld-scaling button,
+  .knot-handheld-scaling a,
+  .knot-handheld-scaling input,
+  .knot-handheld-scaling select {
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+}
+
+.knot-handheld-scaling {
+  --handheld-target-min: 44px;
+}
+
+.knot-handheld-scaling button,
+.knot-handheld-scaling select {
+  touch-action: manipulation;
+}
+
+.knot-handheld-viewport {
+  font-size: 0.95rem;
+}
+
