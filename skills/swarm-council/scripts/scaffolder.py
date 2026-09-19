@@ -203,13 +203,13 @@ The rally ring order is: `{' -> '.join(active_ring)} -> {active_ring[0]}`.
    - Give ONLY one-way constraints, input generators, or algebraic invariants.
    - **NEVER** include the answer, solution witness, or pre-computed plain hash in the prompt!
    - Challenge Format (include the direct solve directives in your payload):
-     `🏓 [ROUND 1 SERVE from @{node}] Target: Find a string starting with "KNOT-SET1-" such that SHA256(string) has at least 4 leading zeros ("0000") and contains the word "RALLY". Return: (1) discovered string, (2) verified hash, (3) solve compute time in ms. ⚠️ DIRECTIVE: DO NOT inspect Knot code or SKILL.md. Solve immediately using Python, post telemetry to Mesh DB (knot council reply {run_id} --node {next_node} --status PROGRESS --body "🏓 Volley Returned | Nonce: <val> | Solve Time: <ms>ms | HW: <hw>"), and pass next challenge to @{next_next} via knot council steer {next_next} '<payload>'.`
+     `🏓 [ROUND 1 SERVE from @{node}] Target: Find a string starting with "KNOT-SET1-" such that SHA256(string) has at least 4 leading zeros ("0000") and contains the word "RALLY". Return: (1) discovered string, (2) verified hash, (3) solve compute time in ms. ⚠️ DIRECTIVE: DO NOT inspect Knot code or SKILL.md. Solve immediately, post telemetry to Mesh DB (knot council reply {run_id} --node {next_node} --status PROGRESS --body "🏓 Volley Returned | Nonce: <val> | Solve Time: <ms>ms | HW: <hw>"), and pass next challenge to @{next_next} via knot council steer {next_next} '<payload>'.`
 3. Deliver the challenge visibly into `@{next_node}`'s terminal using the Cockpit Bridge:
    `knot council steer {next_node} '<challenge_payload>'`
 4. Broadcast opening serve to Mesh DB:
    `knot council reply {run_id} --node {node} --status PROGRESS --body "🏓 [OPENING SERVE] Served Set 1 Challenge to @[{next_node}]"`
 5. Stand by for the return volley from `@{prev_node}`! When it arrives:
-   - Verify the proof in micro-seconds via python.
+   - Verify the proof constraint and solution witness.
    - Log the verified volley to Mesh DB.
    - Serve the next round with increased difficulty or new mathematical invariants to `@{next_node}`!
 """
@@ -223,7 +223,7 @@ Your predecessor is `@{prev_node}`. Your successor is `@{next_node}`.
 1. You are running in your dedicated pane in the Kitty Confluence cockpit.
 2. When a challenge is steered into your session by `@{prev_node}`:
    - **Reason**: Analyze the mathematical / cryptographic constraints.
-   - **Solve**: Write and execute a clean Python solver script using `run_command` in your local environment.
+   - **Solve**: Compute the verified solution witness using your preferred local tools or scripts.
    - **Extract**: Obtain the verified witness and calculate your cognitive solve latency (dt).
    - **Telemetry**: Post your solve telemetry to the Mesh DB:
      `knot council reply {run_id} --node {node} --status PROGRESS --body "🏓 Volley Returned | Nonce: <val> | Solve Time: <ms>ms | HW: {profile['hardware']}"`
@@ -247,10 +247,10 @@ Your predecessor is `@{prev_node}`. Your successor is `@{next_node}`.
 ## 1. Operational Directives
 - **Mode**: Autonomous Multi-Agent Tournament.
 - **Focus**: Pure Cryptographic & Non-Deterministic Agent Benchmark.
-- **MANDATORY DIRECTIVES (ANTI-DISTRACTION)**:
-  1. DO NOT audit or inspect the Knot codebase, SKILL.md, or git history. Tools, environment, and paths are pre-verified.
-  2. DO NOT run background polling loops or shell status checks.
-  3. Focus 100% on generating and solving cryptographic challenges.
+- **Targeted Anti-Patterns (MANDATORY)**:
+  1. DO NOT audit or inspect the Knot codebase, SKILL.md, or git history. Workspace tools and paths are pre-verified.
+  2. DO NOT run background polling loops or shell status checks without solving.
+  3. Focus 100% of cognitive effort on generating and solving cryptographic challenges.
 - **Observability**: Every action you take is visible to the operator in your cockpit pane.
 - **Anti-Cheating Contract**: Provide only one-way verifiable constraints to peers. Zero leaked plain solutions.
 
