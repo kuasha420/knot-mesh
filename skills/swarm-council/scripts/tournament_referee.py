@@ -196,8 +196,8 @@ def main():
                     seen_ids.add(msg_id)
 
                     if node_id in state.nodes and "Volley Returned" in body:
-                        ms_match = re.search(r"Solve Time:\s*([\d\.]+)ms", body)
-                        proof_match = re.search(r"Nonce/Proof:\s*(\S+)", body)
+                        ms_match = re.search(r"Solve Time:\s*([\d\.]+)\s*(?:ms)?", body)
+                        proof_match = re.search(r"(?:Nonce/Proof|Nonce|Proof):\s*(\S+)", body)
                         solve_ms = float(ms_match.group(1)) if ms_match else 500.0
                         proof = proof_match.group(1) if proof_match else ""
 

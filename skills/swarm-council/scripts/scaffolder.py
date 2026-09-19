@@ -193,6 +193,7 @@ def scaffold_tournament_prompt(node, nodes, run_id, discussion_url, db="mesh"):
 
     if node == active_ring[0]:
         role_header = f"🏆 TOURNAMENT MASTER & OPENING SERVER (@[{node}])"
+        next_next = active_ring[(idx + 2) % len(active_ring)]
         task_directive = f"""You are the **Opening Server & Tournament Master** for this 5-minute Cryptographic Agent Rally!
 The rally ring order is: `{' -> '.join(active_ring)} -> {active_ring[0]}`.
 
@@ -201,8 +202,8 @@ The rally ring order is: `{' -> '.join(active_ring)} -> {active_ring[0]}`.
 2. Adhere strictly to the **Anti-Cheating Contract**:
    - Give ONLY one-way constraints, input generators, or algebraic invariants.
    - **NEVER** include the answer, solution witness, or pre-computed plain hash in the prompt!
-   - Example challenge format:
-     `"🏓 [ROUND 1 SERVE from @{node}] Target: Find a string starting with 'KNOT-SET1-' such that SHA256(string) has at least 4 leading zeros ('0000') and contains the word 'RALLY'. Return: (1) discovered string, (2) verified hash, (3) solve compute time in ms."`
+   - Challenge Format (include the direct solve directives in your payload):
+     `🏓 [ROUND 1 SERVE from @{node}] Target: Find a string starting with "KNOT-SET1-" such that SHA256(string) has at least 4 leading zeros ("0000") and contains the word "RALLY". Return: (1) discovered string, (2) verified hash, (3) solve compute time in ms. ⚠️ DIRECTIVE: DO NOT inspect Knot code or SKILL.md. Solve immediately using Python, post telemetry to Mesh DB (knot council reply {run_id} --node {next_node} --status PROGRESS --body "🏓 Volley Returned | Nonce: <val> | Solve Time: <ms>ms | HW: <hw>"), and pass next challenge to @{next_next} via knot council steer {next_next} '<payload>'.`
 3. Deliver the challenge visibly into `@{next_node}`'s terminal using the Cockpit Bridge:
    `knot council steer {next_node} '<challenge_payload>'`
 4. Broadcast opening serve to Mesh DB:
@@ -210,7 +211,7 @@ The rally ring order is: `{' -> '.join(active_ring)} -> {active_ring[0]}`.
 5. Stand by for the return volley from `@{prev_node}`! When it arrives:
    - Verify the proof in micro-seconds via python.
    - Log the verified volley to Mesh DB.
-   - Serve the next round with increased difficulty or new mathematical invariants!
+   - Serve the next round with increased difficulty or new mathematical invariants to `@{next_node}`!
 """
     else:
         role_header = f"⚡ TOURNAMENT RALLY PLAYER & INDEPENDENT VERIFIER (@[{node}])"
@@ -225,7 +226,7 @@ Your predecessor is `@{prev_node}`. Your successor is `@{next_node}`.
    - **Solve**: Write and execute a clean Python solver script using `run_command` in your local environment.
    - **Extract**: Obtain the verified witness and calculate your cognitive solve latency (dt).
    - **Telemetry**: Post your solve telemetry to the Mesh DB:
-     `knot council reply {run_id} --node {node} --status PROGRESS --body "🏓 Volley Returned | Nonce/Proof: <val> | Solve Time: <ms> | HW: <fingerprint>"`
+     `knot council reply {run_id} --node {node} --status PROGRESS --body "🏓 Volley Returned | Nonce: <val> | Solve Time: <ms>ms | HW: {profile['hardware']}"`
    - **Pass**: Synthesize the next dynamic one-way challenge and pass it to your successor `@{next_node}`:
      `knot council steer {next_node} '<new_challenge_payload>'`
    - **Anti-Cheating Contract**: Never give `@{next_node}` the solution! Provide only one-way constraints.
@@ -245,6 +246,11 @@ Your predecessor is `@{prev_node}`. Your successor is `@{next_node}`.
 
 ## 1. Operational Directives
 - **Mode**: Autonomous Multi-Agent Tournament.
+- **Focus**: Pure Cryptographic & Non-Deterministic Agent Benchmark.
+- **MANDATORY DIRECTIVES (ANTI-DISTRACTION)**:
+  1. DO NOT audit or inspect the Knot codebase, SKILL.md, or git history. Tools, environment, and paths are pre-verified.
+  2. DO NOT run background polling loops or shell status checks.
+  3. Focus 100% on generating and solving cryptographic challenges.
 - **Observability**: Every action you take is visible to the operator in your cockpit pane.
 - **Anti-Cheating Contract**: Provide only one-way verifiable constraints to peers. Zero leaked plain solutions.
 

@@ -251,7 +251,7 @@ All node checkpoints and final audit deliverables will be posted here."
   # Save run metadata
   local missions_dir="$HOME/.config/knot/missions/$run_id"
   mkdir -p "$missions_dir"
-  echo "{\"run_id\":\"$run_id\",\"disc_id\":\"$disc_id\",\"disc_url\":\"$disc_url\",\"mode\":\"$mode\",\"project\":\"$proj_name\",\"db\":\"$db\",\"tiling\":\"$tiling\",\"interactive\":$interactive,\"nodes\":\"$nodes\",\"status\":\"ACTIVE\",\"created_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$missions_dir/meta.json"
+  echo "{\"run_id\":\"$run_id\",\"disc_id\":\"$disc_id\",\"disc_url\":\"$disc_url\",\"mode\":\"$mode\",\"project\":\"$proj_name\",\"db\":\"$db\",\"tiling\":\"$tiling\",\"pack\":\"$pack\",\"anchor\":\"desktop\",\"interactive\":$interactive,\"nodes\":\"$nodes\",\"status\":\"ACTIVE\",\"created_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$missions_dir/meta.json"
 
   if [ $dry_run -eq 1 ]; then
     if [ $interactive -eq 1 ]; then
@@ -425,8 +425,13 @@ council_steer() {
     my_h="$(knot_detect_hostname 2>/dev/null || uname -n | cut -d. -f1)"
     if [ "$my_h" != "$anchor" ] && command -v knot >/dev/null 2>&1; then
       if knot exec "$anchor" "test -S /tmp/kitty-council-$run_id.sock" >/dev/null 2>&1; then
-        knot exec "$anchor" "knot council steer '$node' $(printf %q "$prompt_text") '$run_id'"
-        return $?
+        if printf '%s\r' "$prompt_text" | knot exec "$anchor" "kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-text --match 'title:.*${node}.*' --stdin" >/dev/null 2>&1; then
+          knot_log_ok "Steered node '@$node' via Cockpit Bridge Relay to @$anchor (Run: $run_id)"
+          return 0
+        else
+          knot_log_err "Remote steer relay to @$anchor failed for node '$node'"
+          return 1
+        fi
       fi
     fi
     knot_log_err "Kitty control socket not found for run '$run_id' at $sock."
@@ -434,9 +439,9 @@ council_steer() {
     return 1
   fi
 
-  # Send text to target node's pane via Kitty remote control socket
+  # Send text to target node's pane via Kitty remote control socket using stdin
   # Matches window title containing the node name (e.g. title:.*laptop.*)
-  if kitty @ --to "unix:$sock" send-text --match "title:.*${node}.*" "${prompt_text}\r" >/dev/null 2>&1; then
+  if printf '%s\r' "$prompt_text" | kitty @ --to "unix:$sock" send-text --match "title:.*${node}.*" --stdin >/dev/null 2>&1; then
     knot_log_ok "Steered node '@$node' via Cockpit Bridge (Run: $run_id)"
     return 0
   else
@@ -651,6 +656,13 @@ council_kill() {
   if pgrep -f "$run_id.*kitty" >/dev/null 2>&1; then
     pkill -f "$run_id.*kitty"
   fi
-  "$KNOT_ROOT/bin/knot" exec --all "if pgrep -f knot-council-$run_id >/dev/null 2>&1; then pkill -f knot-council-$run_id; fi"
+  if pgrep -f "kitty.*$run_id" >/dev/null 2>&1; then
+    pkill -f "kitty.*$run_id"
+  fi
+  if pgrep -f "$run_id" >/dev/null 2>&1; then
+    pkill -f "$run_id"
+  fi
+  rm -f "/tmp/kitty-council-$run_id.sock"
+  "$KNOT_ROOT/bin/knot" exec --all "if pgrep -f $run_id >/dev/null 2>&1; then pkill -f $run_id; fi"
   knot_log_ok "Council run $run_id halted across fleet."
 }

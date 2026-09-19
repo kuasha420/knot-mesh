@@ -57,12 +57,70 @@ case "$MODE" in
       "${local_conf_cmd[@]}"
     else
       echo "==> Staging prompt files and launchers across mesh..."
+      local pack=""
+      if [ -f "$MISSIONS_DIR/meta.json" ]; then
+        pack="$(jq -r '.pack // ""' "$MISSIONS_DIR/meta.json")"
+      fi
+
       for pfile in "$MISSIONS_DIR"/*_prompt.md; do
         [ -f "$pfile" ] || continue
         node_id="$(basename "$pfile" | sed 's/_prompt.md//')"
         
         launcher_script="$MISSIONS_DIR/${node_id}_launch.sh"
-        cat << 'EOF_LAUNCH' > "$launcher_script"
+        if [ "$pack" = "tournament" ] && [ "$node_id" != "desktop" ] && [ "$node_id" != "localhost" ] && [ "$node_id" != "$(hostname -s)" ]; then
+          cat << 'EOF_LAUNCH' > "$launcher_script"
+#!/usr/bin/env bash
+trap '' HUP
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:$PATH"
+export KNOT_NODE_ID="NODE_ID_PLACEHOLDER"
+PROJECT_NAME="PROJECT_PLACEHOLDER"
+
+PROJECT_DIR="$(python3 -c '
+import sys, os, glob, json
+home = os.path.expanduser("~")
+pname = sys.argv[1].lower() if len(sys.argv) > 1 else ""
+pdir = os.path.join(home, ".gemini/config/projects")
+res = ""
+if os.path.isdir(pdir):
+    for f in glob.glob(os.path.join(pdir, "*.json")):
+        try:
+            with open(f) as jf:
+                d = json.load(jf)
+            if d.get("name", "").lower() == pname or d.get("id", "").lower() == pname:
+                for r in d.get("projectResources", {}).get("resources", []):
+                    u = r.get("gitFolder", {}).get("folderUri", "")
+                    if u.startswith("file://"):
+                        p = u[7:].rstrip("/")
+                        if os.path.isdir(p):
+                            res = p; break
+                        b = os.path.basename(p)
+                        for c in [os.path.join(home, "Dev", b), os.path.join(home, b), os.path.join(home, ".local/share", b)]:
+                            if os.path.isdir(c):
+                                res = c; break
+                if res: break
+        except Exception: pass
+if not res:
+    for c in [os.path.join(home, "Dev", pname), os.path.join(home, pname), os.path.join(home, ".local/share", pname)]:
+        if os.path.isdir(c):
+            res = c; break
+print(res or os.getcwd())
+' "$PROJECT_NAME")"
+
+if [ -d "$PROJECT_DIR" ]; then
+  cd "$PROJECT_DIR"
+fi
+echo -e "\033[1;36m╔══════════════════════════════════════════════════════════════════════╗\033[0m"
+echo -e "\033[1;36m║\033[0m  🛰️  \033[1mKnot Swarm Tournament Rally Player: @[NODE_ID_PLACEHOLDER]\033[0m"
+echo -e "\033[1;36m║\033[0m  Project:   \033[33mPROJECT_PLACEHOLDER\033[0m"
+echo -e "\033[1;36m║\033[0m  Registry:  \033[35mknot://mesh/council/RUN_ID_PLACEHOLDER\033[0m"
+echo -e "\033[1;36m║\033[0m  Mode:      \033[32mZero-Token Standby (Awaiting challenge volley)\033[0m"
+echo -e "\033[1;36m║\033[0m  Commands:  \033[32mknot council reply\033[0m | \033[32mknot council steer\033[0m"
+echo -e "\033[1;36m╚══════════════════════════════════════════════════════════════════════╝\033[0m"
+echo ""
+exec agy --project "$PROJECT_NAME" --dangerously-skip-permissions
+EOF_LAUNCH
+        else
+          cat << 'EOF_LAUNCH' > "$launcher_script"
 #!/usr/bin/env bash
 trap '' HUP
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:$PATH"
@@ -106,6 +164,7 @@ if [ -d "$PROJECT_DIR" ]; then
 fi
 exec agy --project "$PROJECT_NAME" --dangerously-skip-permissions -i "$(< "$PROMPT_FILE")"
 EOF_LAUNCH
+        fi
         sed -i "s|RUN_ID_PLACEHOLDER|$RUN_ID|g" "$launcher_script"
         sed -i "s|PROJECT_PLACEHOLDER|$PROJECT|g" "$launcher_script"
         sed -i "s|NODE_ID_PLACEHOLDER|$node_id|g" "$launcher_script"

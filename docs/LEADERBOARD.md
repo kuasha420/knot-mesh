@@ -2,18 +2,18 @@
 
 > **Tournament Mission:** `run_20260920_030729_db7be4a2`  
 > **Arena:** Knot Mesh Confluence Cockpit (4 Nodes: `desktop`, `laptop`, `rog-ally`, `steamdeck`)  
-> **Total Execution Time:** 0s / 300s  
-> **Total Verified Hash Proofs:** 80  
-> **Peak Flawless Rally Streak:** 80 clean rounds (5.0x)
+> **Total Execution Time:** 0s / 1200s  
+> **Total Verified Hash Proofs:** 82  
+> **Peak Flawless Rally Streak:** 82 clean rounds (5.0x)
 
 ## 1. 🏆 Championship Podium Rankings
 
 | Rank | Badge | Workstation | Role | Final Score | Total Volleys | Aces (<10s) | Power Smashes (<5s) | Elegance |
 | :--- | :---: | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| **1** | 🥇 Gold Medal | `desktop` 🖥️ | The Anchor / High-Entropy Server | **14,650 pts** | 20 | 0 | 20 | 20 |
-| **2** | 🥈 Silver Medal | `laptop` 💻 | Worker Alpha / RTX 3050 CUDA Speedster | **14,650 pts** | 20 | 0 | 20 | 20 |
-| **3** | 🥉 Bronze Medal | `rog-ally` 🎮 | Worker Beta / AMD Z1 Extreme Burst Returner | **14,400 pts** | 20 | 0 | 20 | 20 |
-| **4** | 🎖️ 4th Place | `steamdeck` 🕹️ | Worker Gamma / SteamOS Low-Power Precision Volleyer | **14,300 pts** | 20 | 0 | 20 | 20 |
+| **1** | 🥇 Gold Medal | `rog-ally` 🎮 | Worker Beta / AMD Z1 Extreme Burst Returner | **15,650 pts** | 21 | 0 | 21 | 21 |
+| **2** | 🥈 Silver Medal | `steamdeck` 🕹️ | Worker Gamma / SteamOS Low-Power Precision Volleyer | **15,550 pts** | 21 | 0 | 21 | 21 |
+| **3** | 🥉 Bronze Medal | `desktop` 🖥️ | The Anchor / High-Entropy Server | **14,650 pts** | 20 | 0 | 20 | 20 |
+| **4** | 🎖️ 4th Place | `laptop` 💻 | Worker Alpha / RTX 3050 CUDA Speedster | **14,650 pts** | 20 | 0 | 20 | 20 |
 
 ---
 
@@ -21,10 +21,10 @@
 
 | Node ID | Fastest Return | Average Latency | Verified Proofs | Faults | Status |
 | :--- | :---: | :---: | :---: | :---: | :---: |
+| `@rog-ally` | **10.1ms** | 487.6ms | 21 | 0 | ✅ FLAWLESS |
+| `@steamdeck` | **50.8ms** | 1066.3ms | 21 | 0 | ✅ FLAWLESS |
 | `@desktop` | **0.0ms** | 779.9ms | 20 | 0 | ✅ FLAWLESS |
 | `@laptop` | **3.9ms** | 841.6ms | 20 | 0 | ✅ FLAWLESS |
-| `@rog-ally` | **10.1ms** | 447.1ms | 20 | 0 | ✅ FLAWLESS |
-| `@steamdeck` | **50.8ms** | 928.7ms | 20 | 0 | ✅ FLAWLESS |
 
 ---
 
