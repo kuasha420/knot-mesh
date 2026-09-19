@@ -21,6 +21,16 @@ import threading
 import time
 from typing import Dict, List, Optional, Set
 
+script_dir = os.path.dirname(os.path.abspath(__file__))
+knot_root = os.path.abspath(os.path.join(script_dir, ".."))
+if knot_root not in sys.path:
+    sys.path.insert(0, knot_root)
+
+try:
+    from core.palette import resolve_swarm_palette
+except ImportError:
+    resolve_swarm_palette = None
+
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtProperty, QUrl, QTimer
 from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlContext
@@ -268,6 +278,17 @@ class KnotStripDaemon(QObject):
         color_index = 0
         palette_len = len(DEFAULT_PALETTE)
 
+        dynamic_palette = {}
+        if resolve_swarm_palette:
+            try:
+                dynamic_palette = resolve_swarm_palette(
+                    swarm_id=self.swarm_name,
+                    topology_path=top_file,
+                    nodes_dir=nodes_dir
+                )
+            except Exception as e:
+                sys.stderr.write(f"[knot-stripd] Warning: failed to resolve dynamic palette: {e}\n")
+
         for edge_dir, edge_spec in anchor_layout.items():
             norm_edge = edge_dir.lower().strip()
             specs = edge_spec if isinstance(edge_spec, list) else [edge_spec]
@@ -308,17 +329,13 @@ class KnotStripDaemon(QObject):
                             except Exception as e:
                                 sys.stderr.write(f"[knot-stripd] Error reading lease {lfile}: {e}\n")
 
-                # Determine color
-                if node_data.get("strip_color"):
+                # Determine color dynamically with topological collision avoidance
+                if target_node in dynamic_palette:
+                    color = dynamic_palette[target_node].hex
+                elif node_data.get("strip_color"):
                     color = node_data["strip_color"]
                 elif node_data.get("color"):
                     color = node_data["color"]
-                elif "deck" in target_node.lower() or "handheld" in target_node.lower():
-                    color = "#ffaa00"
-                elif "purrfect" in target_node.lower():
-                    color = "#a855f7"
-                elif "devbox" in target_node.lower():
-                    color = "#00f0ff"
                 else:
                     color = DEFAULT_PALETTE[color_index % palette_len]
                     color_index += 1

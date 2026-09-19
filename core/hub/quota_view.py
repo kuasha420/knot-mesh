@@ -5,11 +5,22 @@ Renders 5-hour and weekly Google AI Pro/Ultra model limits with account identity
 subscription tier, token refresh status, progress bars, and reset countdowns.
 """
 
+import os
 import sys
 import json
 import re
 import urllib.request
 from datetime import datetime, timezone
+
+script_dir = os.path.dirname(os.path.abspath(__file__))
+knot_root = os.path.abspath(os.path.join(script_dir, "../.."))
+if knot_root not in sys.path:
+    sys.path.insert(0, knot_root)
+
+try:
+    from core.palette import resolve_swarm_palette
+except ImportError:
+    resolve_swarm_palette = None
 
 
 def render_bar(fraction: float | None, is_offline: bool = False, width: int = 10) -> str:
@@ -104,12 +115,13 @@ def main():
         "psl-0000": "rog-ally",
         "steamdeck-eos": "steamdeck",
     }
-    node_bullets = {
-        "desktop": "\033[38;2;168;85;247m●\033[0m",    # Neon Purple #A855F7
-        "laptop": "\033[38;2;0;240;255m●\033[0m",      # Cyber Cyan #00F0FF
-        "rog-ally": "\033[38;2;244;63;94m●\033[0m",    # Rose Flare #F43F5E
-        "steamdeck": "\033[38;2;255;170;0m●\033[0m",   # Amber Glow #FFAA00
-    }
+    # Resolve dynamic node palette
+    dynamic_palette = {}
+    if resolve_swarm_palette:
+        try:
+            dynamic_palette = resolve_swarm_palette(swarm_id="home")
+        except Exception:
+            pass
 
     deduped = {}
     for n in nodes:
@@ -158,7 +170,10 @@ def main():
 
     for n in nodes:
         nid = n.get("id", "unknown")
-        bullet = node_bullets.get(nid, f"{cyan}●{reset}")
+        if nid in dynamic_palette:
+            bullet = f"{dynamic_palette[nid].ansi}●{reset}"
+        else:
+            bullet = f"{cyan}●{reset}"
         status = n.get("status", "ONLINE")
         is_offline = (status == "OFFLINE")
         qdata = n.get("quota_data") or {}

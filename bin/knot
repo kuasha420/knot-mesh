@@ -544,6 +544,10 @@ cmd_council() {
   esac
 }
 
+cmd_color() {
+  python3 "$KNOT_ROOT/core/palette.py" "$@"
+}
+
 cmd_swarm() {
   local action="${1:-status}"
   if [ $# -gt 0 ]; then shift; fi
@@ -657,8 +661,11 @@ cmd_swarm() {
     auth)
       antigravity_swarm_auth "$@"
       ;;
+    color|colors|palette)
+      cmd_color "$@"
+      ;;
     *)
-      echo "Usage: knot swarm <status|quota [node|--all]|auth [node|--gui]|test [node|--all]|exec <node> \"<prompt>\">"
+      echo "Usage: knot swarm <status|quota [node|--all]|auth [node|--gui]|color [node]|test [node|--all]|exec <node> \"<prompt>\">"
       exit 1
       ;;
   esac
@@ -1273,6 +1280,10 @@ case "${1:-}" in
   swarm)
     shift
     cmd_swarm "$@"
+    ;;
+  color|palette)
+    shift
+    cmd_color "$@"
     ;;
   quota)
     shift
