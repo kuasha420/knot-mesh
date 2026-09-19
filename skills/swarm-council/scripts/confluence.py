@@ -54,10 +54,10 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
             ordered_nodes.append(n)
 
     descriptions = {
-        "desktop": "Anchor / Coordinator",
-        "laptop": "CUDA / Roaming Strand",
-        "rog-ally": "Handheld Strand (AMD APU)",
-        "steamdeck": "Handheld Strand (SteamOS APU)"
+        "desktop": ("🟣", "Anchor / Coordinator", "#A855F7"),
+        "laptop": ("🔵", "CUDA / Roaming Strand", "#00F0FF"),
+        "rog-ally": ("🔴", "Handheld Strand (AMD APU)", "#F43F5E"),
+        "steamdeck": ("🟠", "Gaming Handheld (SteamOS APU)", "#FFAA00")
     }
 
     try:
@@ -66,8 +66,9 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
         local_host = "desktop"
 
     for node in ordered_nodes:
-        desc = descriptions.get(node, "Strand Worker")
-        lines.append(f"title {node} ({desc})")
+        meta = descriptions.get(node, ("⚪", "Strand Worker", "#7047EB"))
+        emoji, desc, color = meta
+        lines.append(f"title {emoji} {node} ({desc})")
         if node in [local_host, "desktop", "localhost"]:
             cmd = f'{missions_dir}/launch.sh; exec bash'
         else:
@@ -115,7 +116,17 @@ def main():
         env.setdefault("DISPLAY", ":0")
         env.setdefault("WAYLAND_DISPLAY", "wayland-0")
         subprocess.Popen(
-            ["kitty", "--start-as=fullscreen", "--session", session_file],
+            [
+                "kitty",
+                "--start-as=fullscreen",
+                "-o", "font_size=9.0",
+                "-o", "window_border_width=3pt",
+                "-o", "window_margin_width=3",
+                "-o", "window_padding_width=8",
+                "-o", "active_border_color=#A855F7",
+                "-o", "inactive_border_color=#1E2238",
+                "--session", session_file
+            ],
             env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

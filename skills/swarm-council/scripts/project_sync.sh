@@ -104,15 +104,16 @@ for node in nodes:
                     pass
             node_res["folders"][folder_name] = {"path": folder, "exists": exists, "branch": branch, "commit": commit}
         else:
-            # Probe remote node
+            # Probe remote node across candidate directory roots
             pull_subcmd = "git pull --ff-only >/dev/null 2>&1 && " if do_pull else ""
-            remote_cmd = f"test -d ~/Dev/{folder_name} && (cd ~/Dev/{folder_name} && {pull_subcmd}git rev-parse --abbrev-ref HEAD && git rev-parse --short HEAD) || echo 'MISSING'"
+            remote_cmd = f"TARGET=\"\"; for c in ~/Dev/{folder_name} ~/{folder_name} ~/.local/share/{folder_name}; do if [ -d \"\$c\" ]; then TARGET=\"\$c\"; break; fi; done; if [ -n \"\$TARGET\" ]; then (cd \"\$TARGET\" && {pull_subcmd}git rev-parse --abbrev-ref HEAD && git rev-parse --short HEAD && echo \"\$TARGET\"); else echo 'MISSING'; fi"
             try:
                 rout = subprocess.check_output([knot_bin, "exec", node, remote_cmd], text=True, stderr=subprocess.DEVNULL).strip().splitlines()
                 if rout and rout[0] != "MISSING":
                     r_branch = rout[0] if len(rout) > 0 else "unknown"
                     r_commit = rout[1] if len(rout) > 1 else "unknown"
-                    node_res["folders"][folder_name] = {"path": f"~/Dev/{folder_name}", "exists": True, "branch": r_branch, "commit": r_commit}
+                    r_path = rout[2] if len(rout) > 2 else f"~/Dev/{folder_name}"
+                    node_res["folders"][folder_name] = {"path": r_path, "exists": True, "branch": r_branch, "commit": r_commit}
                 else:
                     node_res["folders"][folder_name] = {"path": f"~/Dev/{folder_name}", "exists": False, "branch": "", "commit": ""}
                     node_res["status"] = "MISSING_FOLDER"

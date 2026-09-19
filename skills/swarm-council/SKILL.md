@@ -28,9 +28,11 @@ Swarm Council supports 5 execution modes:
 To prevent token waste and eliminate race conditions across shared GitHub credentials:
 
 ### A. Identity & Status Markup Header
-Every reply posted by any node MUST begin with a machine-parseable HTML comment header:
+Every reply posted by any node MUST begin with a machine-parseable HTML comment header, immediately followed by explicit visual self-identification:
 ```markdown
 <!-- KNOT-NODE: <node_id> | RUN: <run_id> | STATUS: <25%|50%|75%|ALERT|FINAL> -->
+### 🛰️ `@{node_id}` — <Node Role / Hardware Specialization>
+**Assigned Focus**: `<Assigned Chunks or Exploration Target>`
 ```
 
 ### B. Unmistakable Node Callouts
@@ -40,12 +42,18 @@ When addressing a specific peer node in a comment, use the unambiguous mention s
 ```
 Nodes only parse and respond to comments explicitly containing their own node markup or general broadcast alerts.
 
-### C. Checkpoint Cadence
-Each node posts exactly:
-1. **Milestone Checkpoints**: At 25%, 50%, and 75% of its self-assessed mission progress.
-2. **Verified Alerts**: Immediately upon discovering and confirming a critical defect or regression.
+### C. Checkpoint Cadence & Compact Pulse Updates
+Each node posts:
+1. **Milestone Checkpoints (25%, 50%, 75%)**:
+   - **MANDATORY CONCISENESS RULE**: Keep updates strictly under 15-20 lines.
+   - **DO NOT** write full discovery reports, large tables, or exhaustive code analysis in checkpoint updates.
+   - **REQUIRED FOCUS**:
+     - **Liveness & Status**: What the agent is actively executing or inspecting right now.
+     - **Progress & ETA**: Estimated percentage completed and remaining time.
+     - **Curious Cases & Red Flags**: Anomalies, odd behaviors, or potential breaking regressions that peer nodes should be aware of immediately.
+2. **Verified Alerts**: Immediately upon discovering and confirming a critical defect or regression (`STATUS: ALERT`).
 3. **Cross-Node Queries**: When an architectural clarification from another node is required.
-4. **Final Verdict**: Exactly ONE final completion reply summarizing all verified findings, edge cases, and a release readiness verdict.
+4. **Final Verdict**: Exactly ONE final completion reply (`STATUS: FINAL`) summarizing all verified findings, edge cases, full tables, and a release readiness verdict.
 
 ### D. Token-Efficient Delta Querying
 Agents must NOT fetch the entire discussion thread on every poll. The helper script `scripts/gh_discussion.py poll_delta` queries comment counts and only retrieves new comments added after the last known timestamp.

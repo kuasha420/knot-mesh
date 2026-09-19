@@ -41,15 +41,49 @@ case "$MODE" in
 #!/usr/bin/env bash
 trap '' HUP
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:$PATH"
+export KNOT_NODE_ID="NODE_ID_PLACEHOLDER"
 PROMPT_FILE="$HOME/.config/knot/missions/RUN_ID_PLACEHOLDER/prompt.md"
-PROJECT_DIR="$HOME/Dev/PROJECT_PLACEHOLDER"
+PROJECT_NAME="PROJECT_PLACEHOLDER"
+
+PROJECT_DIR="$(python3 -c '
+import sys, os, glob, json
+home = os.path.expanduser("~")
+pname = sys.argv[1].lower() if len(sys.argv) > 1 else ""
+pdir = os.path.join(home, ".gemini/config/projects")
+res = ""
+if os.path.isdir(pdir):
+    for f in glob.glob(os.path.join(pdir, "*.json")):
+        try:
+            with open(f) as jf:
+                d = json.load(jf)
+            if d.get("name", "").lower() == pname or d.get("id", "").lower() == pname:
+                for r in d.get("projectResources", {}).get("resources", []):
+                    u = r.get("gitFolder", {}).get("folderUri", "")
+                    if u.startswith("file://"):
+                        p = u[7:].rstrip("/")
+                        if os.path.isdir(p):
+                            res = p; break
+                        b = os.path.basename(p)
+                        for c in [os.path.join(home, "Dev", b), os.path.join(home, b), os.path.join(home, ".local/share", b)]:
+                            if os.path.isdir(c):
+                                res = c; break
+                if res: break
+        except Exception: pass
+if not res:
+    for c in [os.path.join(home, "Dev", pname), os.path.join(home, pname), os.path.join(home, ".local/share", pname)]:
+        if os.path.isdir(c):
+            res = c; break
+print(res or os.getcwd())
+' "$PROJECT_NAME")"
+
 if [ -d "$PROJECT_DIR" ]; then
   cd "$PROJECT_DIR"
 fi
-exec agy --project PROJECT_PLACEHOLDER --dangerously-skip-permissions -i "$(< "$PROMPT_FILE")"
+exec agy --project "$PROJECT_NAME" --dangerously-skip-permissions -i "$(< "$PROMPT_FILE")"
 EOF_LAUNCH
       sed -i "s|RUN_ID_PLACEHOLDER|$RUN_ID|g" "$launcher_script"
       sed -i "s|PROJECT_PLACEHOLDER|$PROJECT|g" "$launcher_script"
+      sed -i "s|NODE_ID_PLACEHOLDER|$node_id|g" "$launcher_script"
       chmod +x "$launcher_script"
 
       if [ "$node_id" = "desktop" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(hostname -s)" ]; then
@@ -72,15 +106,17 @@ EOF_LAUNCH
       node_id="$(basename "$pfile" | sed 's/_prompt.md//')"
       echo "  [•] Dispatching to $node_id (headless)..."
       
+      resolve_cmd="python3 -c 'import sys, os, glob, json; home=os.path.expanduser(\"~\"); pname=sys.argv[1].lower(); pdir=os.path.join(home, \".gemini/config/projects\"); res=\"\"; [None for f in glob.glob(os.path.join(pdir, \"*.json\")) if not res and (lambda d: [setattr(sys.modules[__name__], \"res\", p if os.path.isdir(p) else next((c for b in [os.path.basename(p)] for c in [os.path.join(home, \"Dev\", b), os.path.join(home, b), os.path.join(home, \".local/share\", b)] if os.path.isdir(c)), \"\")) for r in d.get(\"projectResources\",{}).get(\"resources\",[]) for u in [r.get(\"gitFolder\",{}).get(\"folderUri\",\"\")] if u.startswith(\"file://\") for p in [u[7:].rstrip(\"/\")] if res==\"\"])(json.load(open(f))) if (lambda d: d.get(\"name\",\"\").lower()==pname or d.get(\"id\",\"\").lower()==pname)(json.load(open(f)))]; print(res or next((c for c in [os.path.join(home, \"Dev\", pname), os.path.join(home, pname), os.path.join(home, \".local/share\", pname)] if os.path.isdir(c)), os.getcwd()))' '$PROJECT'"
+
       if [ "$node_id" = "desktop" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(hostname -s)" ]; then
         systemd-run --user --unit="knot-council-$RUN_ID-$node_id" \
-          bash -c "if [ -d \"\$HOME/Dev/$PROJECT\" ]; then cd \"\$HOME/Dev/$PROJECT\"; fi; export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/bin:\$PATH\"; agy --project '$PROJECT' --dangerously-skip-permissions -p \"\$(cat '$pfile')\" --output-format json" \
+          bash -c "PDIR=\"\$($resolve_cmd)\"; if [ -d \"\$PDIR\" ]; then cd \"\$PDIR\"; fi; export KNOT_NODE_ID='$node_id'; export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/bin:\$PATH\"; agy --project '$PROJECT' --dangerously-skip-permissions -p \"\$(cat '$pfile')\" --output-format json" \
           > "$MISSIONS_DIR/${node_id}_output.json" 2>&1 &
       else
         # Push prompt file to target node and execute via systemd-run
         "$KNOT_ROOT/bin/knot" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
         cat "$pfile" | "$KNOT_ROOT/bin/knot" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
-        "$KNOT_ROOT/bin/knot" exec "$node_id" "systemd-run --user --unit=knot-council-$RUN_ID bash -c \"if [ -d \\\"\\\$HOME/Dev/$PROJECT\\\" ]; then cd \\\"\\\$HOME/Dev/$PROJECT\\\"; fi; export PATH=\\\"\\\$HOME/.local/bin:/usr/local/bin:/usr/bin:\\\$PATH\\\"; agy --project $PROJECT --dangerously-skip-permissions -p \\\"\\\$(cat ~/.config/knot/missions/$RUN_ID/prompt.md)\\\" --output-format json\" > ~/.config/knot/missions/$RUN_ID/output.json 2>&1 &"
+        "$KNOT_ROOT/bin/knot" exec "$node_id" "systemd-run --user --unit=knot-council-$RUN_ID bash -c \"PDIR=\\\$\($resolve_cmd\); if [ -d \\\"\\\$PDIR\\\" ]; then cd \\\"\\\$PDIR\\\"; fi; export KNOT_NODE_ID='$node_id'; export PATH=\\\"\\\$HOME/.local/bin:/usr/local/bin:/usr/bin:\\\$PATH\\\"; agy --project $PROJECT --dangerously-skip-permissions -p \\\"\\\$(cat ~/.config/knot/missions/$RUN_ID/prompt.md)\\\" --output-format json\" > ~/.config/knot/missions/$RUN_ID/output.json 2>&1 &"
       fi
     done
     echo "[✓] Fleet runners dispatched headlessly in background."
@@ -93,8 +129,11 @@ EOF_LAUNCH
       node_id="$(basename "$pfile" | sed 's/_prompt.md//')"
       echo "  [•] Spawning Konsole on $node_id screen..."
       
+      resolve_cmd="python3 -c 'import sys, os, glob, json; home=os.path.expanduser(\"~\"); pname=sys.argv[1].lower(); pdir=os.path.join(home, \".gemini/config/projects\"); res=\"\"; [None for f in glob.glob(os.path.join(pdir, \"*.json\")) if not res and (lambda d: [setattr(sys.modules[__name__], \"res\", p if os.path.isdir(p) else next((c for b in [os.path.basename(p)] for c in [os.path.join(home, \"Dev\", b), os.path.join(home, b), os.path.join(home, \".local/share\", b)] if os.path.isdir(c)), \"\")) for r in d.get(\"projectResources\",{}).get(\"resources\",[]) for u in [r.get(\"gitFolder\",{}).get(\"folderUri\",\"\")] if u.startswith(\"file://\") for p in [u[7:].rstrip(\"/\")] if res==\"\"])(json.load(open(f))) if (lambda d: d.get(\"name\",\"\").lower()==pname or d.get(\"id\",\"\").lower()==pname)(json.load(open(f)))]; print(res or next((c for c in [os.path.join(home, \"Dev\", pname), os.path.join(home, pname), os.path.join(home, \".local/share\", pname)] if os.path.isdir(c)), os.getcwd()))' '$PROJECT'"
+
       if [ "$node_id" = "desktop" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(hostname -s)" ]; then
-        WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 nohup konsole --hold --workdir "$HOME/Dev/$PROJECT" -e agy --project "$PROJECT" --dangerously-skip-permissions -i "$(cat "$pfile")" >/dev/null 2>&1 &
+        local_pdir="$(python3 "$SCRIPT_DIR/resolve_project.py" "$PROJECT")"
+        WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 nohup konsole --hold --workdir "$local_pdir" -e bash -c "export KNOT_NODE_ID='$node_id'; exec agy --project '$PROJECT' --dangerously-skip-permissions -i \"\$(cat '$pfile')\"" >/dev/null 2>&1 &
       else
         # Push prompt and launch konsole on remote display
         "$KNOT_ROOT/bin/knot" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
@@ -102,7 +141,7 @@ EOF_LAUNCH
         
         uid="1000"
         if [ "$node_id" = "steamdeck" ]; then uid="1001"; fi
-        "$KNOT_ROOT/bin/knot" exec "$node_id" "WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/$uid nohup konsole --hold --workdir \"\$HOME/Dev/$PROJECT\" -e agy --project $PROJECT --dangerously-skip-permissions -i \"\$(cat ~/.config/knot/missions/$RUN_ID/prompt.md)\" >/dev/null 2>&1 &"
+        "$KNOT_ROOT/bin/knot" exec "$node_id" "PDIR=\\\$\($resolve_cmd\); WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/$uid nohup konsole --hold --workdir \\\"\\\$PDIR\\\" -e bash -c \\\"export KNOT_NODE_ID='$node_id'; exec agy --project $PROJECT --dangerously-skip-permissions -i \\\$\(cat ~/.config/knot/missions/$RUN_ID/prompt.md\)\\\" >/dev/null 2>&1 &"
       fi
     done
     echo "[✓] Interactive TUI windows open on fleet displays."

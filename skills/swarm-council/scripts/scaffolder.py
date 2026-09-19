@@ -176,13 +176,26 @@ Dedicate ~{sidequest_pct}% of your mission effort to autonomous deep-dive explor
 All progress must be reported to the discussion thread:
 `{discussion_url}`
 
-- **Header Requirement**: Every single reply posted MUST start with:
-  `<!-- KNOT-NODE: {node} | RUN: {run_id} | STATUS: <25%|50%|75%|ALERT|FINAL> -->`
-- **Milestone Checkpoints**: Post updates at your self-assessed 25%, 50%, and 75% milestones.
+- **Header Requirement & Visual Self-Identification**: Every single reply posted MUST begin with:
+  ```markdown
+  <!-- KNOT-NODE: {node} | RUN: {run_id} | STATUS: <25%|50%|75%|ALERT|FINAL> -->
+  ### 🛰️ `@{node}` — {profile['title']}
+  **Assigned Chunks**: {', '.join([c['name'] for c in assigned_chunks])}
+  ```
+
+- **Compact Milestone Checkpoints (25%, 50%, 75%)**:
+  - **MANDATORY CONCISENESS RULE**: Keep interim checkpoints strictly under 15-20 lines.
+  - **DO NOT** output the full audit discoveries, large code dumps, or exhaustive file listings in checkpoints!
+  - **STRICT FOCUS FOR CHECKPOINTS**:
+    1. **Liveness & Active Task**: Exactly what file or test you are actively inspecting right now.
+    2. **Velocity & ETA**: Current progress percentage and estimated time to completion.
+    3. **Curious Cases & Red Flags**: Anomalies, strange edge cases, or potential breaking bugs that the swarm must be aware of early.
+  - **Reserve Exhaustive Deliverables for `STATUS: FINAL`**: Comprehensive findings, validation matrices, tables, and release verdicts belong exclusively in your final completion reply.
+
 - **Verified Alerts**: Immediately post an `ALERT` if you discover a critical blocker or regression with high confidence.
 - **Peer Callouts**: When addressing a specific peer, use unmistakable markup: `@[node:<node_id>]`.
 - **Token Efficiency**: Do NOT fetch the whole discussion repeatedly. Only answer when called out or at checkpoints.
-- **Final Deliverable**: Post exactly ONE final reply (`STATUS: FINAL`) with your comprehensive audit findings and release recommendation.
+- **Final Deliverable**: Post exactly ONE final reply (`STATUS: FINAL`) with your complete, exhaustive findings and release sign-off.
 """
     return prompt
 

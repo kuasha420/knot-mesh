@@ -297,6 +297,36 @@ def get_node_manifest(node_id: str) -> dict:
     return manifest
 
 
+def get_canonical_node_id(node_id: str) -> str:
+    if not node_id:
+        return "unknown"
+    nid_lower = str(node_id).lower().strip()
+    active_swarm, _ = get_active_swarm_info()
+    user_home = os.path.expanduser("~")
+    nodes_dir = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/nodes")
+    if os.path.isdir(nodes_dir):
+        for f in os.listdir(nodes_dir):
+            if f.endswith(".json"):
+                fp = os.path.join(nodes_dir, f)
+                try:
+                    with open(fp, "r", encoding="utf-8") as jf:
+                        m = json.load(jf)
+                        can_id = m.get("id", f[:-5])
+                        m_host = (m.get("hostname") or "").lower()
+                        aliases = [a.lower() for a in m.get("aliases", [])]
+                        if nid_lower in (can_id.lower(), m_host, *aliases):
+                            return can_id
+                except Exception:
+                    pass
+    known_mappings = {
+        "kuasha-z490ud": "desktop",
+        "devbox": "laptop",
+        "psl-0000": "rog-ally",
+        "steamdeck-eos": "steamdeck",
+    }
+    return known_mappings.get(nid_lower, node_id)
+
+
 def _get_screen_lock(node_id: str) -> threading.Lock:
     with _screen_locks_mutex:
         if node_id not in _node_screen_locks:
@@ -2075,6 +2105,7 @@ class Database:
     def register_node_heartbeat(self, node_id: str, hostname: str, capabilities: list[str],
                                 agy_ver: str = "", agy_auth: str = "", quota: dict | None = None,
                                 power: dict | None = None, ip: str = "") -> dict:
+        node_id = get_canonical_node_id(node_id)
         now = int(time.time())
         cap_json = json.dumps(capabilities)
         conn = self.get_connection()
@@ -2119,16 +2150,20 @@ class Database:
     def list_nodes(self) -> list[dict]:
         conn = self.get_connection()
         cur = conn.cursor()
-        cur.execute("SELECT * FROM nodes ORDER BY id ASC")
+        cur.execute("SELECT * FROM nodes ORDER BY last_heartbeat DESC")
         rows = cur.fetchall()
         now = int(time.time())
-        result = []
+        result_map = {}
         for r in rows:
             d = dict(r)
+            can_id = get_canonical_node_id(d.get("id", ""))
+            if can_id in result_map:
+                continue
+            d["id"] = can_id
             d["capabilities"] = json.loads(d.get("capabilities") or "[]")
-            d["selected_model"] = self.get_node_model(d["id"])
+            d["selected_model"] = self.get_node_model(can_id)
 
-            manifest = get_node_manifest(d["id"])
+            manifest = get_node_manifest(can_id)
             manifest_ip = manifest.get("ip_hint") or ""
             if not manifest_ip and "interfaces" in manifest and isinstance(manifest["interfaces"], dict):
                 for iface in manifest["interfaces"].values():
@@ -2171,13 +2206,22 @@ class Database:
                     d["power"] = json.loads(d["power_state"])
                 except Exception:
                     pass
-            d["activity"] = self._node_activities.get(d["id"], {})
+            d["activity"] = self._node_activities.get(can_id, {})
             if isinstance(d["power"], dict) and d["activity"]:
                 d["power"]["activity"] = d["activity"]
             if now - d.get("last_heartbeat", 0) > 30:
                 d["status"] = "OFFLINE"
-            result.append(d)
-        return result
+            result_map[can_id] = d
+
+        # Sort in canonical swarm hierarchy
+        canonical_order = ["desktop", "laptop", "rog-ally", "steamdeck"]
+        sorted_nodes = []
+        for cid in canonical_order:
+            if cid in result_map:
+                sorted_nodes.append(result_map.pop(cid))
+        for remaining in sorted(result_map.keys()):
+            sorted_nodes.append(result_map[remaining])
+        return sorted_nodes
 
     def get_swarm_activity(self, idle_timeout_sec: int = 1800) -> dict:
         """

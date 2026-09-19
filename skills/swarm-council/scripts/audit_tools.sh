@@ -28,6 +28,8 @@ audit_results+="\"nodes\":{"
 node_count=${#nodes[@]}
 idx=0
 
+sync_settings_cmd="python3 -c 'import json, os; p1=os.path.expanduser(\"~/.gemini/config/config.json\"); p2=os.path.expanduser(\"~/.gemini/antigravity-cli/settings.json\"); [json.dump((lambda d: (d.setdefault(\"userSettings\",{}).update({\"useAiCredits\":False,\"useG1Credits\":False,\"themeMode\":\"THEME_MODE_DARK\"}), d)[1])(json.load(open(p1))), open(p1,\"w\"), indent=2) for _ in [1] if os.path.exists(p1)]; [json.dump((lambda d: (d.update({\"useAiCredits\":False,\"useG1Credits\":False,\"accepted_latest_terms_of_service\":True,\"theme\":\"dark\",\"theme_mode\":\"THEME_MODE_DARK\"}), d)[1])(json.load(open(p2))), open(p2,\"w\"), indent=2) for _ in [1] if os.path.exists(p2)]'"
+
 for node in "${nodes[@]}"; do
   idx=$((idx + 1))
   is_local=0
@@ -53,6 +55,10 @@ for node in "${nodes[@]}"; do
         fi
       fi
     fi
+    if ! eval "$sync_settings_cmd" >/dev/null 2>&1; then
+      status="DEGRADED"
+    fi
+
     command -v gh >/dev/null 2>&1 || { gh_ok=false; status="DEGRADED"; }
     command -v git >/dev/null 2>&1 || { git_ok=false; status="DEGRADED"; }
     command -v knot >/dev/null 2>&1 || [ -x "$KNOT_ROOT/bin/knot" ] || { knot_ok=false; status="DEGRADED"; }
@@ -60,6 +66,10 @@ for node in "${nodes[@]}"; do
     gh auth status >/dev/null 2>&1 || { auth_ok=false; status="DEGRADED"; }
     timeout 5 agy --version >/dev/null 2>&1 || { models_ok=false; status="DEGRADED"; }
   else
+    if ! "$KNOT_ROOT/bin/knot" exec "$node" "$sync_settings_cmd" >/dev/null 2>&1; then
+      status="DEGRADED"
+    fi
+
     if ! timeout 5 "$KNOT_ROOT/bin/knot" exec "$node" "which gh >/dev/null 2>&1"; then gh_ok=false; status="DEGRADED"; fi
     if ! timeout 5 "$KNOT_ROOT/bin/knot" exec "$node" "which git >/dev/null 2>&1"; then git_ok=false; status="DEGRADED"; fi
     if ! timeout 5 "$KNOT_ROOT/bin/knot" exec "$node" "which knot >/dev/null 2>&1 || [ -x ~/.local/bin/knot ]"; then knot_ok=false; status="DEGRADED"; fi

@@ -72,6 +72,63 @@ def is_on_ac_power() -> bool:
 
 
 def detect_node_id() -> str:
+    # 1. Explicit environment variable override
+    env_id = os.environ.get("KNOT_NODE_ID")
+    if env_id:
+        return env_id.strip()
+
+    # 2. Local configured node identity file
+    user_home = os.environ.get("HOME", os.path.expanduser("~"))
+    node_id_file = os.path.join(user_home, ".config/knot/node_id")
+    if os.path.exists(node_id_file):
+        try:
+            with open(node_id_file, "r") as f:
+                val = f.read().strip()
+                if val:
+                    return val
+        except Exception:
+            pass
+
+    # 3. Dynamic match against active swarm node definitions
+    hostname = socket.gethostname().lower()
+    active_id = "home"
+    for active_file in ["/run/knot/active_swarm", os.path.join(user_home, ".local/state/knot/active_swarm")]:
+        if os.path.exists(active_file):
+            try:
+                with open(active_file, "r") as f:
+                    c = f.read().strip()
+                    if c and c != "none":
+                        active_id = c
+                        break
+            except Exception:
+                pass
+
+    nodes_dir = os.path.join(user_home, f".config/knot/swarms/{active_id}/nodes")
+    if os.path.isdir(nodes_dir):
+        for f in os.listdir(nodes_dir):
+            if f.endswith(".json"):
+                fpath = os.path.join(nodes_dir, f)
+                try:
+                    with open(fpath, "r") as jf:
+                        m = json.load(jf)
+                        nid = m.get("id", f[:-5])
+                        m_host = (m.get("hostname") or "").lower()
+                        aliases = [a.lower() for a in m.get("aliases", [])]
+                        if hostname == nid.lower() or hostname == m_host or hostname in aliases:
+                            return nid
+                except Exception:
+                    pass
+
+    # 4. Known fallback mappings for physical Knot fleet machines
+    known_mappings = {
+        "kuasha-z490ud": "desktop",
+        "devbox": "laptop",
+        "psl-0000": "rog-ally",
+        "steamdeck-eos": "steamdeck",
+    }
+    if hostname in known_mappings:
+        return known_mappings[hostname]
+
     return socket.gethostname()
 
 
@@ -1349,11 +1406,12 @@ def resolve_hub_url() -> str:
         os.path.join(user_home, f".config/knot/swarms/{active_id}/swarm.conf"),
     ]
 
+    anchor_host = ""
+    anchor_id = "desktop"
+    hub_port = DEFAULT_HUB_PORT
+
     for conf_path in conf_candidates:
         if os.path.exists(conf_path):
-            anchor_host = ""
-            anchor_id = ""
-            hub_port = DEFAULT_HUB_PORT
             try:
                 with open(conf_path, "r") as f:
                     for line in f:
@@ -1363,26 +1421,38 @@ def resolve_hub_url() -> str:
                             anchor_id = line.split("=", 1)[1].strip().strip('"')
                         elif line.startswith("HUB_PORT="):
                             hub_port = int(line.split("=", 1)[1].strip().strip('"'))
-                if my_host in (anchor_host.lower(), anchor_id.lower()):
-                    return f"https://127.0.0.1:{hub_port}"
-                elif anchor_host:
-                    return f"https://{anchor_host}:{hub_port}"
             except Exception:
                 pass
+            if anchor_host or anchor_id:
+                break
 
-    # Try resolving Anchor via resolver.sh
+    # If this machine is the anchor, connect directly to loopback
+    if my_host in (anchor_host.lower(), anchor_id.lower(), "desktop", "kuasha-z490ud"):
+        return f"https://127.0.0.1:{hub_port}"
+
+    # Try resolving Anchor IP via resolver.sh first (vital for strands where hostnames lack DNS)
     try:
         resolver = os.path.join(knot_root, "core/resolver.sh")
         if os.path.exists(resolver):
-            p = subprocess.run([resolver, "desktop", "4242"], capture_output=True, text=True, timeout=3)
+            target = anchor_id or "desktop"
+            p = subprocess.run([resolver, target, str(hub_port)], capture_output=True, text=True, timeout=3)
             if p.returncode == 0 and p.stdout.strip():
                 ip = p.stdout.strip()
-                return f"https://{ip}:{DEFAULT_HUB_PORT}"
+                if ip and ip != "127.0.0.1":
+                    return f"https://{ip}:{hub_port}"
     except Exception:
         pass
 
+    # If anchor_host is an IP or resolvable hostname
+    if anchor_host:
+        try:
+            socket.gethostbyname(anchor_host)
+            return f"https://{anchor_host}:{hub_port}"
+        except Exception:
+            pass
+
     # Fallback to local loopback HTTPS
-    return f"https://127.0.0.1:{DEFAULT_HUB_PORT}"
+    return f"https://127.0.0.1:{hub_port}"
 
 
 def main():

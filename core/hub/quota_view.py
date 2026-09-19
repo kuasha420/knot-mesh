@@ -67,13 +67,13 @@ def fmt_token_expiry(expiry_iso: str) -> str:
         secs = int(diff.total_seconds())
         time_part = dt.astimezone().strftime("%H:%M:%S")
         if secs <= 0:
-            return f"Expired ({time_part})"
+            return f"\033[1;32mAuto-refresh Ready\033[0m \033[90m(last renewed {time_part})\033[0m"
         mins = secs // 60
         if mins < 60:
-            return f"in {mins}m ({time_part})"
+            return f"\033[1;32mValid\033[0m \033[90m(renews in {mins}m at {time_part})\033[0m"
         hrs = mins // 60
         rem_mins = mins % 60
-        return f"in {hrs}h {rem_mins}m ({time_part})"
+        return f"\033[1;32mValid\033[0m \033[90m(renews in {hrs}h {rem_mins}m at {time_part})\033[0m"
     except Exception:
         return str(expiry_iso)[:19]
 
@@ -97,6 +97,49 @@ def main():
         print(f"\033[31m[!] Failed to connect to Knot Hub at {hub_url}: {e}\033[0m", file=sys.stderr)
         sys.exit(1)
 
+    # Canonicalize and deduplicate nodes
+    canonical_map = {
+        "kuasha-z490ud": "desktop",
+        "devbox": "laptop",
+        "psl-0000": "rog-ally",
+        "steamdeck-eos": "steamdeck",
+    }
+    node_bullets = {
+        "desktop": "\033[38;2;168;85;247m●\033[0m",    # Neon Purple #A855F7
+        "laptop": "\033[38;2;0;240;255m●\033[0m",      # Cyber Cyan #00F0FF
+        "rog-ally": "\033[38;2;244;63;94m●\033[0m",    # Rose Flare #F43F5E
+        "steamdeck": "\033[38;2;255;170;0m●\033[0m",   # Amber Glow #FFAA00
+    }
+
+    deduped = {}
+    for n in nodes:
+        raw_id = n.get("id", "unknown")
+        cid = canonical_map.get(raw_id, raw_id)
+        if cid not in deduped:
+            n_copy = dict(n)
+            n_copy["id"] = cid
+            deduped[cid] = n_copy
+        else:
+            existing = deduped[cid]
+            if n.get("status") == "ONLINE" and existing.get("status") != "ONLINE":
+                n_copy = dict(n)
+                n_copy["id"] = cid
+                deduped[cid] = n_copy
+            elif n.get("last_heartbeat", 0) > existing.get("last_heartbeat", 0):
+                n_copy = dict(n)
+                n_copy["id"] = cid
+                deduped[cid] = n_copy
+
+    order = ["desktop", "laptop", "rog-ally", "steamdeck"]
+    sorted_nodes = []
+    for o in order:
+        if o in deduped:
+            sorted_nodes.append(deduped[o])
+    for k, v in deduped.items():
+        if k not in order:
+            sorted_nodes.append(v)
+    nodes = sorted_nodes
+
     if target not in ("all", "--all"):
         nodes = [n for n in nodes if n.get("id") == target or n.get("hostname") == target]
         if not nodes:
@@ -115,6 +158,7 @@ def main():
 
     for n in nodes:
         nid = n.get("id", "unknown")
+        bullet = node_bullets.get(nid, f"{cyan}●{reset}")
         status = n.get("status", "ONLINE")
         is_offline = (status == "OFFLINE")
         qdata = n.get("quota_data") or {}
@@ -144,7 +188,7 @@ def main():
             user_display = f"{yellow}No Google Account Linked{reset}"
 
         # Header line for node
-        print(f"{cyan}● {nid}{reset} {st_badge}  •  {user_display}")
+        print(f"{bullet} {bold}{nid}{reset} {st_badge}  •  {user_display}")
         print(f"  {purple}Plan:{reset} {bold}{sub_name}{reset}  {dim}│{reset}  {dim}Token Refresh:{reset} {token_exp_str}")
 
         # Quota table for this node
