@@ -133,11 +133,27 @@ council_start() {
   # Stage 1: Dynamic project sync
   echo -e "  ${C_CYAN}[1/7] Synchronizing Antigravity project mirrors...${C_RESET}"
   local sync_out
-  sync_out="$(bash "$SCRIPTS_DIR/project_sync.sh" --pull 2>&1)" || {
+  local sync_err_file
+  sync_err_file="$(mktemp)"
+  local sync_args=(--pull)
+  if [ -n "$proj_override" ]; then
+    sync_args+=(--project "$proj_override")
+  fi
+  if ! sync_out="$(bash "$SCRIPTS_DIR/project_sync.sh" "${sync_args[@]}" 2>"$sync_err_file")"; then
     knot_log_err "Project sync failed:"
+    cat "$sync_err_file"
+    rm -f "$sync_err_file"
+    return 1
+  fi
+  rm -f "$sync_err_file"
+
+  local jq_err
+  if ! jq_err="$(echo "$sync_out" | jq empty 2>&1)"; then
+    knot_log_err "Project sync returned invalid JSON output: $jq_err"
     echo "$sync_out"
     return 1
-  }
+  fi
+
   local proj_name proj_folder
   if [ -n "$proj_override" ]; then
     proj_name="$proj_override"
@@ -165,10 +181,15 @@ council_start() {
 - **Interactive**: $([ $interactive -eq 1 ] && echo "Yes" || echo "No")
 
 All node checkpoints and audit deliverables will be posted here."
-      disc_res="$(python3 "$SCRIPTS_DIR/mesh_db.py" create --title "Swarm Council Mission: $run_id" --body "$disc_body" --run-id "$run_id" 2>&1)" || {
-        knot_log_err "Could not create mesh db registry: $disc_res"
+      local db_err_file
+      db_err_file="$(mktemp)"
+      if ! disc_res="$(python3 "$SCRIPTS_DIR/mesh_db.py" create --title "Swarm Council Mission: $run_id" --body "$disc_body" --run-id "$run_id" 2>"$db_err_file")"; then
+        knot_log_err "Could not create mesh db registry:"
+        cat "$db_err_file"
+        rm -f "$db_err_file"
         return 1
-      }
+      fi
+      rm -f "$db_err_file"
       disc_id="$(echo "$disc_res" | jq -r '.id')"
       disc_url="$(echo "$disc_res" | jq -r '.url')"
       echo -e "  Mesh registry thread created: ${C_GREEN}${disc_url}${C_RESET}"
@@ -188,10 +209,15 @@ All node checkpoints and audit deliverables will be posted here."
 - **Pack**: \`$pack\`
 
 All node checkpoints and final audit deliverables will be posted here."
-      disc_res="$(python3 "$SCRIPTS_DIR/gh_discussion.py" create --title "Swarm Council Mission: $run_id" --body "$disc_body" 2>&1)" || {
-        knot_log_err "Could not create discussion thread: $disc_res"
+      local gh_err_file
+      gh_err_file="$(mktemp)"
+      if ! disc_res="$(python3 "$SCRIPTS_DIR/gh_discussion.py" create --title "Swarm Council Mission: $run_id" --body "$disc_body" 2>"$gh_err_file")"; then
+        knot_log_err "Could not create discussion thread:"
+        cat "$gh_err_file"
+        rm -f "$gh_err_file"
         return 1
-      }
+      fi
+      rm -f "$gh_err_file"
       disc_id="$(echo "$disc_res" | jq -r '.id')"
       disc_url="$(echo "$disc_res" | jq -r '.url')"
       echo -e "  Discussion thread created: ${C_GREEN}${disc_url}${C_RESET}"
