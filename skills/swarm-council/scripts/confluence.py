@@ -44,9 +44,8 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
 
     # 1. Left pane: Laptop
     if left_node:
-        pfile = os.path.join(missions_dir, f"{left_node}_prompt.md")
         lines.append(f"title {left_node} (CUDA / Roaming Strand)")
-        cmd = f'{knot_bin} exec {left_node} -tt "trap \'\' HUP; agy --project {project_name} --dangerously-skip-permissions -i \\"$(cat {pfile})\\""; exec bash'
+        cmd = f'{knot_bin} exec {left_node} -tt \'trap "" HUP; agy --project {project_name} --dangerously-skip-permissions -i "$(< ~/.config/knot/missions/{run_id}/prompt.md)"; exec bash\''
         lines.append(f'launch --cwd={knot_root} bash -c {json.dumps(cmd)}')
         lines.append("")
 
@@ -54,15 +53,14 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
     pfile_anchor = os.path.join(missions_dir, f"{anchor_node}_prompt.md")
     lines.append(f"title {anchor_node} (Anchor / Coordinator)")
     loc = "vsplit" if left_node else "hsplit"
-    cmd_anchor = f'agy --project {project_name} --dangerously-skip-permissions -i "$(cat {pfile_anchor})"; exec bash'
+    cmd_anchor = f'agy --project {project_name} --dangerously-skip-permissions -i "$(< {pfile_anchor})"; exec bash'
     lines.append(f'launch --location={loc} --cwd={knot_root} bash -c {json.dumps(cmd_anchor)}')
     lines.append("")
 
     # 3. Bottom Panes: ROG Ally & Steam Deck
     for b_node in bottom_nodes:
-        b_pfile = os.path.join(missions_dir, f"{b_node}_prompt.md")
         lines.append(f"title {b_node} (Handheld / Auxiliary Strand)")
-        cmd_b = f'{knot_bin} exec {b_node} -tt "trap \'\' HUP; agy --project {project_name} --dangerously-skip-permissions -i \\"$(cat {b_pfile})\\""; exec bash'
+        cmd_b = f'{knot_bin} exec {b_node} -tt \'trap "" HUP; agy --project {project_name} --dangerously-skip-permissions -i "$(< ~/.config/knot/missions/{run_id}/prompt.md)"; exec bash\''
         lines.append(f'launch --location=hsplit --cwd={knot_root} bash -c {json.dumps(cmd_b)}')
         lines.append("")
 

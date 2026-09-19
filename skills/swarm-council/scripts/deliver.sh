@@ -31,6 +31,15 @@ fi
 
 case "$MODE" in
   confluence)
+    echo "==> Staging prompt files across mesh..."
+    for pfile in "$MISSIONS_DIR"/*_prompt.md; do
+      [ -f "$pfile" ] || continue
+      node_id="$(basename "$pfile" | sed 's/_prompt.md//')"
+      if [ "$node_id" != "desktop" ] && [ "$node_id" != "localhost" ] && [ "$node_id" != "$(hostname -s)" ]; then
+        "$KNOT_ROOT/bin/knot" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
+        cat "$pfile" | "$KNOT_ROOT/bin/knot" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
+      fi
+    done
     echo "==> Spawning Confluence Spatial Cockpit in Kitty..."
     python3 "$SCRIPT_DIR/confluence.py" --run-id "$RUN_ID" --project "$PROJECT"
     ;;
