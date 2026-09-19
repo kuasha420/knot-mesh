@@ -530,6 +530,7 @@ cmd_council() {
 
   case "$action" in
     start) council_start "$@" ;;
+    resume) council_resume "$@" ;;
     status) council_status "$@" ;;
     reply) council_reply "$@" ;;
     list) council_list "$@" ;;
@@ -541,7 +542,7 @@ cmd_council() {
     audit) bash "$KNOT_ROOT/skills/swarm-council/scripts/audit_tools.sh" "$@" ;;
     sync) bash "$KNOT_ROOT/skills/swarm-council/scripts/project_sync.sh" "$@" ;;
     *)
-      echo "Usage: knot council <start|status|reply|list|attach|reconcile|copy|clean|kill|audit|sync> [options]"
+      echo "Usage: knot council <start|resume|status|reply|list|attach|reconcile|copy|clean|kill|audit|sync> [options]"
       ;;
   esac
 }
@@ -1369,7 +1370,7 @@ case "${1:-}" in
     echo "  knot sync [--all | <node_id>] Reconcile keys, configs, and layout across swarm"
     echo "  knot resolve <node_id> [port] Resolve active IP across 3 tiers"
     echo "  knot status                   Show live status of all mesh nodes"
-    echo "  knot council <start|status|reply|list|attach|reconcile|copy|clean|kill> Out-of-band multi-agent swarm coordination"
+    echo "  knot council <start|resume|status|reply|list|attach|reconcile|copy|clean|kill> Out-of-band multi-agent swarm coordination"
     echo "  knot swarm [status|quota|test|exec|auth] Manage Antigravity AI agents across the mesh"
     echo "  knot quota [node|--all]       Show real-time 5h & weekly model quota limits"
     echo "  knot auth [node] [--gui]      Log in / re-authenticate Antigravity CLI on a node"

@@ -10,9 +10,10 @@ PROJECT="${3:-knot-mesh}"
 TILING="${4:-grid}"
 INTERACTIVE="${5:-0}"
 NODES="${6:-}"
+RESUME="${7:-0}"
 
 if [ -z "$RUN_ID" ]; then
-  echo "Usage: $0 <confluence|headless|tui|gui|suggested> <run_id> [project_name] [tiling] [interactive] [nodes]"
+  echo "Usage: $0 <confluence|headless|tui|gui|suggested> <run_id> [project_name] [tiling] [interactive] [nodes] [resume]"
   exit 1
 fi
 
@@ -35,8 +36,13 @@ fi
 case "$MODE" in
   confluence)
     if [ "$INTERACTIVE" = "1" ] || [ "$INTERACTIVE" = "true" ]; then
-      echo "==> Spawning Interactive Confluence Spatial Cockpit in Kitty..."
-      local_conf_cmd=(python3 "$SCRIPT_DIR/confluence.py" --run-id "$RUN_ID" --project "$PROJECT" --tiling "$TILING" --interactive)
+      if [ "$RESUME" = "1" ] || [ "$RESUME" = "true" ]; then
+        echo "==> Resuming Interactive Confluence Spatial Cockpit in Kitty..."
+        local_conf_cmd=(python3 "$SCRIPT_DIR/confluence.py" --run-id "$RUN_ID" --project "$PROJECT" --tiling "$TILING" --interactive --resume)
+      else
+        echo "==> Spawning Zero-Token Interactive Confluence Cockpit in Kitty..."
+        local_conf_cmd=(python3 "$SCRIPT_DIR/confluence.py" --run-id "$RUN_ID" --project "$PROJECT" --tiling "$TILING" --interactive)
+      fi
       if [ -n "$NODES" ]; then
         local_conf_cmd+=(--nodes "$NODES")
       fi

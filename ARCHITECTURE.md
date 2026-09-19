@@ -122,3 +122,73 @@ Passwordless sudo execution is guarded dynamically via PAM execution check:
 - **Single-Page Application**: Built with React 19, TypeScript, and Tailwind CSS.
 - **SSE Event Streaming**: Consumes continuous server-sent events from Knot Hub (`/events`) for node status, task DAG orchestrations, GPU telemetry, and artifact leases.
 - **Zero-Dependency Production Assets**: Static assets are pre-compiled to `web/dist` and served natively by Knot Hub's HTTP server without requiring Node.js on production nodes.
+
+---
+
+## 8. Out-of-Band Multi-Agent Swarm Council Architecture
+
+```
+┌───────────────────────────────────────────────────────────────────────────────────────┐
+│                      KNOT COUNCIL START --INTERACTIVE (--db mesh)                     │
+│                        Total Startup Tokens: EXACTLY 0 TOKENS                         │
+└──────────────────────────────────────────────────┬────────────────────────────────────┘
+                                                   │
+                                                   ▼
+┌───────────────────────────────────────────────────────────────────────────────────────┐
+│                Kitty Confluence Cockpit (Scale-Aware GPU Multiplexing)                │
+├───────────────────────────────┬───────────────────────────────┬───────────────────────┤
+│ 🟣 desktop (Anchor)           │ 🟢 laptop (Roaming/CUDA)      │ 🔴 rog-ally (Handheld)│
+│ - Injected ENV:               │ - Injected ENV:               │ - Injected ENV:       │
+│   KNOT_NODE_ID=desktop        │   KNOT_NODE_ID=laptop         │   KNOT_NODE_ID=...    │
+│   KNOT_COUNCIL_RUN_ID=run_... │   KNOT_COUNCIL_RUN_ID=run_... │   ...                 │
+│                               │                               │                       │
+│ - agy Interactive TUI         │ - agy Interactive TUI         │ - agy Interactive TUI │
+│   (Zero-token standby)        │   (Zero-token standby)        │   (Zero-token standby)│
+│   > [Type to steer agent...]  │   > [Type to steer agent...]  │   > [Type to steer...]│
+└───────────────────────────────┴───────────────────────────────┴───────────────────────┘
+                                                   │
+                   Operator types steering prompt into e.g. @[desktop]:
+                          "Audit core runtime and verify tests"
+                                                   │
+                                                   ▼
+┌───────────────────────────────────────────────────────────────────────────────────────┐
+│                  Antigravity Hook Activation (PreInvocation Hook)                     │
+│  - council_hook.py reads KNOT_COUNCIL_RUN_ID from environment                         │
+│  - Evaluates invocationNum == 1 (Turn 1 only)                                         │
+│  - Outputs injectSteps with ephemeralMessage:                                         │
+│      • Node Identity (@[desktop] - Anchor / Coordinator)                              │
+│      • Active Mesh Peers (laptop, rog-ally, steamdeck)                                │
+│      • Council Registry (knot://mesh/council/run_...)                                 │
+│      • Autonomous coordination protocol (knot council reply / knot council status)    │
+│  - Model executes turn WITH full mesh awareness!                                      │
+└──────────────────────────────────────────────────┬────────────────────────────────────┘
+                                                   │
+                                Autonomous Mesh Coordination
+                         (knot council reply & knot council status)
+                                                   │
+                                                   ▼
+                      ┌──────────────────────────────────────────────────┐
+                      │    Knot Mesh DB / Knot Hub REST API (:4242)      │
+                      │    (or GitHub Discussions if --db ghd)           │
+                      └──────────────────────────────────────────────────┘
+```
+
+### Out-of-Band Resilience Model
+Swarm Council operates independently of Knot's Blackboard Hub and Linda Tuplespace daemons. During deep system audits, kernel updates, network reassignments, or service restarts, agents continue collaborating out-of-band via GitHub Discussions GraphQL or the dedicated Mesh DB subsystem.
+
+### Dual Registry Architecture
+- **GitHub Discussions (`--db ghd`)**: Public or team-visible coordination thread with machine-parseable HTML comments (`<!-- KNOT-NODE: <id> | STATUS: <status> -->`).
+- **Mesh Database (`--db mesh`)**: High-performance local alternative backed by Knot Hub TLS REST endpoints (`/council/threads`, `/council/messages`) with automatic SQLite WAL fallback at `~/.config/knot/council.db`. Emits GitHub Discussions-compatible JSON payloads for 100% interoperability with downstream reconcilers.
+
+### Zero-Token Start & Arena Isolation
+- **Zero Startup Token Overhead**: In interactive mode (`knot council start --interactive`), every pane connects directly into the `agy` interactive TUI in standby mode. **Zero prompts are dispatched, zero LLM calls occur, and startup is instantaneous (< 1s)**.
+- **Antigravity `PreInvocation` Lifecycle Hook (`council_hook.py`)**:
+  - Gated by `KNOT_COUNCIL_RUN_ID` environment variable. When unset (normal coding), the hook exits in `< 2ms` returning `{"injectSteps": []}`, ensuring **zero contamination** outside council missions.
+  - Gated by `invocationNum == 1`. Injects the full node persona, peer roster, and coordination CLI commands strictly on Turn 1 of each steered node.
+  - On subsequent turns (`invocationNum > 1`), returns `{"injectSteps": []}`, eliminating repetitive prompt token waste.
+
+### Cockpit Tiling Engine & Display Scaling
+- **Topological Tiling Layouts**: Confluence mode configures Kitty with scale-aware layouts (`grid`, `sidebyside`, `splits`, `tall`, `fat`, `stacked`).
+- **Dynamic Scale Detection**: Queries Wayland / KDE Plasma display scaling (`kscreen-doctor -o`, `QT_SCALE_FACTOR`, `GDK_SCALE`) and dynamically calculates optimal cockpit typography (8.0pt to 12.0pt).
+- **Session Resumption**: `knot council resume [run_id]` re-opens the cockpit and re-attaches all panes using `agy -c` with zero prompt overhead.
+

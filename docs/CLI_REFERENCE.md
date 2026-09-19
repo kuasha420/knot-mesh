@@ -21,6 +21,7 @@ This document provides a comprehensive command-line reference for both `knot` (d
   - [knot exec](#knot-exec)
   - [knot resolve](#knot-resolve)
   - [knot shutdown](#knot-shutdown)
+  - [knot council](#knot-council)
 - [2. `knot-installer` — Onboarding & Lifecycle CLI](#2-knot-installer--onboarding--lifecycle-cli)
   - [knot-installer init](#knot-installer-init)
   - [knot-installer invite](#knot-installer-invite)
@@ -236,6 +237,149 @@ knot shutdown --all reboot         # Reboot all Strands, then the Anchor
 - **Options**:
   - `--delay <minutes|now>`: Delay before shutdown (e.g. `+10` for 10 minutes, `23:00`, or `now`).
   - `--wall "<message>"`: Custom broadcast message sent to all logged-in users.
+
+---
+
+### `knot council`
+Out-of-band multi-agent coordination protocol using GitHub Discussions, Mesh DB, and scale-aware Kitty Confluence multiplexing. Allows autonomous Antigravity agents across physical nodes to coordinate on distributed audits, verification sweeps, or interactive pair steering.
+
+```bash
+knot council <start|resume|status|reply|list|attach|reconcile|copy|clean|kill> [options]
+```
+
+#### `knot council start`
+Launches an autonomous council mission or zero-token interactive multi-node cockpit.
+
+```bash
+# Autonomous Mission (with prompt scaffolding)
+knot council start [--mode <mode>] [--db <ghd|mesh>] [--tiling <layout>] [--pack <pack>] [--prompt <text>]
+
+# Zero-Token Interactive Cockpit (direct drop into agy TUI with on-demand steering)
+knot council start --interactive [--tiling <layout>] [--project <name>] [--nodes <list>]
+
+# Dry-run validation
+knot council start --interactive --dry-run
+```
+
+- **Options**:
+  - `--mode <confluence|headless|tui|gui|suggested>`: Execution surface. Default: `confluence`.
+  - `--db <ghd|mesh>`: Coordination message board backend: `ghd` (GitHub Discussions, default for autonomous missions) or `mesh` (Knot Hub REST API `:4242` and SQLite fallback, default for interactive cockpit).
+  - `--interactive`: Spawns fullscreen Kitty Confluence cockpit with all swarm nodes connected in `agy` standby. **Consumes 0 tokens at startup**; context is injected on-demand via Antigravity `PreInvocation` lifecycle hook when the operator prompts a node.
+  - `--resume [run_id]`: Resumes previous conversations across all cockpit panes using `agy -c`.
+  - `--tiling <grid|sidebyside|splits|tall|fat|stacked>`: Scale-aware Kitty window layout. Default: `grid`.
+  - `--pack <audit-parity|fast-triage>`: Prompt scaffold template pack. Default: `audit-parity`.
+  - `--prompt <text>`: Base mission prompt text.
+  - `--prompt-file <path>`: Path to file containing base mission prompt.
+  - `--nodes <list>`: Comma-separated list of target nodes (default: all online fleet nodes).
+  - `--project <name>`: Target Antigravity project name (default: auto-detected from CWD).
+  - `--dry-run`: Generates prompts and Kitty session configurations without launching runners.
+
+---
+
+#### `knot council resume`
+Re-opens the Kitty Confluence cockpit and re-attaches all swarm nodes to their active conversations using `agy -c`.
+
+```bash
+knot council resume [run_id]
+```
+
+- If `[run_id]` is omitted, automatically finds and resumes the latest active council session.
+- Restores active tiling layout, project directory, and exports council environment variables across all panes.
+
+---
+
+#### `knot council status`
+Inspects real-time milestone progress, node check-ins, and peer updates for a mission.
+
+```bash
+knot council status [run_id]
+```
+
+- Displays the fleet status matrix, verified alerts, milestone progress (25%, 50%, 75%), and deliverables.
+- If `[run_id]` is omitted, inspects the latest mission.
+
+---
+
+#### `knot council reply`
+Posts status checkpoints, alerts, or final reports to the mission registry (GitHub Discussions or Mesh DB).
+
+```bash
+knot council reply <run_id> [--node <id>] [--status <25%|50%|75%|ALERT|FINAL|PROGRESS>] [--body "<text>"]
+
+# Or pipe markdown deliverable from stdin:
+knot council reply <run_id> --node desktop --status FINAL < deliverable.md
+```
+
+- **Options**:
+  - `--node <id>`: Node identifier (defaults to `$KNOT_NODE_ID` or local hostname).
+  - `--status <status>`: Milestone indicator (`25%`, `50%`, `75%`, `ALERT`, `FINAL`, `PROGRESS`).
+  - `--body <text>`: Message text (strictly under 15-20 lines for interim checkpoints).
+
+---
+
+#### `knot council list`
+Lists recent Swarm Council missions from local storage with execution metadata, backend, and status.
+
+```bash
+knot council list [interactive|active|mesh|ghd]
+```
+
+- **Filters**:
+  - `interactive`: Display only interactive cockpit sessions.
+  - `active`: Display only active, running missions.
+  - `mesh` / `ghd`: Filter by registry backend.
+- Displays `[INTERACTIVE | ACTIVE]` and `[AUTONOMOUS | ACTIVE]` badges with tiling mode and node rosters.
+
+---
+
+#### `knot council attach`
+Connects directly to an active agent session on a specific node from the current terminal.
+
+```bash
+knot council attach <node_id> [run_id]
+```
+
+- Inherits council environment variables (`KNOT_NODE_ID`, `KNOT_COUNCIL_RUN_ID`, `KNOT_PROJECT`) and attaches via `agy -c`.
+
+---
+
+#### `knot council reconcile`
+Synthesizes all discussion comments and node deliverables into a consolidated Markdown audit report.
+
+```bash
+knot council reconcile [run_id]
+```
+
+- Saves report to `~/.config/knot/missions/<run_id>/reconciled_report.md` and marks mission `status: COMPLETED`.
+
+---
+
+#### `knot council copy`
+Copies the staged prompt for the local node to the Wayland or X11 clipboard for GUI delivery (`--mode gui`).
+
+```bash
+knot council copy
+```
+
+---
+
+#### `knot council kill`
+Halts all running council runner processes and Kitty cockpit instances across the fleet.
+
+```bash
+knot council kill <run_id>
+```
+
+- Marks mission `status: TERMINATED` in `meta.json`.
+
+---
+
+#### `knot council clean`
+Prunes mission directories older than the specified retention window.
+
+```bash
+knot council clean [days]        # Default: 7 days
+```
 
 ---
 

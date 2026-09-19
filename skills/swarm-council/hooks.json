@@ -1,0 +1,11 @@
+{
+  "swarm-council-coordinator": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "python3 scripts/council_hook.py",
+        "timeout": 5
+      }
+    ]
+  }
+}

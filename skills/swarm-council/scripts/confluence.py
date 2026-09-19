@@ -103,7 +103,7 @@ def load_topology(knot_root):
     }
 
 
-def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="knot-mesh", tiling="grid", interactive=False):
+def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="knot-mesh", tiling="grid", interactive=False, resume=False):
     knot_bin = os.path.join(knot_root, "bin/knot")
 
     # Resolve dynamic palette with topological near-neighbor separation
@@ -132,6 +132,7 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
         f"# Run ID: {run_id}",
         f"# Tiling Mode: {tiling} ({active_layout})",
         f"# Interactive Mode: {interactive}",
+        f"# Resuming Session: {resume}",
         "# SIGHUP resilience: trap '' HUP",
         "enabled_layouts grid,splits,tall,fat,horizontal,vertical,stack",
         active_layout,
@@ -175,39 +176,57 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
             ps.write("#!/usr/bin/env bash\n")
             ps.write("trap '' HUP\n")
             if interactive:
-                # Interactive Cockpit Pane: sets environment, prints banner, opens interactive shell in project directory
+                # Zero-Token Interactive Cockpit: drops directly into agy TUI
+                if resume:
+                    agy_cmd = f'exec agy --project "{project_name}" --dangerously-skip-permissions -c'
+                    mode_label = "Resuming Session (agy -c)"
+                else:
+                    agy_cmd = f'exec agy --project "{project_name}" --dangerously-skip-permissions'
+                    mode_label = "Zero-Token Standby (Prompt to steer)"
+
                 if node in [local_host, "desktop", "localhost"]:
                     ps.write(f'export KNOT_NODE_ID="{node}"\n')
                     ps.write(f'export KNOT_COUNCIL_RUN_ID="{run_id}"\n')
                     ps.write(f'export KNOT_HUB_URL="https://127.0.0.1:4242"\n')
+                    ps.write(f'export KNOT_COUNCIL_DB="mesh"\n')
+                    ps.write(f'export KNOT_PROJECT="{project_name}"\n')
+                    ps.write(f'export KNOT_PEERS="{",".join(nodes)}"\n')
+                    ps.write(f'export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:$PATH"\n')
                     ps.write(f'PDIR="$("{knot_root}/skills/swarm-council/scripts/resolve_project.py" "{project_name}" 2>/dev/null || echo "{knot_root}")"\n')
                     ps.write('if [ -d "$PDIR" ]; then cd "$PDIR"; fi\n')
                     ps.write(f'echo -e "\\033[1;36m╔══════════════════════════════════════════════════════════════════════╗\\033[0m"\n')
                     ps.write(f'echo -e "\\033[1;36m║\\033[0m  🛰️  \\033[1mKnot Swarm Interactive Cockpit: @[{node}]\\033[0m ({desc})"\n')
                     ps.write(f'echo -e "\\033[1;36m║\\033[0m  Project:   \\033[33m{project_name}\\033[0m ($PWD)"\n')
                     ps.write(f'echo -e "\\033[1;36m║\\033[0m  Registry:  \\033[35mknot://mesh/council/{run_id}\\033[0m"\n')
-                    ps.write(f'echo -e "\\033[1;36m║\\033[0m  Commands:  \\033[32magy\\033[0m | \\033[32mknot council reply {run_id} --status ... --body ...\\033[0m"\n')
+                    ps.write(f'echo -e "\\033[1;36m║\\033[0m  Mode:      \\033[32m{mode_label}\\033[0m"\n')
+                    ps.write(f'echo -e "\\033[1;36m║\\033[0m  Commands:  \\033[32mknot council reply\\033[0m | \\033[32mknot council status\\033[0m"\n')
                     ps.write(f'echo -e "\\033[1;36m╚══════════════════════════════════════════════════════════════════════╝\\033[0m"\n')
                     ps.write('echo ""\n')
-                    ps.write('exec bash -i\n')
+                    ps.write(f'{agy_cmd}\n')
                 else:
+                    if resume:
+                        remote_agy = f'exec agy --project \\"{project_name}\\" --dangerously-skip-permissions -c'
+                    else:
+                        remote_agy = f'exec agy --project \\"{project_name}\\" --dangerously-skip-permissions'
                     remote_cmd = (
-                        f"export KNOT_NODE_ID='{node}' KNOT_COUNCIL_RUN_ID='{run_id}'; "
+                        f"trap '' HUP; "
+                        f"export KNOT_NODE_ID='{node}' KNOT_COUNCIL_RUN_ID='{run_id}' KNOT_HUB_URL='https://127.0.0.1:4242' KNOT_COUNCIL_DB='mesh' KNOT_PROJECT='{project_name}' KNOT_PEERS='{','.join(nodes)}' PATH=\"\\$HOME/.local/bin:/usr/local/bin:/usr/bin:\\$PATH\"; "
                         f"if [ -d \\\"Dev/{project_name}\\\" ]; then cd \\\"Dev/{project_name}\\\"; elif [ -d \\\"{project_name}\\\" ]; then cd \\\"{project_name}\\\"; fi; "
                         f"echo -e '\\033[1;36m╔══════════════════════════════════════════════════════════════════════╗\\033[0m'; "
                         f"echo -e '\\033[1;36m║\\033[0m  🛰️  \\033[1mKnot Swarm Interactive Cockpit: @[{node}]\\033[0m ({desc})'; "
                         f"echo -e '\\033[1;36m║\\033[0m  Project:   \\033[33m{project_name}\\033[0m (\\$PWD)'; "
                         f"echo -e '\\033[1;36m║\\033[0m  Registry:  \\033[35mknot://mesh/council/{run_id}\\033[0m'; "
-                        f"echo -e '\\033[1;36m║\\033[0m  Commands:  \\033[32magy\\033[0m | \\033[32mknot council reply {run_id} --status ... --body ...\\033[0m'; "
+                        f"echo -e '\\033[1;36m║\\033[0m  Mode:      \\033[32m{mode_label}\\033[0m'; "
+                        f"echo -e '\\033[1;36m║\\033[0m  Commands:  \\033[32mknot council reply\\033[0m | \\033[32mknot council status\\033[0m'; "
                         f"echo -e '\\033[1;36m╚══════════════════════════════════════════════════════════════════════╝\\033[0m'; "
-                        f"echo ''; exec bash -i"
+                        f"echo ''; {remote_agy}"
                     )
                     ps.write(f'exec "{knot_bin}" exec -tt {node} "{remote_cmd}"\n')
             else:
                 if node in [local_host, "desktop", "localhost"]:
                     ps.write(f'exec "{missions_dir}/launch.sh"\n')
                 else:
-                    ps.write(f'exec "{knot_bin}" exec -t {node} "trap \'\' HUP; ~/.config/knot/missions/{run_id}/launch.sh; exec bash"\n')
+                    ps.write(f'exec "{knot_bin}" exec -tt {node} "trap \'\' HUP; ~/.config/knot/missions/{run_id}/launch.sh; exec bash"\n')
         os.chmod(pane_script, 0o755)
 
         lines.append(f"launch --cwd={knot_root} {pane_script}")
@@ -223,6 +242,7 @@ def main():
     parser.add_argument("--project", default="knot-mesh", help="Antigravity project name")
     parser.add_argument("--tiling", default="grid", help="Cockpit window tiling layout: grid, sidebyside, splits, tall, fat, stacked")
     parser.add_argument("--interactive", action="store_true", help="Launch interactive multi-node cockpit without prompt dispatch")
+    parser.add_argument("--resume", action="store_true", help="Resume previous conversations in cockpit via agy -c")
     parser.add_argument("--dry-run", action="store_true", help="Generate config without launching Kitty")
 
     args = parser.parse_args()
@@ -249,7 +269,8 @@ def main():
         knot_root=knot_root,
         project_name=args.project,
         tiling=args.tiling,
-        interactive=args.interactive
+        interactive=args.interactive,
+        resume=args.resume
     )
 
     session_file = os.path.join(missions_dir, "kitty_session.conf")

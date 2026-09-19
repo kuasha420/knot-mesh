@@ -124,16 +124,30 @@ To support offline swarms, fast developer iteration, or hermetic testing without
 
 ---
 
-## 6. Interactive Spatial Cockpit & Tiling Engine
+## 6. Zero-Token Interactive Cockpit, Hooks & Tiling Engine
 
-### A. Interactive Multi-Node Cockpit (`--interactive`)
-To launch a live cockpit with interactive shells across all swarm nodes without dispatching autonomous mission prompts:
+### A. Zero-Token Interactive Cockpit (`--interactive`)
+To launch a live cockpit across all swarm nodes with zero startup token overhead:
 ```bash
 knot council start --interactive [--tiling <layout>] [--project <name>]
 ```
-Each pane connects to its respective node in the project directory, sets environment variables (`KNOT_NODE_ID`, `KNOT_COUNCIL_RUN_ID`), renders a cybernetic status banner, and presents an interactive shell.
+- **Zero Startup Tokens**: Drops directly into the `agy` interactive TUI in standby mode across every active node. No prompts are dispatched at launch, consuming **0 tokens** and **0 LLM calls**.
+- **Human Steering Model**: The human operator prompts high-level directives and steers execution. The agents coordinate autonomously among themselves across the mesh.
 
-### B. Cockpit Tiling Layouts (`--tiling <layout>`)
+### B. Antigravity Lifecycle Hook (`council_hook.py`)
+Context is injected lazily and on-demand using Antigravity's `PreInvocation` lifecycle hook:
+1. **Turn-1 Gating (`invocationNum == 1`)**: When the operator submits their first prompt to any node, the hook detects `KNOT_COUNCIL_RUN_ID` and dynamically injects an `ephemeralMessage` containing node identity, peer roster, and CLI coordination commands.
+2. **Subsequent Turns (`invocationNum > 1`)**: The hook emits `{"injectSteps": []}`. Because the model already retains the council context in its conversation history, no extra tokens are spent on repetitive injections.
+3. **Strict Arena Isolation**: Outside council missions (`$KNOT_COUNCIL_RUN_ID` is unset), the hook exits in `< 2ms` returning `{"injectSteps": []}` with zero impact on normal development.
+
+### C. Cockpit Resumption (`knot council resume`)
+To restore an interactive council cockpit across the entire fleet:
+```bash
+knot council resume [run_id]
+```
+Re-opens the Kitty Confluence cockpit with the original tiling layout, enters the project directory on all nodes, and connects to previous conversations via `agy -c` with zero prompt overhead.
+
+### D. Cockpit Tiling Layouts (`--tiling <layout>`)
 Customize the Kitty window topology for both autonomous and interactive sessions:
 - `grid` *(default)*: Balanced NxM matrix (ideal for ultrawide displays)
 - `sidebyside` / `horizontal`: Full-height side-by-side vertical columns
@@ -147,17 +161,20 @@ Customize the Kitty window topology for both autonomous and interactive sessions
 ## 7. Command Reference
 
 ```bash
-# Autonomous Mission
+# Autonomous Mission (with prompt scaffolding)
 knot council start [--mode <mode>] [--db <ghd|mesh>] [--tiling <layout>] [--nodes <list>] [--prompt <text>]
 
-# Interactive Multi-Node Cockpit
-knot council start --interactive [--tiling <layout>] [--nodes <list>]
+# Zero-Token Interactive Cockpit (direct drop into agy TUI with on-demand steering)
+knot council start --interactive [--tiling <layout>] [--nodes <list>] [--project <name>]
+
+# Cockpit Resumption
+knot council resume [run_id]                  # Re-attach all nodes via agy -c in Kitty
 
 # Mission Lifecycle & Coordination
 knot council status [run_id]                  # Inspect real-time status matrix & milestones
 knot council reply <run_id> [options]         # Post status checkpoint or final report
 knot council reconcile [run_id]               # Compile consolidated audit report
-knot council list [--db <ghd|mesh>]           # List recent missions
+knot council list [interactive|active|mesh]   # List recent missions with status badges
 knot council attach <node_id> [run_id]        # Attach directly to node's agy session
 knot council copy                             # Load staged prompt into local clipboard
 knot council kill <run_id>                    # Halt all mission processes across fleet

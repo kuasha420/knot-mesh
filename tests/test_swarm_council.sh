@@ -104,7 +104,7 @@ echo "PASSED"
 # 7. First-Class knot council CLI Integration
 echo -n "7. Testing knot council CLI integration... "
 cli_help="$("$KNOT_ROOT/bin/knot" council --help)"
-if ! echo "$cli_help" | grep -q "knot council <start|status|reply|list|attach|reconcile"; then
+if ! echo "$cli_help" | grep -q "knot council <start|resume|status|reply|list|attach|reconcile"; then
   echo "FAILED (knot council --help missing command signature)"
   exit 1
 fi
@@ -144,8 +144,8 @@ if [ "$thread_title" != "Unit Test Mission" ]; then
 fi
 echo "PASSED"
 
-# 9. Confluence Tiling Layouts & Interactive Mode
-echo -n "9. Testing Confluence tiling modes (sidebyside, tall) & interactive shell... "
+# 9. Confluence Tiling Layouts, Zero-Token Interactive Mode & Resumption
+echo -n "9. Testing Confluence tiling modes & zero-token agy interactive/resume... "
 test_run_tiling="unit_test_tiling_$$"
 python3 "$COUNCIL_SCRIPTS/confluence.py" --run-id "$test_run_tiling" --nodes desktop,laptop --tiling sidebyside --interactive --dry-run >/dev/null
 tiling_conf="$HOME/.config/knot/missions/$test_run_tiling/kitty_session.conf"
@@ -158,16 +158,28 @@ if ! grep -q "Interactive Mode: True" "$tiling_conf"; then
   exit 1
 fi
 desktop_pane="$HOME/.config/knot/missions/$test_run_tiling/confluence_desktop.sh"
-if ! grep -q "exec bash -i" "$desktop_pane"; then
-  echo "FAILED (Interactive bash not spawned in pane script)"
+if grep -q "exec bash -i" "$desktop_pane"; then
+  echo "FAILED (Found bare bash in interactive pane script - must be agy TUI)"
+  exit 1
+fi
+if ! grep -q 'exec agy --project "knot-mesh" --dangerously-skip-permissions' "$desktop_pane"; then
+  echo "FAILED (Expected zero-token agy invocation without prompt in pane script)"
+  exit 1
+fi
+if grep -q -- ' -i ' "$desktop_pane"; then
+  echo "FAILED (Found -i prompt in zero-token interactive pane script)"
   exit 1
 fi
 rm -rf "$HOME/.config/knot/missions/$test_run_tiling"
 
-# Test tall layout
-python3 "$COUNCIL_SCRIPTS/confluence.py" --run-id "$test_run_tiling" --nodes desktop,laptop --tiling tall --dry-run >/dev/null
+# Test resume mode
+python3 "$COUNCIL_SCRIPTS/confluence.py" --run-id "$test_run_tiling" --nodes desktop,laptop --tiling tall --interactive --resume --dry-run >/dev/null
 if ! grep -q "layout tall" "$tiling_conf"; then
   echo "FAILED (Expected layout tall in session conf)"
+  exit 1
+fi
+if ! grep -q 'exec agy --project "knot-mesh" --dangerously-skip-permissions -c' "$desktop_pane"; then
+  echo "FAILED (Expected agy -c in resume pane script)"
   exit 1
 fi
 rm -rf "$HOME/.config/knot/missions/$test_run_tiling"
@@ -211,5 +223,55 @@ if [ -n "$run_id_found" ]; then
 fi
 echo "PASSED"
 
+# 12. Antigravity Lifecycle Hook Arena Isolation & Turn-1 Gating (council_hook.py)
+echo -n "12. Testing council_hook.py arena isolation and Turn-1 gating... "
+hook_script="$COUNCIL_SCRIPTS/council_hook.py"
+
+# Case A: Normal developer session (KNOT_COUNCIL_RUN_ID unset) -> must be empty injectSteps
+hook_out_normal="$(env -u KNOT_COUNCIL_RUN_ID python3 "$hook_script" <<< '{"invocationNum": 1}')"
+if [ "$hook_out_normal" != '{"injectSteps": []}' ]; then
+  echo "FAILED (Expected empty injectSteps for normal session, got: $hook_out_normal)"
+  exit 1
+fi
+
+# Case B: Council session Turn 1 (KNOT_COUNCIL_RUN_ID set, invocationNum=1) -> must inject ephemeralMessage
+hook_out_turn1="$(KNOT_COUNCIL_RUN_ID="test_run_hook_$$" KNOT_NODE_ID="desktop" KNOT_PEERS="desktop,laptop" python3 "$hook_script" <<< '{"invocationNum": 1}')"
+if ! echo "$hook_out_turn1" | jq -e '.injectSteps[0].ephemeralMessage' >/dev/null; then
+  echo "FAILED (Expected ephemeralMessage in Turn 1 hook output: $hook_out_turn1)"
+  exit 1
+fi
+if ! echo "$hook_out_turn1" | grep -Fq '@[desktop]'; then
+  echo "FAILED (Missing node id in ephemeralMessage: $hook_out_turn1)"
+  exit 1
+fi
+
+# Case C: Council session Turn 2 (invocationNum=2) -> must be empty injectSteps (zero repetition)
+hook_out_turn2="$(KNOT_COUNCIL_RUN_ID="test_run_hook_$$" KNOT_NODE_ID="desktop" python3 "$hook_script" <<< '{"invocationNum": 2}')"
+if [ "$hook_out_turn2" != '{"injectSteps": []}' ]; then
+  echo "FAILED (Expected empty injectSteps for Turn 2, got: $hook_out_turn2)"
+  exit 1
+fi
+echo "PASSED"
+
+# 13. Council List Output & Interactive Tagging
+echo -n "13. Testing knot council list [filter] and interactive tagging... "
+mock_run_interactive="run_unit_interactive_$$"
+mkdir -p "$HOME/.config/knot/missions/$mock_run_interactive"
+echo "{\"run_id\":\"$mock_run_interactive\",\"project\":\"knot-mesh\",\"db\":\"mesh\",\"interactive\":1,\"status\":\"ACTIVE\",\"nodes\":\"desktop,laptop\"}" > "$HOME/.config/knot/missions/$mock_run_interactive/meta.json"
+
+list_out="$("$KNOT_ROOT/bin/knot" council list interactive)"
+if ! echo "$list_out" | grep -q "$mock_run_interactive"; then
+  echo "FAILED (knot council list interactive did not find mock run)"
+  rm -rf "$HOME/.config/knot/missions/$mock_run_interactive"
+  exit 1
+fi
+if ! echo "$list_out" | grep -q "INTERACTIVE | ACTIVE"; then
+  echo "FAILED (knot council list missing INTERACTIVE badge)"
+  rm -rf "$HOME/.config/knot/missions/$mock_run_interactive"
+  exit 1
+fi
+rm -rf "$HOME/.config/knot/missions/$mock_run_interactive"
+echo "PASSED"
+
 echo ""
-echo "=== All 11 Swarm Council Tests PASSED Successfully! ==="
+echo "=== All 13 Swarm Council Tests PASSED Successfully! ==="
