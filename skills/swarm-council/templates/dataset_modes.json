@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "modes": {
+    "confluence": {
+      "title": "Master Spatial Cockpit (Kitty)",
+      "description": "GPU-accelerated fullscreen Kitty instance with native tiled splits mirroring physical workspace topology.",
+      "best_for": "Multi-node parallel audits, distributed debugging, live cross-fleet streaming, and collaborative pair-programming.",
+      "superpowers": [
+        "Faithful spatial layout mapping to ~/.config/knot/swarms/home/topology.json",
+        "Simultaneous live visibility of all swarm nodes on anchor display",
+        "Shared prompt cache acceleration across concurrent sessions",
+        "Instant keyboard switching and human takeover across any pane",
+        "Zero risk of KDE Connect clipboard echo loops"
+      ],
+      "limitations": [
+        "Requires graphical desktop environment on anchor machine",
+        "Occupies screen real estate during run",
+        "Cannot render interactive HTML/Generative UI canvas elements"
+      ],
+      "scoring_weights": {
+        "multi_node": 3.0,
+        "interactive_monitoring": 2.5,
+        "cross_mesh_sync": 2.0,
+        "visual_ui": -2.0,
+        "unattended_batch": -1.5
+      }
+    },
+    "headless": {
+      "title": "Autonomous Background Fleet",
+      "description": "Background execution via systemd-run --user with --dangerously-skip-permissions reporting via GitHub Discussions.",
+      "best_for": "Unattended batch jobs, nightly regressions, cron maintenance, CI/CD sweeps, and headless/docked nodes.",
+      "superpowers": [
+        "100% unattended execution without screen or terminal dependencies",
+        "Zero screen distraction; runs seamlessly in background",
+        "Immune to terminal window closures or SSH pipe drops",
+        "Lowest token and resource overhead (~340k base context)",
+        "Easily scheduled via cron, timer, or CI hooks"
+      ],
+      "limitations": [
+        "No live streaming on screen without attaching",
+        "Cannot prompt human for inline plan review or interactive questions",
+        "No visual browser or HTML widget rendering"
+      ],
+      "scoring_weights": {
+        "unattended_batch": 3.5,
+        "nightly_ci": 3.0,
+        "background_maintenance": 2.5,
+        "multi_node": 1.5,
+        "interactive_monitoring": -3.0,
+        "visual_ui": -3.0
+      }
+    },
+    "tui": {
+      "title": "Decentralized Physical Screens (Konsole)",
+      "description": "Dedicated interactive Konsole instances running agy -i on each target node's local Wayland display.",
+      "best_for": "Device-specific hardware testing, local thermal/power profiling, and ergonomic/gamepad verification.",
+      "superpowers": [
+        "Renders directly on target machine's physical screen",
+        "Direct local keyboard/gamepad interaction on that specific device",
+        "Bypasses remote SSH PTY layer completely",
+        "Full human-in-the-loop override in terminal"
+      ],
+      "limitations": [
+        "Scattered visibility across separate physical rooms/screens",
+        "Requires active display session on each node",
+        "Awkward window management on small handheld screens"
+      ],
+      "scoring_weights": {
+        "hardware_ergonomics": 3.5,
+        "local_display_test": 3.0,
+        "interactive_monitoring": 2.0,
+        "multi_node": -1.0,
+        "unattended_batch": -2.5
+      }
+    },
+    "gui": {
+      "title": "Antigravity 2.0 Desktop App",
+      "description": "Electron desktop GUI canvas using staged file delivery and local clipboard helper to prevent echo loops.",
+      "best_for": "Frontend development, visual HTML/CSS layouts, Generative UI, and interactive artifact planning.",
+      "superpowers": [
+        "Full rich interactive Generative UI and inline HTML rendering",
+        "Interactive 'Proceed' and plan feedback buttons",
+        "Visual Chrome DevTools browser testing and DOM inspection",
+        "Collapsible visual diffs and auxiliary panel inspection"
+      ],
+      "limitations": [
+        "Highest base system prompt token overhead (~450k+ tokens)",
+        "Requires manual copy/paste per node to avoid KDE Connect clipboard echoing",
+        "Cannot run headlessly without human operator"
+      ],
+      "scoring_weights": {
+        "visual_ui": 4.0,
+        "generative_ui": 3.5,
+        "interactive_plan": 3.0,
+        "browser_devtools": 2.5,
+        "unattended_batch": -4.0,
+        "multi_node": -2.0
+      }
+    }
+  },
+  "archetypes": [
+    {
+      "id": "multi_node_swarm_audit",
+      "task": "Audit codebase parity, documentation, and hardware features across desktop, laptop, rog-ally, and steamdeck with 1.5x coverage.",
+      "ground_truth_mode": "confluence",
+      "tags": ["multi_node", "interactive_monitoring", "cross_mesh_sync"]
+    },
+    {
+      "id": "unattended_nightly_regression",
+      "task": "Run overnight regression test suite on all nodes, record results in discussion, and output pass/fail matrix.",
+      "ground_truth_mode": "headless",
+      "tags": ["unattended_batch", "nightly_ci", "multi_node"]
+    },
+    {
+      "id": "steamdeck_gamepad_profile",
+      "task": "Test Steam Deck gamepad controls, desktop mode switching, and APU power throttling profiles locally.",
+      "ground_truth_mode": "tui",
+      "tags": ["hardware_ergonomics", "local_display_test"]
+    },
+    {
+      "id": "frontend_dashboard_design",
+      "task": "Design a new dashboard layout using Glassmorphism, Tailwind CSS, and interactive SVG diagrams.",
+      "ground_truth_mode": "gui",
+      "tags": ["visual_ui", "generative_ui", "browser_devtools"]
+    },
+    {
+      "id": "cross_mesh_compiler_matrix",
+      "task": "Compile and verify kernel shims and C extensions across AMD ROCm, NVIDIA CUDA, and Intel APU simultaneously.",
+      "ground_truth_mode": "confluence",
+      "tags": ["multi_node", "cross_mesh_sync", "interactive_monitoring"]
+    },
+    {
+      "id": "scheduled_security_scan",
+      "task": "Run weekly Lynis security auditing and Pacman package drift analysis on all nodes at 3 AM.",
+      "ground_truth_mode": "headless",
+      "tags": ["unattended_batch", "background_maintenance", "nightly_ci"]
+    },
+    {
+      "id": "laptop_battery_roaming_test",
+      "task": "Verify NetworkManager dispatcher script while roaming between Wi-Fi APs and monitor battery drain rate on laptop screen.",
+      "ground_truth_mode": "tui",
+      "tags": ["hardware_ergonomics", "local_display_test"]
+    },
+    {
+      "id": "interactive_plan_architecture",
+      "task": "Create a multi-phase system migration plan, requiring interactive operator feedback on each milestone before execution.",
+      "ground_truth_mode": "gui",
+      "tags": ["interactive_plan", "visual_ui"]
+    }
+  ]
+}

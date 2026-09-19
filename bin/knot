@@ -23,6 +23,7 @@ source "$KNOT_ROOT/core/modules/memory.sh"
 source "$KNOT_ROOT/core/modules/shutdown.sh"
 source "$KNOT_ROOT/core/modules/topology.sh"
 source "$KNOT_ROOT/core/modules/swarm_sync.sh"
+source "$KNOT_ROOT/core/modules/council.sh"
 
 cmd_onboard() {
   local node_id="${1:-}"
@@ -512,6 +513,26 @@ cmd_doctor() {
 
 cmd_repair() {
   doctor_repair "$@"
+}
+
+cmd_council() {
+  local action="${1:-start}"
+  if [ $# -gt 0 ]; then shift; fi
+
+  case "$action" in
+    start) council_start "$@" ;;
+    status) council_status "$@" ;;
+    attach) council_attach "$@" ;;
+    reconcile) council_reconcile "$@" ;;
+    copy) council_copy "$@" ;;
+    clean) council_clean "$@" ;;
+    kill) council_kill "$@" ;;
+    audit) bash "$KNOT_ROOT/skills/swarm-council/scripts/audit_tools.sh" "$@" ;;
+    sync) bash "$KNOT_ROOT/skills/swarm-council/scripts/project_sync.sh" "$@" ;;
+    *)
+      echo "Usage: knot council <start|status|attach|reconcile|copy|clean|kill|audit|sync> [options]"
+      ;;
+  esac
 }
 
 cmd_swarm() {
@@ -1236,6 +1257,10 @@ case "${1:-}" in
     shift
     cmd_kdeconnect "$@"
     ;;
+  council)
+    shift
+    cmd_council "$@"
+    ;;
   swarm)
     shift
     cmd_swarm "$@"
@@ -1322,6 +1347,7 @@ case "${1:-}" in
     echo "  knot sync [--all | <node_id>] Reconcile keys, configs, and layout across swarm"
     echo "  knot resolve <node_id> [port] Resolve active IP across 3 tiers"
     echo "  knot status                   Show live status of all mesh nodes"
+    echo "  knot council <start|status|attach|reconcile|copy|clean|kill> Out-of-band multi-agent swarm coordination"
     echo "  knot swarm [status|quota|test|exec|auth] Manage Antigravity AI agents across the mesh"
     echo "  knot quota [node|--all]       Show real-time 5h & weekly model quota limits"
     echo "  knot auth [node] [--gui]      Log in / re-authenticate Antigravity CLI on a node"

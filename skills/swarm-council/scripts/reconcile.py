@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""
+Swarm Council: Stage 6 Discussion Reconciler
+Parses node checkpoints and final verdicts from GitHub Discussions
+and generates a consolidated audit report.
+"""
+
+import re
+import os
+import sys
+import json
+import argparse
+import subprocess
+
+def fetch_thread_data(discussion_id):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    gh_helper = os.path.join(script_dir, "gh_discussion.py")
+    out = subprocess.check_output([gh_helper, "get_thread", "--discussion-id", discussion_id], text=True)
+    return json.loads(out)
+
+def parse_comments(thread_data, target_run_id):
+    comments = thread_data.get("comments", {}).get("nodes", [])
+    node_reports = {}
+
+    header_regex = re.compile(
+        r'<!--\s*KNOT-NODE:\s*([^\s|]+)\s*\|\s*RUN:\s*([^\s|]+)\s*\|\s*STATUS:\s*([^\s|]+)\s*-->',
+        re.IGNORECASE
+    )
+
+    for c in comments:
+        body = c.get("body", "")
+        match = header_regex.search(body)
+        if match:
+            node_id, run_id, status = match.groups()
+            if target_run_id and run_id != target_run_id:
+                continue
+
+            content = header_regex.sub('', body).strip()
+            node_reports.setdefault(node_id, []).append({
+                "run_id": run_id,
+                "status": status.upper(),
+                "created_at": c.get("createdAt"),
+                "author": c.get("author", {}).get("login"),
+                "content": content
+            })
+
+    return node_reports
+
+def generate_reconciled_report(thread_data, node_reports, target_run_id):
+    lines = [
+        f"# Swarm Council Consolidated Audit Report",
+        f"",
+        f"**Run ID**: `{target_run_id or 'all'}`  ",
+        f"**Discussion Thread**: [{thread_data.get('title')}]({thread_data.get('url')})  ",
+        f"**Total Discussion Comments**: {thread_data.get('comments', {}).get('totalCount', 0)}  ",
+        f"",
+        "---",
+        "",
+        "## 1. Executive Summary & Fleet Status Matrix",
+        "",
+        "| Node ID | Milestones Passed | Final Verdict | Key Findings / Side Quest |",
+        "| :--- | :---: | :---: | :--- |"
+    ]
+
+    all_verdicts = []
+
+    for node_id, updates in node_reports.items():
+        statuses = [u["status"] for u in updates]
+        final_update = next((u for u in reversed(updates) if u["status"] == "FINAL"), updates[-1] if updates else None)
+        
+        milestones = ", ".join([s for s in statuses if s in ["25%", "50%", "75%"]]) or "Direct"
+        verdict = "IN_PROGRESS"
+        findings_summary = "Awaiting final deliverable."
+
+        if final_update:
+            text = final_update["content"]
+            if "READY FOR GA" in text.upper():
+                verdict = "✅ READY FOR GA"
+            elif "NOT READY" in text.upper():
+                verdict = "❌ NOT READY (Blocking Issues)"
+            else:
+                verdict = final_update["status"]
+
+            # Extract first summary paragraph or header
+            for p in text.split("\n\n"):
+                clean = p.strip().replace("\n", " ")
+                if len(clean) > 20 and not clean.startswith("#"):
+                    findings_summary = clean[:120] + "..."
+                    break
+
+        all_verdicts.append(verdict)
+        lines.append(f"| **`{node_id}`** | {milestones} | {verdict} | {findings_summary} |")
+
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("## 2. Reconciled Findings by Workstation")
+    lines.append("")
+
+    for node_id, updates in node_reports.items():
+        lines.append(f"### Workstation: `@{node_id}`")
+        for u in updates:
+            lines.append(f"#### Status: `{u['status']}` ({u['created_at']})")
+            lines.append(u["content"])
+            lines.append("")
+
+    return "\n".join(lines)
+
+def main():
+    parser = argparse.ArgumentParser(description="Swarm Council Discussion Reconciler")
+    parser.add_argument("--discussion-id", required=True, help="GitHub Discussion node ID")
+    parser.add_argument("--run-id", default="", help="Specific run ID to reconcile")
+    parser.add_argument("--out-file", default="", help="Output markdown report path")
+
+    args = parser.parse_args()
+
+    thread_data = fetch_thread_data(args.discussion_id)
+    node_reports = parse_comments(thread_data, args.run_id)
+    report_md = generate_reconciled_report(thread_data, node_reports, args.run_id)
+
+    if args.out_file:
+        with open(args.out_file, "w") as f:
+            f.write(report_md)
+        print(f"Reconciled report written to: {args.out_file}")
+    else:
+        print(report_md)
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "packs": {
+    "audit-parity": {
+      "title": "Full Codebase Parity Audit",
+      "description": "Comprehensive audit package with 1.5x chunk coverage, domain specialization, 30% side quests, and 25/50/75 checkpoints.",
+      "hints": {
+        "divide:coverage": 1.5,
+        "domain:specialist": true,
+        "checkpoint:intervals": [25, 50, 75],
+        "sidequest:capacity": 30,
+        "callout:markup": "@[node:{node_id}]",
+        "execution:autonomous": true
+      }
+    },
+    "fast-triage": {
+      "title": "Rapid Fleet Triage",
+      "description": "High-speed triage focusing on zero-token CLI probing, single checkpoint reporting, and rapid pass/fail barrier.",
+      "hints": {
+        "divide:coverage": 1.0,
+        "domain:specialist": true,
+        "checkpoint:intervals": [50],
+        "sidequest:capacity": 0,
+        "callout:markup": "@[node:{node_id}]",
+        "execution:autonomous": true
+      }
+    }
+  }
+}

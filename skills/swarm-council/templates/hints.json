@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "hints": {
+    "divide:coverage": {
+      "name": "Divide and Conquer Coverage",
+      "parameter": "ratio",
+      "default": 1.5,
+      "description": "Calculates codebase chunk distribution achieving target overlapping coverage ratio across online nodes."
+    },
+    "domain:specialist": {
+      "name": "Hardware Domain Specialization",
+      "parameter": "enabled",
+      "default": true,
+      "description": "Injects node-specific testing instructions tailored to physical and OS capabilities (GPU, display, roaming, anchor)."
+    },
+    "checkpoint:intervals": {
+      "name": "Milestone Checkpoint Cadence",
+      "parameter": "percentages",
+      "default": [25, 50, 75],
+      "description": "Defines self-assessed progress milestone percentages at which each node must post a discussion reply."
+    },
+    "sidequest:capacity": {
+      "name": "Autonomous Side Quest Capacity",
+      "parameter": "percentage",
+      "default": 30,
+      "description": "Percentage of individual capacity dedicated to autonomous deep-dive exploration or stress testing."
+    },
+    "callout:markup": {
+      "name": "Node Mention Markup",
+      "parameter": "format",
+      "default": "@[node:{node_id}]",
+      "description": "Unmistakable markup pattern for addressing specific nodes without triggering irrelevant agent turns."
+    },
+    "execution:autonomous": {
+      "name": "Autonomous Non-Blocking Directive",
+      "parameter": "enabled",
+      "default": true,
+      "description": "Instructs runner to execute tools directly without pausing for human artifact or plan approval."
+    }
+  }
+}
