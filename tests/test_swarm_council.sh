@@ -322,5 +322,64 @@ if [ -d "$purr_dir" ]; then
 fi
 echo "PASSED"
 
+# 16. Dynamic Node Identifier Resolution & Active Tournament Server Delivery
+echo -n "16. Testing dynamic node resolution & active tournament server delivery... "
+resolved_nid="$(python3 "$COUNCIL_SCRIPTS/resolve_node.py")"
+if [ -z "$resolved_nid" ]; then
+  echo "FAILED (Empty node id from resolve_node.py)"
+  exit 1
+fi
+
+ring_test="$(python3 -c '
+import sys; sys.path.insert(0, "skills/swarm-council/scripts")
+from scaffolder import build_tournament_ring
+nodes = ["laptop", "rog-ally", "steamdeck", "desktop"]
+ring = build_tournament_ring(nodes)
+print(",".join(ring))
+')"
+first_ring_node="$(echo "$ring_test" | cut -d',' -f1)"
+if [ "$first_ring_node" != "$resolved_nid" ]; then
+  echo "FAILED (Expected first ring node to be $resolved_nid, got $first_ring_node)"
+  exit 1
+fi
+
+# Test tournament launcher delivery for active server vs standby
+test_tourn_run="unit_test_tourn_$$"
+mkdir -p "$HOME/.config/knot/missions/$test_tourn_run"
+trap 'rm -rf "$HOME/.config/knot/missions/$test_tourn_run"' EXIT
+
+python3 "$COUNCIL_SCRIPTS/scaffolder.py" --run-id "$test_tourn_run" --pack tournament --db mesh --nodes "$resolved_nid,mock-peer" --project-dir "$KNOT_ROOT" >/dev/null
+
+meta_tourn="$HOME/.config/knot/missions/$test_tourn_run/meta.json"
+meta_opening="$(jq -r '.opening_node // empty' "$meta_tourn")"
+if [ "$meta_opening" != "$resolved_nid" ]; then
+  echo "FAILED (Opening node in meta.json is $meta_opening, expected $resolved_nid)"
+  exit 1
+fi
+
+# Stage delivery without launching
+bash "$COUNCIL_SCRIPTS/deliver.sh" confluence "$test_tourn_run" "knot-mesh" grid 0 "$resolved_nid,mock-peer" 0 >/dev/null 2>&1 || true
+
+active_launch="$HOME/.config/knot/missions/$test_tourn_run/${resolved_nid}_launch.sh"
+peer_launch="$HOME/.config/knot/missions/$test_tourn_run/mock-peer_launch.sh"
+
+if [ ! -f "$active_launch" ] || [ ! -f "$peer_launch" ]; then
+  echo "FAILED (Launch scripts not generated)"
+  exit 1
+fi
+
+if ! grep -q -- '-i "\$(< "\$PROMPT_FILE")"' "$active_launch"; then
+  echo "FAILED (Active opening server launcher missing prompt execution flag - was generated in Standby!)"
+  exit 1
+fi
+
+if ! grep -q "Zero-Token Standby" "$peer_launch"; then
+  echo "FAILED (Peer node launcher not generated in Zero-Token Standby mode)"
+  exit 1
+fi
+
+rm -rf "$HOME/.config/knot/missions/$test_tourn_run"
+echo "PASSED"
+
 echo ""
-echo "=== All 15 Swarm Council Tests PASSED Successfully! ==="
+echo "=== All 16 Swarm Council Tests PASSED Successfully! ==="

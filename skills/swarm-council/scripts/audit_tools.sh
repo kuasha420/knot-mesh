@@ -33,8 +33,9 @@ if [ -n "$KNOT_BIN" ] && [ -x "$KNOT_BIN" ]; then
   done < <("$KNOT_BIN" status 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | awk '$5 == "ONLINE" {print $1}')
 fi
 
+local_node="$(python3 "$SCRIPT_DIR/resolve_node.py" 2>/dev/null || hostname -s)"
 if [ ${#nodes[@]} -eq 0 ]; then
-  nodes=("$(hostname -s)")
+  nodes=("$local_node")
 fi
 
 audit_results="{"
@@ -49,7 +50,7 @@ sync_settings_cmd="python3 -c 'import json, os; p1=os.path.expanduser(\"~/.gemin
 for node in "${nodes[@]}"; do
   idx=$((idx + 1))
   is_local=0
-  if [ "$node" = "$(hostname -s)" ] || [ "$node" = "desktop" ] || [ "$node" = "localhost" ]; then
+  if [ "$node" = "$local_node" ] || [ "$node" = "$(hostname -s)" ] || [ "$node" = "localhost" ]; then
     is_local=1
   fi
 

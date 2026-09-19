@@ -258,9 +258,9 @@ All node checkpoints and final audit deliverables will be posted here."
       '. + {disc_id: $disc_id, disc_url: $disc_url, mode: $mode, project: $project, db: $db, tiling: $tiling, interactive: $interactive, status: "ACTIVE"}' \
       "$missions_dir/meta.json" > "$tmp_meta" && mv "$tmp_meta" "$missions_dir/meta.json"
   else
-    local local_host
-    local_host="$(hostname -s)"
-    echo "{\"run_id\":\"$run_id\",\"disc_id\":\"$disc_id\",\"disc_url\":\"$disc_url\",\"mode\":\"$mode\",\"project\":\"$proj_name\",\"db\":\"$db\",\"tiling\":\"$tiling\",\"pack\":\"$pack\",\"anchor\":\"$local_host\",\"opening_node\":\"$local_host\",\"interactive\":$interactive,\"nodes\":\"$nodes\",\"status\":\"ACTIVE\",\"created_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$missions_dir/meta.json"
+    local local_node
+    local_node="$(knot_detect_node_id)"
+    echo "{\"run_id\":\"$run_id\",\"disc_id\":\"$disc_id\",\"disc_url\":\"$disc_url\",\"mode\":\"$mode\",\"project\":\"$proj_name\",\"db\":\"$db\",\"tiling\":\"$tiling\",\"pack\":\"$pack\",\"anchor\":\"$local_node\",\"opening_node\":\"$local_node\",\"interactive\":$interactive,\"nodes\":\"$nodes\",\"status\":\"ACTIVE\",\"created_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$missions_dir/meta.json"
   fi
 
   if [ $dry_run -eq 1 ]; then
@@ -339,7 +339,7 @@ council_reply() {
   fi
   shift
 
-  local node="$(hostname -s)"
+  local node="$(knot_detect_node_id)"
   if [ -n "${KNOT_NODE_ID:-}" ]; then node="$KNOT_NODE_ID"; fi
   local status="PROGRESS"
   local body=""
@@ -590,7 +590,9 @@ council_attach() {
   fi
 
   knot_log_info "Connecting to active agent session on node '$node_id' (Mission: ${run_id:-none})..."
-  if [ "$node_id" = "desktop" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(hostname -s)" ]; then
+  local local_node
+  local_node="$(knot_detect_node_id)"
+  if [ "$node_id" = "$local_node" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(knot_detect_hostname)" ]; then
     export KNOT_NODE_ID="$node_id"
     if [ -n "$run_id" ]; then export KNOT_COUNCIL_RUN_ID="$run_id"; fi
     export KNOT_HUB_URL="https://127.0.0.1:4242"

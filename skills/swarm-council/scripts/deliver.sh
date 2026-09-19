@@ -28,6 +28,7 @@ elif [ -x "$HOME/.local/bin/knot" ]; then
   KNOT_BIN="$HOME/.local/bin/knot"
 fi
 MISSIONS_DIR="$HOME/.config/knot/missions/$RUN_ID"
+LOCAL_NODE="$(python3 "$SCRIPT_DIR/resolve_node.py" 2>/dev/null || hostname -s)"
 
 if [ ! -d "$MISSIONS_DIR" ]; then
   echo "Error: Mission directory $MISSIONS_DIR not found."
@@ -64,7 +65,7 @@ case "$MODE" in
         opening_node="$(jq -r '.opening_node // .ring[0] // ""' "$MISSIONS_DIR/meta.json" 2>/dev/null)"
       fi
       if [ -z "$opening_node" ]; then
-        opening_node="$(hostname -s)"
+        opening_node="$LOCAL_NODE"
       fi
 
       for pfile in "$MISSIONS_DIR"/*_prompt.md; do
@@ -175,7 +176,7 @@ EOF_LAUNCH
         sed -i "s|NODE_ID_PLACEHOLDER|$node_id|g" "$launcher_script"
         chmod +x "$launcher_script"
 
-        if [ "$node_id" = "desktop" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(hostname -s)" ]; then
+        if [ "$node_id" = "$LOCAL_NODE" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(hostname -s)" ]; then
           cp "$pfile" "$MISSIONS_DIR/prompt.md"
           cp "$launcher_script" "$MISSIONS_DIR/launch.sh"
         else
@@ -205,7 +206,7 @@ EOF_LAUNCH
       
       resolve_cmd="python3 -c 'import sys, os, glob, json; home=os.path.expanduser(\"~\"); pname=sys.argv[1].lower(); pdir=os.path.join(home, \".gemini/config/projects\"); res=\"\"; [None for f in glob.glob(os.path.join(pdir, \"*.json\")) if not res and (lambda d: [setattr(sys.modules[__name__], \"res\", p if os.path.isdir(p) else next((c for b in [os.path.basename(p)] for c in [os.path.join(home, \"Dev\", b), os.path.join(home, b), os.path.join(home, \".local/share\", b)] if os.path.isdir(c)), \"\")) for r in d.get(\"projectResources\",{}).get(\"resources\",[]) for u in [r.get(\"gitFolder\",{}).get(\"folderUri\",\"\")] if u.startswith(\"file://\") for p in [u[7:].rstrip(\"/\")] if res==\"\"])(json.load(open(f))) if (lambda d: d.get(\"name\",\"\").lower()==pname or d.get(\"id\",\"\").lower()==pname)(json.load(open(f)))]; print(res or next((c for c in [os.path.join(home, \"Dev\", pname), os.path.join(home, pname), os.path.join(home, \".local/share\", pname)] if os.path.isdir(c)), os.getcwd()))' '$PROJECT'"
 
-      if [ "$node_id" = "desktop" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(hostname -s)" ]; then
+      if [ "$node_id" = "$LOCAL_NODE" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(hostname -s)" ]; then
         systemd-run --user --unit="knot-council-$RUN_ID-$node_id" \
           bash -c "PDIR=\"\$($resolve_cmd)\"; if [ -d \"\$PDIR\" ]; then cd \"\$PDIR\"; fi; export KNOT_NODE_ID='$node_id'; export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/bin:\$PATH\"; agy --project '$PROJECT' --dangerously-skip-permissions -p \"\$(cat '$pfile')\" --output-format json" \
           > "$MISSIONS_DIR/${node_id}_output.json" 2>&1 &
@@ -228,7 +229,7 @@ EOF_LAUNCH
       
       resolve_cmd="python3 -c 'import sys, os, glob, json; home=os.path.expanduser(\"~\"); pname=sys.argv[1].lower(); pdir=os.path.join(home, \".gemini/config/projects\"); res=\"\"; [None for f in glob.glob(os.path.join(pdir, \"*.json\")) if not res and (lambda d: [setattr(sys.modules[__name__], \"res\", p if os.path.isdir(p) else next((c for b in [os.path.basename(p)] for c in [os.path.join(home, \"Dev\", b), os.path.join(home, b), os.path.join(home, \".local/share\", b)] if os.path.isdir(c)), \"\")) for r in d.get(\"projectResources\",{}).get(\"resources\",[]) for u in [r.get(\"gitFolder\",{}).get(\"folderUri\",\"\")] if u.startswith(\"file://\") for p in [u[7:].rstrip(\"/\")] if res==\"\"])(json.load(open(f))) if (lambda d: d.get(\"name\",\"\").lower()==pname or d.get(\"id\",\"\").lower()==pname)(json.load(open(f)))]; print(res or next((c for c in [os.path.join(home, \"Dev\", pname), os.path.join(home, pname), os.path.join(home, \".local/share\", pname)] if os.path.isdir(c)), os.getcwd()))' '$PROJECT'"
 
-      if [ "$node_id" = "$(hostname -s)" ] || [ "$node_id" = "localhost" ]; then
+      if [ "$node_id" = "$LOCAL_NODE" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(hostname -s)" ]; then
         local_pdir="$(python3 "$SCRIPT_DIR/resolve_project.py" "$PROJECT")"
         WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 nohup konsole --hold --workdir "$local_pdir" -e bash -c "export KNOT_NODE_ID='$node_id'; exec agy --project '$PROJECT' --dangerously-skip-permissions -i \"\$(cat '$pfile')\"" >/dev/null 2>&1 &
       else
@@ -249,7 +250,7 @@ EOF_LAUNCH
       node_id="$(basename "$pfile" | sed 's/_prompt.md//')"
       echo "  [•] Staging prompt on $node_id..."
       
-      if [ "$node_id" = "$(hostname -s)" ] || [ "$node_id" = "localhost" ]; then
+      if [ "$node_id" = "$LOCAL_NODE" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(hostname -s)" ]; then
         mkdir -p "$HOME/.config/knot/missions/staged"
         if command -v notify-send >/dev/null 2>&1; then
           notify-send -u normal "Knot Swarm Council" "Prompt staged for $node_id. Run 'knot council copy' to load clipboard."

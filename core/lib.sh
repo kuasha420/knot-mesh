@@ -177,6 +177,35 @@ knot_detect_hostname() {
   fi
 }
 
+knot_detect_node_id() {
+  if [ -n "${KNOT_NODE_ID:-}" ]; then
+    echo "$KNOT_NODE_ID"
+    return 0
+  fi
+  local user_home
+  user_home="$(knot_detect_user_home)"
+  if [ -f "$user_home/.config/knot/node_id" ]; then
+    local nid
+    nid="$(cat "$user_home/.config/knot/node_id" 2>/dev/null | tr -d '[:space:]')"
+    if [ -n "$nid" ]; then
+      echo "$nid"
+      return 0
+    fi
+  fi
+  local h
+  h="$(knot_detect_hostname)"
+  if command -v jq >/dev/null 2>&1; then
+    for m in "$user_home"/.config/knot/swarms/*/nodes/*.json; do
+      [ -f "$m" ] || continue
+      if jq -e --arg h "$h" '.hostname == $h or (.aliases // [] | index($h) != null) or .id == $h' "$m" >/dev/null 2>&1; then
+        jq -r '.id' "$m"
+        return 0
+      fi
+    done
+  fi
+  echo "${h:-localhost}"
+}
+
 knot_detect_firewalls() {
   local found=()
   if command -v ufw >/dev/null; then

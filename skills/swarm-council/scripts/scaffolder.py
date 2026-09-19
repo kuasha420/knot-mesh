@@ -182,13 +182,22 @@ def calculate_chunk_distribution(chunks, nodes, target_coverage=1.5):
     actual_coverage = sum(len(v) for v in node_assignments.values()) / float(num_chunks)
     return node_assignments, actual_coverage
 
-def build_tournament_ring(nodes):
+try:
+    from resolve_node import resolve_local_node_id
+except ImportError:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
     try:
-        local_host = subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip()
-    except Exception:
-        local_host = ""
-    if local_host and local_host in nodes:
-        active_ring = [local_host] + [n for n in nodes if n != local_host]
+        from resolve_node import resolve_local_node_id
+    except ImportError:
+        def resolve_local_node_id(nodes=None):
+            return os.environ.get("KNOT_NODE_ID") or (nodes[0] if nodes else "localhost")
+
+def build_tournament_ring(nodes):
+    local_node = resolve_local_node_id(nodes)
+    if local_node and local_node in nodes:
+        active_ring = [local_node] + [n for n in nodes if n != local_node]
     else:
         active_ring = list(nodes)
     return active_ring if active_ring else ["localhost"]

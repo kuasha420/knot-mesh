@@ -185,7 +185,15 @@ results = {
 }
 
 # Determine local node identifiers
-local_node_ids = {"desktop", "localhost", "127.0.0.1", os.uname().nodename.split(".")[0]}
+try:
+    from resolve_node import resolve_local_node_id
+    detected_local = resolve_local_node_id()
+except Exception:
+    detected_local = ""
+
+local_node_ids = {"localhost", "127.0.0.1", os.uname().nodename.split(".")[0]}
+if detected_local:
+    local_node_ids.add(detected_local)
 env_node = os.environ.get("KNOT_NODE_ID")
 if env_node:
     local_node_ids.add(env_node)

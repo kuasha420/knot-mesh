@@ -19,6 +19,14 @@ script_dir = os.path.dirname(os.path.realpath(__file__))
 knot_root = os.path.realpath(os.path.join(script_dir, "../../.."))
 if knot_root not in sys.path:
     sys.path.insert(0, knot_root)
+if script_dir not in sys.path:
+    sys.path.insert(0, script_dir)
+
+try:
+    from resolve_node import resolve_local_node_id
+except ImportError:
+    def resolve_local_node_id(nodes=None):
+        return os.environ.get("KNOT_NODE_ID") or (nodes[0] if nodes else "localhost")
 
 try:
     from core.palette import resolve_swarm_palette
@@ -94,13 +102,10 @@ def load_topology(knot_root):
                     return json.load(f)
             except Exception:
                 pass
-    try:
-        local_host = subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip()
-    except Exception:
-        local_host = "localhost"
+    local_node = resolve_local_node_id()
     return {
-        "anchor": local_host,
-        "screens": [local_host]
+        "anchor": local_node,
+        "screens": [local_node]
     }
 
 
@@ -143,14 +148,11 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
         ""
     ]
 
-    try:
-        local_host = subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip()
-    except Exception:
-        local_host = ""
+    local_node = resolve_local_node_id(nodes)
 
     ordered_nodes = []
-    if local_host and local_host in nodes:
-        ordered_nodes.append(local_host)
+    if local_node and local_node in nodes:
+        ordered_nodes.append(local_node)
     for n in nodes:
         if n not in ordered_nodes:
             ordered_nodes.append(n)
@@ -191,7 +193,7 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
                     agy_cmd = f'exec agy --project "{project_name}" --dangerously-skip-permissions'
                     mode_label = "Zero-Token Standby (Prompt to steer)"
 
-                if node in [local_host, "desktop", "localhost"]:
+                if node in [local_node, "localhost"]:
                     ps.write(f'export KNOT_NODE_ID="{node}"\n')
                     ps.write(f'export KNOT_COUNCIL_RUN_ID="{run_id}"\n')
                     ps.write(f'export KNOT_HUB_URL="https://127.0.0.1:4242"\n')
@@ -230,7 +232,7 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
                     )
                     ps.write(f'exec "{knot_bin}" exec -tt {node} "{remote_cmd}"\n')
             else:
-                if node in [local_host, "desktop", "localhost"]:
+                if node in [local_node, "localhost"]:
                     ps.write(f'exec "{missions_dir}/launch.sh"\n')
                 else:
                     ps.write(f'exec "{knot_bin}" exec -tt {node} "trap \'\' HUP; ~/.config/knot/missions/{run_id}/launch.sh; exec bash"\n')
@@ -270,7 +272,7 @@ def main():
                 from scaffolder import discover_online_nodes
                 nodes = discover_online_nodes(knot_root)
             except Exception:
-                local_h = subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip() or "localhost"
+                local_h = resolve_local_node_id()
                 nodes = [local_h]
 
     os.makedirs(missions_dir, exist_ok=True)
@@ -302,8 +304,11 @@ def main():
     if resolve_swarm_palette:
         try:
             p = resolve_swarm_palette(node_ids=nodes)
-            if "desktop" in p:
-                active_border = p["desktop"].hex
+            local_nid = resolve_local_node_id(nodes)
+            if local_nid in p:
+                active_border = p[local_nid].hex
+            elif nodes and nodes[0] in p:
+                active_border = p[nodes[0]].hex
         except Exception:
             pass
 

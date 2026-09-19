@@ -191,11 +191,11 @@ def main():
 
     if not nodes:
         try:
-            import subprocess
-            local_host = subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip()
+            from resolve_node import resolve_local_node_id
+            local_node = resolve_local_node_id()
         except Exception:
-            local_host = "localhost"
-        nodes = [local_host]
+            local_node = "localhost"
+        nodes = [local_node]
 
     if not opening_node and nodes:
         opening_node = nodes[0]

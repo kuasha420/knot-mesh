@@ -45,7 +45,12 @@ def main():
         return
 
     # 4. Resolve Node & Mesh Identity
-    node_id = os.environ.get("KNOT_NODE_ID", "desktop")
+    try:
+        from resolve_node import resolve_local_node_id
+        default_node = resolve_local_node_id()
+    except Exception:
+        default_node = "localhost"
+    node_id = os.environ.get("KNOT_NODE_ID", default_node)
     peers = os.environ.get("KNOT_PEERS", "")
     db_backend = os.environ.get("KNOT_COUNCIL_DB", "mesh")
     hub_url = os.environ.get("KNOT_HUB_URL", "https://127.0.0.1:4242")
