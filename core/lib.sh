@@ -292,20 +292,21 @@ knot_set_active_swarm() {
     if [ ! -d "$run_dir" ]; then
       mkdir -p "$run_dir"
     fi
-    if [ -w "$run_dir/active_swarm" ]; then
-      echo "$swarm_id" > "$run_dir/active_swarm"
-    elif [ -w "$run_dir" ]; then
-      echo "$swarm_id" > "$run_dir/active_swarm.tmp"
-      if ! mv -f "$run_dir/active_swarm.tmp" "$run_dir/active_swarm" 2>&1; then
+    local tmp_run="$run_dir/active_swarm.$$.tmp"
+    if [ -w "$run_dir" ]; then
+      echo "$swarm_id" > "$tmp_run"
+      if ! mv -f "$tmp_run" "$run_dir/active_swarm" 2>&1; then
         if [ -w "$run_dir/active_swarm" ]; then
-          cat "$run_dir/active_swarm.tmp" > "$run_dir/active_swarm"
+          cat "$tmp_run" > "$run_dir/active_swarm"
         elif command -v sudo >/dev/null; then
           if sudo -n true 2>&1; then
             echo "$swarm_id" | sudo tee "$run_dir/active_swarm" >/dev/null
           fi
         fi
-        rm -f "$run_dir/active_swarm.tmp"
+        rm -f "$tmp_run"
       fi
+    elif [ -w "$run_dir/active_swarm" ]; then
+      echo "$swarm_id" > "$run_dir/active_swarm"
     elif command -v sudo >/dev/null; then
       if sudo -n true 2>&1; then
         echo "$swarm_id" | sudo tee "$run_dir/active_swarm" >/dev/null
@@ -323,8 +324,9 @@ knot_set_active_swarm() {
   user_home="$(knot_detect_user_home)"
   local state_dir="$user_home/.local/state/knot"
   mkdir -p "$state_dir"
-  echo "$swarm_id" > "$state_dir/active_swarm.tmp"
-  mv -f "$state_dir/active_swarm.tmp" "$state_dir/active_swarm"
+  local tmp_state="$state_dir/active_swarm.$$.tmp"
+  echo "$swarm_id" > "$tmp_state"
+  mv -f "$tmp_state" "$state_dir/active_swarm"
 }
 
 # Loads a specific swarm profile into current shell environment

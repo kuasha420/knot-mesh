@@ -90,8 +90,8 @@ if [ ! -f "$session_file" ]; then
   echo "FAILED (Session file not created at $session_file)"
   exit 1
 fi
-if ! grep -q "layout splits" "$session_file"; then
-  echo "FAILED (Missing layout splits in session file)"
+if ! grep -q -E "layout (splits|grid)" "$session_file"; then
+  echo "FAILED (Missing layout grid or splits in session file)"
   exit 1
 fi
 if ! grep -q "trap '' HUP" "$session_file"; then

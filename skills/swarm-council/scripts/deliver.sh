@@ -40,8 +40,12 @@ case "$MODE" in
       cat << 'EOF_LAUNCH' > "$launcher_script"
 #!/usr/bin/env bash
 trap '' HUP
-export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:$PATH"
 PROMPT_FILE="$HOME/.config/knot/missions/RUN_ID_PLACEHOLDER/prompt.md"
+PROJECT_DIR="$HOME/Dev/PROJECT_PLACEHOLDER"
+if [ -d "$PROJECT_DIR" ]; then
+  cd "$PROJECT_DIR"
+fi
 exec agy --project PROJECT_PLACEHOLDER --dangerously-skip-permissions -i "$(< "$PROMPT_FILE")"
 EOF_LAUNCH
       sed -i "s|RUN_ID_PLACEHOLDER|$RUN_ID|g" "$launcher_script"
@@ -70,13 +74,13 @@ EOF_LAUNCH
       
       if [ "$node_id" = "desktop" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(hostname -s)" ]; then
         systemd-run --user --unit="knot-council-$RUN_ID-$node_id" \
-          agy --project "$PROJECT" --dangerously-skip-permissions -p "$(cat "$pfile")" --output-format json \
+          bash -c "if [ -d \"\$HOME/Dev/$PROJECT\" ]; then cd \"\$HOME/Dev/$PROJECT\"; fi; export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/bin:\$PATH\"; agy --project '$PROJECT' --dangerously-skip-permissions -p \"\$(cat '$pfile')\" --output-format json" \
           > "$MISSIONS_DIR/${node_id}_output.json" 2>&1 &
       else
         # Push prompt file to target node and execute via systemd-run
         "$KNOT_ROOT/bin/knot" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
         cat "$pfile" | "$KNOT_ROOT/bin/knot" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
-        "$KNOT_ROOT/bin/knot" exec "$node_id" "systemd-run --user --unit=knot-council-$RUN_ID agy --project $PROJECT --dangerously-skip-permissions -p \"\$(cat ~/.config/knot/missions/$RUN_ID/prompt.md)\" --output-format json > ~/.config/knot/missions/$RUN_ID/output.json 2>&1 &"
+        "$KNOT_ROOT/bin/knot" exec "$node_id" "systemd-run --user --unit=knot-council-$RUN_ID bash -c \"if [ -d \\\"\\\$HOME/Dev/$PROJECT\\\" ]; then cd \\\"\\\$HOME/Dev/$PROJECT\\\"; fi; export PATH=\\\"\\\$HOME/.local/bin:/usr/local/bin:/usr/bin:\\\$PATH\\\"; agy --project $PROJECT --dangerously-skip-permissions -p \\\"\\\$(cat ~/.config/knot/missions/$RUN_ID/prompt.md)\\\" --output-format json\" > ~/.config/knot/missions/$RUN_ID/output.json 2>&1 &"
       fi
     done
     echo "[✓] Fleet runners dispatched headlessly in background."
@@ -90,7 +94,7 @@ EOF_LAUNCH
       echo "  [•] Spawning Konsole on $node_id screen..."
       
       if [ "$node_id" = "desktop" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(hostname -s)" ]; then
-        WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 nohup konsole --hold -e agy --project "$PROJECT" --dangerously-skip-permissions -i "$(cat "$pfile")" >/dev/null 2>&1 &
+        WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 nohup konsole --hold --workdir "$HOME/Dev/$PROJECT" -e agy --project "$PROJECT" --dangerously-skip-permissions -i "$(cat "$pfile")" >/dev/null 2>&1 &
       else
         # Push prompt and launch konsole on remote display
         "$KNOT_ROOT/bin/knot" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
@@ -98,7 +102,7 @@ EOF_LAUNCH
         
         uid="1000"
         if [ "$node_id" = "steamdeck" ]; then uid="1001"; fi
-        "$KNOT_ROOT/bin/knot" exec "$node_id" "WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/$uid nohup konsole --hold -e agy --project $PROJECT --dangerously-skip-permissions -i \"\$(cat ~/.config/knot/missions/$RUN_ID/prompt.md)\" >/dev/null 2>&1 &"
+        "$KNOT_ROOT/bin/knot" exec "$node_id" "WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/$uid nohup konsole --hold --workdir \"\$HOME/Dev/$PROJECT\" -e agy --project $PROJECT --dangerously-skip-permissions -i \"\$(cat ~/.config/knot/missions/$RUN_ID/prompt.md)\" >/dev/null 2>&1 &"
       fi
     done
     echo "[✓] Interactive TUI windows open on fleet displays."

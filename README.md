@@ -15,7 +15,7 @@
 Install Knot Mesh on your primary workstation and client devices in seconds:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kuasha420/knot-mesh/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kuasha420/knot-mesh/main/install.sh | bash
 ```
 
 Bootstrap an Anchor workstation:

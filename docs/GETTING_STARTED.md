@@ -72,7 +72,7 @@ Before starting, ensure all machines meet these requirements:
 Run the bootstrap installer on all workstations and strands:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kuasha420/knot-mesh/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kuasha420/knot-mesh/main/install.sh | bash
 ```
 
 Alternatively, if building from source via `makepkg`:

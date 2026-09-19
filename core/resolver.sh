@@ -35,9 +35,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-if [ -z "$NODE" ]; then
-  knot_log_err "Usage: knot resolve <node_id[.swarm_id]> [port] [--proxy] [--swarm <id>]"
-  exit 1
+if [ -z "$NODE" ] || [ "$NODE" = "-h" ] || [ "$NODE" = "--help" ]; then
+  echo "Usage: knot resolve <node_id[.swarm_id]> [port] [--proxy] [--swarm <id>]"
+  echo "Resolves mesh node addresses across 3 tiers (lease cache, mDNS, manifest IP hint, MAC ARP scan)."
+  if [ -z "$NODE" ]; then
+    exit 1
+  else
+    exit 0
+  fi
 fi
 
 TARGET_NODE="$NODE"
@@ -261,7 +266,10 @@ if [ -z "$RESOLVED_IP" ]; then
   exit 1
 fi
 
-echo "$RESOLVED_IP" > "$LEASE_FILE"
+lease_tmp="${LEASE_FILE}.$$.tmp"
+echo "$RESOLVED_IP" > "$lease_tmp"
+mv -f "$lease_tmp" "$LEASE_FILE" 2>/dev/null || cat "$lease_tmp" > "$LEASE_FILE"
+rm -f "$lease_tmp"
 
 if [ "$MODE" = "proxy" ]; then
   if command -v nc >/dev/null; then

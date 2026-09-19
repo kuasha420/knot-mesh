@@ -1745,7 +1745,7 @@ class MockKnotHubClient(KnotHubClient):
             return {"ok": True, "lease": {"name": (data or {}).get("name"), "state": "VERIFIED_COMMITTED"}}
         elif path == "/projects":
             return [
-                {"id": "knot", "name": "knot", "folders": ["/home/kuasha/Dev/knot"], "default_channel": "main"},
+                {"id": "knot", "name": "knot", "folders": [os.path.expanduser("~/Dev/knot-mesh")], "default_channel": "main"},
                 {"id": "mm-pu-core-connect-website", "name": "mm-pu-core-connect-website", "folders": ["/a", "/b", "/c"], "default_channel": "main"}
             ]
         elif path.startswith("/chat/conversations"):
