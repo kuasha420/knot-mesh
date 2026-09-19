@@ -297,6 +297,18 @@ def main():
         except Exception:
             pass
 
+    socket_path = f"/tmp/kitty-council-{args.run_id}.sock"
+    meta_file = os.path.join(missions_dir, "meta.json")
+    if os.path.exists(meta_file):
+        try:
+            with open(meta_file, "r") as mf:
+                mdata = json.load(mf)
+            mdata["socket"] = socket_path
+            with open(meta_file, "w") as mf:
+                json.dump(mdata, mf, indent=2)
+        except Exception:
+            pass
+
     if not args.dry_run:
         env = os.environ.copy()
         env.setdefault("DISPLAY", ":0")
@@ -305,6 +317,8 @@ def main():
             [
                 "kitty",
                 "--start-as=fullscreen",
+                "-o", "allow_remote_control=yes",
+                "--listen-on", f"unix:{socket_path}",
                 "-o", f"font_size={font_size}",
                 "-o", "window_border_width=3pt",
                 "-o", "window_margin_width=3",
@@ -318,7 +332,7 @@ def main():
             stderr=subprocess.DEVNULL,
             start_new_session=True
         )
-        print("Launched fullscreen Kitty Confluence cockpit.")
+        print(f"Launched fullscreen Kitty Confluence cockpit (Socket: {socket_path}).")
 
 
 if __name__ == "__main__":

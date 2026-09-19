@@ -25,6 +25,20 @@
         "callout:markup": "@[node:{node_id}]",
         "execution:autonomous": true
       }
+    },
+    "tournament": {
+      "title": "Non-Deterministic Cryptographic Agent Rally",
+      "description": "5-minute multi-node cognitive rally testing algorithmic synthesis, cipher solving, one-way proof verification, and peer consensus across the Kitty Confluence cockpit.",
+      "hints": {
+        "divide:coverage": 1.0,
+        "domain:specialist": false,
+        "checkpoint:intervals": [20, 40, 60, 80, 100],
+        "sidequest:capacity": 0,
+        "callout:markup": "@[node:{node_id}]",
+        "execution:autonomous": true,
+        "coordination:bridge": "kitty-socket",
+        "turn:ring": ["desktop", "laptop", "rog-ally", "steamdeck"]
+      }
     }
   }
 }

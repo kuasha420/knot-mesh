@@ -373,6 +373,64 @@ council_reply() {
   knot_log_ok "Reply posted for node '$node' (Status: $status) to mission $run_id"
 }
 
+council_steer() {
+  local node="${1:-}"
+  local prompt_text="${2:-}"
+  local run_id="${3:-}"
+
+  if [ "$prompt_text" = "-" ] || [ -z "$prompt_text" ]; then
+    if [ ! -t 0 ]; then
+      prompt_text="$(cat)"
+    fi
+  fi
+
+  if [ -z "$node" ] || [ -z "$prompt_text" ]; then
+    echo "Usage: knot council steer <node> \"<prompt>\" [run_id]"
+    echo "       echo \"<prompt>\" | knot council steer <node> [run_id]"
+    return 1
+  fi
+
+  local missions_dir="$HOME/.config/knot/missions"
+  if [ -z "$run_id" ]; then
+    local latest=""
+    if compgen -G "$missions_dir/run_*" >/dev/null; then
+      latest="$(ls -td "$missions_dir"/run_* | head -n1)"
+    fi
+    if [ -n "$latest" ]; then
+      run_id="$(basename "$latest")"
+    else
+      knot_log_err "No active council run found to steer."
+      return 1
+    fi
+  fi
+
+  local sock="/tmp/kitty-council-$run_id.sock"
+  local meta_file="$missions_dir/$run_id/meta.json"
+  if [ ! -S "$sock" ] && [ -f "$meta_file" ]; then
+    local configured_sock
+    configured_sock="$(jq -r '.socket // ""' "$meta_file")"
+    if [ -n "$configured_sock" ] && [ -S "$configured_sock" ]; then
+      sock="$configured_sock"
+    fi
+  fi
+
+  if [ ! -S "$sock" ]; then
+    knot_log_err "Kitty control socket not found for run '$run_id' at $sock."
+    echo "Ensure the cockpit was launched with Kitty remote control enabled."
+    return 1
+  fi
+
+  # Send text to target node's pane via Kitty remote control socket
+  # Matches window title containing the node name (e.g. title:.*laptop.*)
+  if kitty @ --to "unix:$sock" send-text --match "title:.*${node}.*" "${prompt_text}\r" >/dev/null 2>&1; then
+    knot_log_ok "Steered node '@$node' via Cockpit Bridge (Run: $run_id)"
+    return 0
+  else
+    knot_log_err "Failed to deliver prompt to node '$node' via socket $sock"
+    return 1
+  fi
+}
+
 council_list() {
   local filter="${1:-}"
   echo -e "${C_BOLD}--- Knot Swarm Council Missions ---${C_RESET}"

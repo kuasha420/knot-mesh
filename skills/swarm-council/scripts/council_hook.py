@@ -69,7 +69,10 @@ def main():
         f"3. Peer State Inquiries: To inspect peer updates and shared discoveries across the mesh, run:\n"
         f"   knot council status {council_run_id}\n"
         f"4. Peer Mentions: Address specific peer nodes using unambiguous markup: @[node:<target_node_id>].\n"
-        f"5. Alert Blockers: Post STATUS: ALERT immediately upon encountering verified regressions or blockers."
+        f"5. Alert Blockers: Post STATUS: ALERT immediately upon encountering verified regressions or blockers.\n"
+        f"6. Cockpit Inter-Agent Steering: To delegate a cognitive task or pass a challenge visibly into a co-located peer's pane, run:\n"
+        f"   knot council steer <target_node_id> '<prompt>'\n"
+        f"   (Never use headless ssh / knot exec to bypass an agent co-located in the cockpit)."
     )
 
     result = {

@@ -176,6 +176,91 @@ def calculate_chunk_distribution(chunks, nodes, target_coverage=1.5):
     actual_coverage = sum(len(v) for v in node_assignments.values()) / float(num_chunks)
     return node_assignments, actual_coverage
 
+def scaffold_tournament_prompt(node, nodes, run_id, discussion_url, db="mesh"):
+    ring = ["desktop", "laptop", "rog-ally", "steamdeck"]
+    active_ring = [n for n in ring if n in nodes]
+    if not active_ring:
+        active_ring = nodes
+    idx = active_ring.index(node) if node in active_ring else 0
+    next_node = active_ring[(idx + 1) % len(active_ring)]
+    prev_node = active_ring[(idx - 1) % len(active_ring)]
+
+    profile = DOMAIN_PROFILES.get(node, {
+        "title": "Tournament Player",
+        "hardware": "Generic Arch Linux workstation",
+        "specialization": "- Cryptographic solver."
+    })
+
+    if node == active_ring[0]:
+        role_header = f"🏆 TOURNAMENT MASTER & OPENING SERVER (@[{node}])"
+        task_directive = f"""You are the **Opening Server & Tournament Master** for this 5-minute Cryptographic Agent Rally!
+The rally ring order is: `{' -> '.join(active_ring)} -> {active_ring[0]}`.
+
+### YOUR IMMEDIATE ACTION (ROUND 1 SERVE):
+1. Immediately generate the Opening Cryptographic Challenge for your peer `@{next_node}`.
+2. Adhere strictly to the **Anti-Cheating Contract**:
+   - Give ONLY one-way constraints, input generators, or algebraic invariants.
+   - **NEVER** include the answer, solution witness, or pre-computed plain hash in the prompt!
+   - Example challenge format:
+     `"🏓 [ROUND 1 SERVE from @{node}] Target: Find a string starting with 'KNOT-SET1-' such that SHA256(string) has at least 4 leading zeros ('0000') and contains the word 'RALLY'. Return: (1) discovered string, (2) verified hash, (3) solve compute time in ms."`
+3. Deliver the challenge visibly into `@{next_node}`'s terminal using the Cockpit Bridge:
+   `knot council steer {next_node} '<challenge_payload>'`
+4. Broadcast opening serve to Mesh DB:
+   `knot council reply {run_id} --node {node} --status PROGRESS --body "🏓 [OPENING SERVE] Served Set 1 Challenge to @[{next_node}]"`
+5. Stand by for the return volley from `@{prev_node}`! When it arrives:
+   - Verify the proof in micro-seconds via python.
+   - Log the verified volley to Mesh DB.
+   - Serve the next round with increased difficulty or new mathematical invariants!
+"""
+    else:
+        role_header = f"⚡ TOURNAMENT RALLY PLAYER & INDEPENDENT VERIFIER (@[{node}])"
+        task_directive = f"""You are an active **Rally Player & Verifier** in the 4-node Cryptographic Agent Rally!
+The rally ring order is: `{' -> '.join(active_ring)} -> {active_ring[0]}`.
+Your predecessor is `@{prev_node}`. Your successor is `@{next_node}`.
+
+### YOUR OPERATIONAL DIRECTIVES:
+1. You are running in your dedicated pane in the Kitty Confluence cockpit.
+2. When a challenge is steered into your session by `@{prev_node}`:
+   - **Reason**: Analyze the mathematical / cryptographic constraints.
+   - **Solve**: Write and execute a clean Python solver script using `run_command` in your local environment.
+   - **Extract**: Obtain the verified witness and calculate your cognitive solve latency (dt).
+   - **Telemetry**: Post your solve telemetry to the Mesh DB:
+     `knot council reply {run_id} --node {node} --status PROGRESS --body "🏓 Volley Returned | Nonce/Proof: <val> | Solve Time: <ms> | HW: <fingerprint>"`
+   - **Pass**: Synthesize the next dynamic one-way challenge and pass it to your successor `@{next_node}`:
+     `knot council steer {next_node} '<new_challenge_payload>'`
+   - **Anti-Cheating Contract**: Never give `@{next_node}` the solution! Provide only one-way constraints.
+3. Keep the rally alive to maximize the Swarm Streak Multiplier!
+"""
+
+    return f"""# Knot Swarm Council Mission: {role_header}
+
+**Run ID**: `{run_id}`  
+**Node**: `@{node}`  
+**Hardware Profile**: {profile['hardware']}  
+**Pack**: `tournament`  
+**Ring Topology**: `{' -> '.join(active_ring)}`  
+**Registry**: {discussion_url}  
+
+---
+
+## 1. Operational Directives
+- **Mode**: Autonomous Multi-Agent Tournament.
+- **Observability**: Every action you take is visible to the operator in your cockpit pane.
+- **Anti-Cheating Contract**: Provide only one-way verifiable constraints to peers. Zero leaked plain solutions.
+
+---
+
+## 2. Mission Assignment
+{task_directive}
+
+---
+
+## 3. Communication Protocol
+- **Steer Peer Pane**: `knot council steer <target_node> '<payload>'`
+- **Broadcast Telemetry**: `knot council reply {run_id} --node {node} --status PROGRESS --body '<compact update>'`
+- **Inspect Ledger**: `knot council status {run_id}`
+"""
+
 def scaffold_prompt(node, base_prompt, assigned_chunks, run_id, discussion_url, pack_name, sidequest_pct=30, db="ghd"):
     profile = DOMAIN_PROFILES.get(node, {
         "title": "Mesh Node",
@@ -339,16 +424,25 @@ def main():
 
     for node in nodes:
         node_chunks = assignments.get(node, [])
-        prompt_content = scaffold_prompt(
-            node=node,
-            base_prompt=base_prompt,
-            assigned_chunks=node_chunks,
-            run_id=run_id,
-            discussion_url=args.discussion_url,
-            pack_name=args.pack,
-            sidequest_pct=sidequest_pct,
-            db=args.db
-        )
+        if args.pack == "tournament":
+            prompt_content = scaffold_tournament_prompt(
+                node=node,
+                nodes=nodes,
+                run_id=run_id,
+                discussion_url=args.discussion_url,
+                db=args.db
+            )
+        else:
+            prompt_content = scaffold_prompt(
+                node=node,
+                base_prompt=base_prompt,
+                assigned_chunks=node_chunks,
+                run_id=run_id,
+                discussion_url=args.discussion_url,
+                pack_name=args.pack,
+                sidequest_pct=sidequest_pct,
+                db=args.db
+            )
 
         out_path = os.path.join(out_dir, f"{node}_prompt.md")
         if not args.dry_run:

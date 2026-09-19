@@ -594,10 +594,11 @@ cmd_council() {
     copy) council_copy "$@" ;;
     clean) council_clean "$@" ;;
     kill) council_kill "$@" ;;
+    steer) council_steer "$@" ;;
     audit) bash "$KNOT_ROOT/skills/swarm-council/scripts/audit_tools.sh" "$@" ;;
     sync) bash "$KNOT_ROOT/skills/swarm-council/scripts/project_sync.sh" "$@" ;;
     *)
-      echo "Usage: knot council <start|resume|status|reply|list|attach|reconcile|copy|clean|kill|audit|sync> [options]"
+      echo "Usage: knot council <start|resume|status|reply|list|attach|reconcile|steer|copy|clean|kill|audit|sync> [options]"
       ;;
   esac
 }

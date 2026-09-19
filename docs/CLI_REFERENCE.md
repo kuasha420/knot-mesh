@@ -270,7 +270,7 @@ knot shutdown --all reboot         # Reboot all Strands, then the Anchor
 Out-of-band multi-agent coordination protocol using GitHub Discussions, Mesh DB, and scale-aware Kitty Confluence multiplexing. Allows autonomous Antigravity agents across physical nodes to coordinate on distributed audits, verification sweeps, or interactive pair steering.
 
 ```bash
-knot council <start|resume|status|reply|list|attach|reconcile|copy|clean|kill> [options]
+knot council <start|resume|status|reply|steer|list|attach|reconcile|copy|clean|kill> [options]
 ```
 
 #### `knot council start`
@@ -293,7 +293,7 @@ knot council start --interactive --dry-run
   - `--interactive`: Spawns fullscreen Kitty Confluence cockpit with all swarm nodes connected in `agy` standby. **Consumes 0 tokens at startup**; context is injected on-demand via Antigravity `PreInvocation` lifecycle hook when the operator prompts a node.
   - `--resume [run_id]`: Resumes previous conversations across all cockpit panes using `agy -c`.
   - `--tiling <grid|sidebyside|splits|tall|fat|stacked>`: Scale-aware Kitty window layout. Default: `grid`.
-  - `--pack <audit-parity|fast-triage>`: Prompt scaffold template pack. Default: `audit-parity`.
+  - `--pack <audit-parity|fast-triage|tournament>`: Prompt scaffold template pack. Default: `audit-parity`.
   - `--prompt <text>`: Base mission prompt text.
   - `--prompt-file <path>`: Path to file containing base mission prompt.
   - `--nodes <list>`: Comma-separated list of target nodes (default: all online fleet nodes).
@@ -340,6 +340,21 @@ knot council reply <run_id> --node desktop --status FINAL < deliverable.md
   - `--node <id>`: Node identifier (defaults to `$KNOT_NODE_ID` or local hostname).
   - `--status <status>`: Milestone indicator (`25%`, `50%`, `75%`, `ALERT`, `FINAL`, `PROGRESS`).
   - `--body <text>`: Message text (strictly under 15-20 lines for interim checkpoints).
+
+---
+
+#### `knot council steer`
+Injects guidance, prompts, or cognitive challenges directly into a target node's active Kitty Confluence cockpit pane using Kitty's remote control bridge socket (`/tmp/kitty-council-<run_id>.sock`).
+
+```bash
+knot council steer <node> "<prompt>" [run_id]
+
+# Or pipe guidance from stdin:
+echo "Focus on edge case validation" | knot council steer laptop
+```
+
+- **Observability**: Prompts are visibly typed into the target agent's terminal in real time, waking up that node's interactive `agy` session so the human operator can watch reasoning and tool calls live.
+- **Inter-Agent Delegation**: Used by the Coordinator and peer agents to pass cryptographic rally volleys or assign audit chunks across co-located panes without bypassing the terminal with headless SSH.
 
 ---
 
