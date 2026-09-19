@@ -286,7 +286,7 @@ if [ -d "$symlink_skill_dir" ]; then
 
   if [ -f "$HOME/.gemini/config/hooks.json" ]; then
     hook_cmd="$(jq -r '.["swarm-council-coordinator"].PreInvocation[0].command' "$HOME/.gemini/config/hooks.json")"
-    hook_test="$(echo '{"invocationNum": 1}' | eval "$hook_cmd")"
+    hook_test="$(echo '{"invocationNum": 1}' | env -u KNOT_COUNCIL_RUN_ID bash -c "$hook_cmd")"
     if [ "$hook_test" != '{"injectSteps": []}' ]; then
       echo "FAILED (Global hook failed arena isolation check: $hook_test)"
       exit 1
