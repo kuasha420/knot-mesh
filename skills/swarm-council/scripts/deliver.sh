@@ -57,7 +57,7 @@ case "$MODE" in
       "${local_conf_cmd[@]}"
     else
       echo "==> Staging prompt files and launchers across mesh..."
-      local pack=""
+      pack=""
       if [ -f "$MISSIONS_DIR/meta.json" ]; then
         pack="$(jq -r '.pack // ""' "$MISSIONS_DIR/meta.json")"
       fi
