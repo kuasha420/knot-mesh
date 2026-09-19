@@ -396,7 +396,13 @@ cmd_exec() {
     exit 1
   fi
 
-  local remote_cmd="export PATH=\"\$HOME/.local/bin:\$PATH\"; $cmd"
+  local base_env="export PATH=\"\$HOME/.local/bin:\$PATH\"; export KNOT_MESH_ANCHOR=\"desktop\";"
+  if [ -n "${KNOT_COUNCIL_RUN_ID:-}" ]; then
+    base_env+=" export KNOT_RUN_ID=\"$KNOT_COUNCIL_RUN_ID\"; export KNOT_COUNCIL_RUN_ID=\"$KNOT_COUNCIL_RUN_ID\";"
+  fi
+  if [ -n "${KNOT_HUB_URL:-}" ]; then
+    base_env+=" export KNOT_HUB_URL=\"$KNOT_HUB_URL\";"
+  fi
 
   if [ "$target" = "--all" ]; then
     local nodes_dir=""
@@ -404,7 +410,8 @@ cmd_exec() {
       knot_log_warn "No active swarm nodes directory found."
       return 1
     fi
-    local my_host
+    local my_node my_host
+    my_node="$(knot_detect_node_id)"
     my_host="$(knot_detect_hostname)"
     for manifest in "$nodes_dir/"*.json; do
       [ -e "$manifest" ] || continue
@@ -412,41 +419,48 @@ cmd_exec() {
       id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
       host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
       echo -e "\n${C_CYAN}=== [$id] ===${C_RESET}"
+      local node_cmd="$base_env export KNOT_NODE_ID=\"$id\"; $cmd"
       local e_out=""
-      if [ "$id" = "$my_host" ] || [ "$host" = "$my_host" ]; then
-        if e_out="$(bash -c "$remote_cmd" 2>&1)"; then
+      if [ "$id" = "$my_node" ] || [ "$id" = "$my_host" ] || [ "$host" = "$my_host" ]; then
+        if e_out="$(bash -c "$node_cmd" 2>&1)"; then
           echo "$e_out"
         else
           knot_log_warn "Notice: Command failed locally on $id: $e_out"
         fi
-      elif e_out="$(ssh -o BatchMode=yes -o ConnectTimeout=3 "$id" "$remote_cmd" 2>&1)"; then
+      elif e_out="$(ssh -o BatchMode=yes -o ConnectTimeout=3 "$id" "$node_cmd" 2>&1)"; then
         echo "$e_out"
       else
         knot_log_warn "Notice: Command failed on $id: $e_out"
       fi
     done
   else
-    local my_host
+    local my_node my_host
+    my_node="$(knot_detect_node_id)"
     my_host="$(knot_detect_hostname)"
     local nodes_dir=""
-    nodes_dir="$(knot_get_nodes_dir 2>/dev/null || true)"
+    if ! nodes_dir="$(knot_get_nodes_dir 2>&1)"; then
+      nodes_dir=""
+    fi
     local is_local=0
-    if [ "$target" = "$my_host" ] || [ "$target" = "local" ] || [ "$target" = "localhost" ]; then
+    if [ "$target" = "$my_node" ] || [ "$target" = "$my_host" ] || [ "$target" = "local" ] || [ "$target" = "localhost" ]; then
       is_local=1
     elif [ -n "$nodes_dir" ] && [ -f "$nodes_dir/${target}.json" ]; then
-      local t_host
+      local t_host t_id
       t_host="$(awk -F'"' '/"hostname":/ {print $4}' "$nodes_dir/${target}.json")"
-      if [ "$t_host" = "$my_host" ]; then
+      t_id="$(awk -F'"' '/"id":/ {print $4}' "$nodes_dir/${target}.json")"
+      if [ "$t_host" = "$my_host" ] || [ "$t_id" = "$my_node" ]; then
         is_local=1
       fi
     fi
+
+    local target_cmd="$base_env export KNOT_NODE_ID=\"$target\"; $cmd"
     if [ "$is_local" -eq 1 ]; then
-      bash -c "$remote_cmd"
+      bash -c "$target_cmd"
     else
       if [ ${#tty_opts[@]} -gt 0 ]; then
-        ssh "${tty_opts[@]}" -o ConnectTimeout=5 "$target" "$remote_cmd"
+        ssh "${tty_opts[@]}" -o ConnectTimeout=5 "$target" "$target_cmd"
       else
-        ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$remote_cmd"
+        ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$target_cmd"
       fi
     fi
   fi
@@ -595,10 +609,12 @@ cmd_council() {
     clean) council_clean "$@" ;;
     kill) council_kill "$@" ;;
     steer) council_steer "$@" ;;
+    challenge) council_challenge "$@" ;;
+    db) council_db "$@" ;;
     audit) bash "$KNOT_ROOT/skills/swarm-council/scripts/audit_tools.sh" "$@" ;;
     sync) bash "$KNOT_ROOT/skills/swarm-council/scripts/project_sync.sh" "$@" ;;
     *)
-      echo "Usage: knot council <start|resume|status|reply|list|attach|reconcile|steer|copy|clean|kill|audit|sync> [options]"
+      echo "Usage: knot council <start|resume|status|reply|list|attach|reconcile|steer|challenge|db|copy|clean|kill|audit|sync> [options]"
       ;;
   esac
 }

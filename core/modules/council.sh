@@ -386,9 +386,30 @@ council_reply() {
 }
 
 council_steer() {
-  local node="${1:-}"
-  local prompt_text="${2:-}"
-  local run_id="${3:-}"
+  local wait_ack=0
+  local ack_timeout=30
+  local positional=()
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --wait-ack)
+        wait_ack=1
+        if [ $# -ge 2 ] && [[ "$2" =~ ^[0-9]+$ ]]; then
+          ack_timeout="$2"
+          shift
+        fi
+        shift
+        ;;
+      *)
+        positional+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  local node="${positional[0]:-}"
+  local prompt_text="${positional[1]:-}"
+  local run_id="${positional[2]:-}"
 
   if [ "$prompt_text" = "-" ] || [ -z "$prompt_text" ]; then
     if [ ! -t 0 ]; then
@@ -397,8 +418,8 @@ council_steer() {
   fi
 
   if [ -z "$node" ] || [ -z "$prompt_text" ]; then
-    echo "Usage: knot council steer <node> \"<prompt>\" [run_id]"
-    echo "       echo \"<prompt>\" | knot council steer <node> [run_id]"
+    echo "Usage: knot council steer [--wait-ack [sec]] <node> \"<prompt>\" [run_id]"
+    echo "       echo \"<prompt>\" | knot council steer [--wait-ack [sec]] <node> [run_id]"
     return 1
   fi
 
@@ -435,7 +456,7 @@ council_steer() {
     my_h="$(knot_detect_hostname 2>/dev/null || uname -n | cut -d. -f1)"
     if [ "$my_h" != "$anchor" ] && command -v knot >/dev/null 2>&1; then
       if knot exec "$anchor" "test -S /tmp/kitty-council-$run_id.sock" >/dev/null 2>&1; then
-        if printf '%s\r' "$prompt_text" | knot exec "$anchor" "kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-text --match 'title:.*${node}.*' --stdin" >/dev/null 2>&1; then
+        if printf '%s\r' "$prompt_text" | knot exec "$anchor" "kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-text --match 'title:.*${node}.*' --stdin && sleep 0.2 && kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-key --match 'title:.*${node}.*' return" >/dev/null 2>&1; then
           knot_log_ok "Steered node '@$node' via Cockpit Bridge Relay to @$anchor (Run: $run_id)"
           return 0
         else
@@ -452,12 +473,90 @@ council_steer() {
   # Send text to target node's pane via Kitty remote control socket using stdin
   # Matches window title containing the node name (e.g. title:.*laptop.*)
   if printf '%s\r' "$prompt_text" | kitty @ --to "unix:$sock" send-text --match "title:.*${node}.*" --stdin >/dev/null 2>&1; then
+    sleep 0.2
+    kitty @ --to "unix:$sock" send-key --match "title:.*${node}.*" return >/dev/null 2>&1
     knot_log_ok "Steered node '@$node' via Cockpit Bridge (Run: $run_id)"
+
+    if [ "$wait_ack" -eq 1 ]; then
+      knot_log_info "Awaiting turn-state acknowledgement from @$node in Mesh DB (timeout: ${ack_timeout}s)..."
+      local start_t
+      start_t="$(date +%s)"
+      local ack_received=0
+      local poll_script="$SCRIPTS_DIR/mesh_db.py"
+      while [ $(( $(date +%s) - start_t )) -lt "$ack_timeout" ]; do
+        sleep 2
+        local latest_msg
+        latest_msg="$(python3 "$poll_script" get_thread --discussion-id "$run_id" 2>&1)"
+        if echo "$latest_msg" | grep -q "\"author\": {\"login\": \"$node\"}"; then
+          ack_received=1
+          knot_log_ok "Received acknowledgement from @$node in Mesh DB"
+          break
+        fi
+      done
+      if [ "$ack_received" -eq 0 ]; then
+        knot_log_warn "Timeout waiting for acknowledgement from @$node after ${ack_timeout}s"
+      fi
+    fi
+
     return 0
   else
     knot_log_err "Failed to deliver prompt to node '$node' via socket $sock"
     return 1
   fi
+}
+
+council_challenge() {
+  local script="$SCRIPTS_DIR/challenge_tool.py"
+  if [ ! -f "$script" ]; then
+    script="$KNOT_ROOT/skills/swarm-council/scripts/challenge_tool.py"
+  fi
+  if [ ! -f "$script" ]; then
+    knot_log_err "challenge_tool.py not found at $script"
+    return 1
+  fi
+  python3 "$script" "$@"
+}
+
+council_db() {
+  local action="${1:-inspect}"
+  [ $# -gt 0 ] && shift
+  local run_id="${1:-}"
+  [ $# -gt 0 ] && shift
+
+  local missions_dir="$HOME/.config/knot/missions"
+  if [ -z "$run_id" ] && [ "$action" != "list" ]; then
+    local latest=""
+    if compgen -G "$missions_dir/run_*" >/dev/null; then
+      latest="$(ls -td "$missions_dir"/run_* | head -n1)"
+    fi
+    if [ -n "$latest" ]; then
+      run_id="$(basename "$latest")"
+    else
+      knot_log_err "No active council run found."
+      return 1
+    fi
+  fi
+
+  local script="$SCRIPTS_DIR/mesh_db.py"
+  if [ ! -f "$script" ]; then
+    script="$KNOT_ROOT/skills/swarm-council/scripts/mesh_db.py"
+  fi
+
+  case "$action" in
+    inspect)
+      python3 "$script" get_thread --discussion-id "$run_id"
+      ;;
+    tail)
+      python3 "$script" tail --discussion-id "$run_id" "$@"
+      ;;
+    list)
+      python3 "$script" list
+      ;;
+    *)
+      echo "Usage: knot council db <inspect|tail|list> [run_id] [options]"
+      return 1
+      ;;
+  esac
 }
 
 council_list() {

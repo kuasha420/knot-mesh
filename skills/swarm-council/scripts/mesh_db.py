@@ -258,6 +258,37 @@ def list_threads(db_path: str = DEFAULT_DB_PATH) -> list:
     return threads
 
 
+def tail_messages(discussion_id: str, limit: int = 10, follow: bool = False, db_path: str = DEFAULT_DB_PATH):
+    thread_data = get_full_thread(discussion_id, db_path=db_path)
+    comments = thread_data.get("comments", {}).get("nodes", [])
+
+    seen_ids = set()
+    initial_batch = comments[-limit:] if len(comments) > limit else comments
+    for c in initial_batch:
+        seen_ids.add(c["id"])
+        author = c.get("author", {}).get("login", "unknown")
+        body = c.get("body", "").strip()
+        print(f"[{c['createdAt']}] @{author}:\n{body}\n---")
+
+    if not follow:
+        return
+
+    import time
+    while True:
+        try:
+            time.sleep(2.0)
+            thread_data = get_full_thread(discussion_id, db_path=db_path)
+            new_comments = thread_data.get("comments", {}).get("nodes", [])
+            for c in new_comments:
+                if c["id"] not in seen_ids:
+                    seen_ids.add(c["id"])
+                    author = c.get("author", {}).get("login", "unknown")
+                    body = c.get("body", "").strip()
+                    print(f"[{c['createdAt']}] @{author}:\n{body}\n---")
+        except KeyboardInterrupt:
+            break
+
+
 def main():
     parser = argparse.ArgumentParser(description="Swarm Council Mesh Database Helper")
     parser.add_argument("--db-path", default=DEFAULT_DB_PATH, help="Path to SQLite database file")
@@ -287,6 +318,11 @@ def main():
 
     list_p = subparsers.add_parser("list")
 
+    tail_p = subparsers.add_parser("tail")
+    tail_p.add_argument("--discussion-id", required=True)
+    tail_p.add_argument("--limit", type=int, default=10)
+    tail_p.add_argument("--follow", "-f", action="store_true")
+
     args = parser.parse_args()
 
     if args.cmd == "create":
@@ -306,6 +342,8 @@ def main():
     elif args.cmd == "list":
         res = list_threads(db_path=args.db_path)
         print(json.dumps(res, indent=2))
+    elif args.cmd == "tail":
+        tail_messages(args.discussion_id, limit=args.limit, follow=args.follow, db_path=args.db_path)
     else:
         parser.print_help()
         sys.exit(1)

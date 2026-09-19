@@ -11,9 +11,10 @@ TILING="${4:-grid}"
 INTERACTIVE="${5:-0}"
 NODES="${6:-}"
 RESUME="${7:-0}"
+LAUNCH="${LAUNCH:-${8:-1}}"
 
 if [ -z "$RUN_ID" ]; then
-  echo "Usage: $0 <confluence|headless|tui|gui|suggested> <run_id> [project_name] [tiling] [interactive] [nodes] [resume]"
+  echo "Usage: $0 <confluence|headless|tui|gui|suggested> <run_id> [project_name] [tiling] [interactive] [nodes] [resume] [launch]"
   exit 1
 fi
 
@@ -176,24 +177,29 @@ EOF_LAUNCH
         sed -i "s|NODE_ID_PLACEHOLDER|$node_id|g" "$launcher_script"
         chmod +x "$launcher_script"
 
-        if [ "$node_id" = "$LOCAL_NODE" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(hostname -s)" ]; then
+        my_h="$(uname -n | cut -d. -f1)"
+        if [ "$node_id" = "$LOCAL_NODE" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$my_h" ]; then
           cp "$pfile" "$MISSIONS_DIR/prompt.md"
           cp "$launcher_script" "$MISSIONS_DIR/launch.sh"
-        else
+        elif [ "$LAUNCH" -eq 1 ]; then
           "$KNOT_BIN" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
           cat "$pfile" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
           cat "$launcher_script" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/launch.sh && chmod +x ~/.config/knot/missions/$RUN_ID/launch.sh"
         fi
       done
-      echo "==> Spawning Confluence Spatial Cockpit in Kitty..."
-      ACTIVE_NODES="$(python3 -c 'import glob, os, sys, re; p=glob.glob(os.path.join(sys.argv[1], "*_prompt.md")); print(",".join(re.sub(r"_prompt\.md$", "", os.path.basename(x)) for x in p))' "$MISSIONS_DIR")"
-      local_conf_cmd=(python3 "$SCRIPT_DIR/confluence.py" --run-id "$RUN_ID" --project "$PROJECT" --tiling "$TILING")
-      if [ -n "$ACTIVE_NODES" ]; then
-        local_conf_cmd+=(--nodes "$ACTIVE_NODES")
-      elif [ -n "$NODES" ]; then
-        local_conf_cmd+=(--nodes "$NODES")
+      if [ "$LAUNCH" -eq 1 ]; then
+        echo "==> Spawning Confluence Spatial Cockpit in Kitty..."
+        ACTIVE_NODES="$(python3 -c 'import glob, os, sys, re; p=glob.glob(os.path.join(sys.argv[1], "*_prompt.md")); print(",".join(re.sub(r"_prompt\.md$", "", os.path.basename(x)) for x in p))' "$MISSIONS_DIR")"
+        local_conf_cmd=(python3 "$SCRIPT_DIR/confluence.py" --run-id "$RUN_ID" --project "$PROJECT" --tiling "$TILING")
+        if [ -n "$ACTIVE_NODES" ]; then
+          local_conf_cmd+=(--nodes "$ACTIVE_NODES")
+        elif [ -n "$NODES" ]; then
+          local_conf_cmd+=(--nodes "$NODES")
+        fi
+        "${local_conf_cmd[@]}"
+      else
+        echo "==> Staging complete for Confluence mode (launch=0)."
       fi
-      "${local_conf_cmd[@]}"
     fi
     ;;
 

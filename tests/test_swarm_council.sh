@@ -218,7 +218,7 @@ if [ -n "$run_id_found" ]; then
   fi
   rm -rf "$HOME/.config/knot/missions/$run_id_found"
   if [ -f "$HOME/.config/knot/hub.db" ]; then
-    sqlite3 "$HOME/.config/knot/hub.db" "DELETE FROM council_messages WHERE run_id='$run_id_found';" 2>/dev/null
+    sqlite3 "$HOME/.config/knot/hub.db" "DELETE FROM council_messages WHERE run_id='$run_id_found';"
   fi
 fi
 echo "PASSED"
@@ -358,7 +358,7 @@ if [ "$meta_opening" != "$resolved_nid" ]; then
 fi
 
 # Stage delivery without launching
-bash "$COUNCIL_SCRIPTS/deliver.sh" confluence "$test_tourn_run" "knot-mesh" grid 0 "$resolved_nid,mock-peer" 0 >/dev/null 2>&1 || true
+LAUNCH=0 bash "$COUNCIL_SCRIPTS/deliver.sh" confluence "$test_tourn_run" "knot-mesh" grid 0 "$resolved_nid,mock-peer" 0 0 >/dev/null
 
 active_launch="$HOME/.config/knot/missions/$test_tourn_run/${resolved_nid}_launch.sh"
 peer_launch="$HOME/.config/knot/missions/$test_tourn_run/mock-peer_launch.sh"
@@ -381,5 +381,59 @@ fi
 rm -rf "$HOME/.config/knot/missions/$test_tourn_run"
 echo "PASSED"
 
+# 17. Cryptographic Challenge Tool (knot council challenge)
+echo -n "17. Testing knot council challenge (generate, verify, solve)... "
+gen_out="$("$KNOT_ROOT/bin/knot" council challenge generate --difficulty 3 --keyword TEST --prefix KNOT-UNIT)"
+if ! echo "$gen_out" | grep -q "Target: Find a string starting with 'KNOT-UNIT-'"; then
+  echo "FAILED (Challenge generate format unexpected: $gen_out)"
+  exit 1
+fi
+
+solve_out="$(python3 "$COUNCIL_SCRIPTS/challenge_tool.py" solve --difficulty 3 --keyword TEST --prefix KNOT-UNIT)"
+if ! echo "$solve_out" | grep -q "\[✓\] SOLVED"; then
+  echo "FAILED (Challenge solve failed: $solve_out)"
+  exit 1
+fi
+solved_str="$(echo "$solve_out" | grep -o "String='[^']*'" | cut -d"'" -f2)"
+
+ver_out="$("$KNOT_ROOT/bin/knot" council challenge verify --string "$solved_str" --difficulty 3 --keyword TEST)"
+if ! echo "$ver_out" | grep -q "\[✓\] VALID"; then
+  echo "FAILED (Challenge verify failed for valid solution: $ver_out)"
+  exit 1
+fi
+
+if "$KNOT_ROOT/bin/knot" council challenge verify --string "INVALID_NONCE" --difficulty 3 --keyword TEST 2>&1 | grep -q "\[✓\] VALID"; then
+  echo "FAILED (Challenge verify succeeded on invalid candidate)"
+  exit 1
+fi
+echo "PASSED"
+
+# 18. Mesh DB CLI Ergonomics (knot council db inspect, tail)
+echo -n "18. Testing knot council db (inspect, tail)... "
+inspect_out="$("$KNOT_ROOT/bin/knot" council db inspect "test_mesh_$$")"
+if ! echo "$inspect_out" | jq -e '.comments.totalCount >= 2' >/dev/null; then
+  echo "FAILED (Inspect output missing expected comments count: $inspect_out)"
+  exit 1
+fi
+
+tail_out="$("$KNOT_ROOT/bin/knot" council db tail "test_mesh_$$" --limit 5)"
+if ! echo "$tail_out" | grep -q "@desktop"; then
+  echo "FAILED (Tail output missing comments: $tail_out)"
+  exit 1
+fi
+echo "PASSED"
+
+# 19. Steer Option Validation
+echo -n "19. Testing knot council steer argument validation... "
+usage_out=""
+if ! usage_out="$("$KNOT_ROOT/bin/knot" council steer 2>&1)"; then
+  : # Expected non-zero exit code for missing arguments
+fi
+if ! echo "$usage_out" | grep -q "Usage: knot council steer"; then
+  echo "FAILED (Steer missing usage instructions: $usage_out)"
+  exit 1
+fi
+echo "PASSED"
+
 echo ""
-echo "=== All 16 Swarm Council Tests PASSED Successfully! ==="
+echo "=== All 19 Swarm Council Tests PASSED Successfully! ==="
