@@ -45,7 +45,7 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
     # 1. Left pane: Laptop
     if left_node:
         lines.append(f"title {left_node} (CUDA / Roaming Strand)")
-        cmd = f'{knot_bin} exec {left_node} -tt \'trap "" HUP; agy --project {project_name} --dangerously-skip-permissions -i "$(< ~/.config/knot/missions/{run_id}/prompt.md)"; exec bash\''
+        cmd = f'{knot_bin} exec {left_node} -tt "trap \'\' HUP; agy --project {project_name} --dangerously-skip-permissions -i \\"$(< ~/.config/knot/missions/{run_id}/prompt.md)\\""; exec bash'
         lines.append(f'launch --cwd={knot_root} bash -c {json.dumps(cmd)}')
         lines.append("")
 
@@ -60,7 +60,7 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
     # 3. Bottom Panes: ROG Ally & Steam Deck
     for b_node in bottom_nodes:
         lines.append(f"title {b_node} (Handheld / Auxiliary Strand)")
-        cmd_b = f'{knot_bin} exec {b_node} -tt \'trap "" HUP; agy --project {project_name} --dangerously-skip-permissions -i "$(< ~/.config/knot/missions/{run_id}/prompt.md)"; exec bash\''
+        cmd_b = f'{knot_bin} exec {b_node} -tt "trap \'\' HUP; agy --project {project_name} --dangerously-skip-permissions -i \\"$(< ~/.config/knot/missions/{run_id}/prompt.md)\\""; exec bash'
         lines.append(f'launch --location=hsplit --cwd={knot_root} bash -c {json.dumps(cmd_b)}')
         lines.append("")
 
