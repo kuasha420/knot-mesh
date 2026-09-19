@@ -16,6 +16,7 @@ import base64
 import argparse
 import urllib.request
 import urllib.error
+import glob
 from typing import Any, Optional, Dict, List
 
 # Locate Knot root directory

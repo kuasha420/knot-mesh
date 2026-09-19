@@ -1795,11 +1795,100 @@ class MockKnotHubClient(KnotHubClient):
         return {}
 
 
+class MockMemoryPalaceClient(MemoryPalaceClient):
+    """Mock Memory Palace & Vault client for offline self-test suites."""
+
+    def __init__(self):
+        self.artifacts = {}
+        self.memories = {}
+        self.my_node = "desktop"
+        self.surreal_url = "http://mock.surreal:8000"
+        self.pocketbase_url = "http://mock.pocketbase:8090"
+
+    def store_artifact(self, name: str, content: str, artifact_type: str = "text", meta: dict | None = None) -> str:
+        aid = f"mock-art-{len(self.artifacts)+1}"
+        self.artifacts[aid] = {"name": name, "content": content, "artifact_type": artifact_type, "meta": meta or {}}
+        return aid
+
+    def get_artifact(self, artifact_id: str) -> dict:
+        if artifact_id in self.artifacts:
+            return self.artifacts[artifact_id]
+        return {"name": "mock.txt", "artifact_type": "text", "content": "Mock artifact content"}
+
+    def store(
+        self,
+        wing: str,
+        hall: str,
+        drawer: str,
+        title: str,
+        content: str,
+        tags: list | None = None,
+        importance: float = 1.0,
+        artifact_id: str | None = None
+    ) -> dict:
+        mid = f"memory:mock{len(self.memories)+1}"
+        rec = {
+            "id": mid,
+            "wing": wing,
+            "hall": hall,
+            "drawer": drawer,
+            "title": title,
+            "content": content,
+            "importance": importance,
+            "artifact_id": artifact_id
+        }
+        self.memories[mid] = rec
+        return rec
+
+    def recall(
+        self,
+        query: str | None = None,
+        wing: str | None = None,
+        hall: str | None = None,
+        drawer: str | None = None,
+        tags: list | None = None,
+        limit: int = 5
+    ) -> list:
+        return [{
+            "id": "memory:mock1",
+            "title": query or "Mock Memory",
+            "content": "Mock memory content for self-test suite",
+            "score": 1.0,
+            "importance": 1.0,
+            "recall_count": 1,
+            "wing": wing or "architecture",
+            "hall": hall or "mesh_core",
+            "drawer": drawer or "decisions"
+        }]
+
+    def palace_map(self) -> dict:
+        return {
+            "wings": {
+                "architecture": {
+                    "halls": {
+                        "mesh_core": {
+                            "drawers": {
+                                "decisions": [{"id": "memory:mock1", "title": "Mock", "importance": 1.0, "recall_count": 0}]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+    def promote(self, memory_id: str, boost: float = 1.0) -> float:
+        return 2.0
+
+    def relate(self, source: str, target: str, rel_type: str = "relates_to", weight: float = 1.0) -> dict:
+        return {"ok": True, "source": source, "target": target}
+
+
 def run_self_test() -> int:
     """Runs internal self-check verifying JSON-RPC initialize, tools/list, and tools/call outputs."""
     print("=== [knot-mcp-gateway] Starting Internal Self-Test Suite ===", file=sys.stderr)
     mock_hub = MockKnotHubClient()
-    gateway = KnotMCPGateway(mock_hub)
+    mock_memory = MockMemoryPalaceClient()
+    gateway = KnotMCPGateway(mock_hub, mock_memory)
 
     # 1. Test initialize
     init_req = {
