@@ -292,7 +292,7 @@ knot_set_active_swarm() {
     if [ ! -d "$run_dir" ]; then
       mkdir -p "$run_dir"
     fi
-    local tmp_run="$run_dir/active_swarm.$$.tmp"
+    local tmp_run="$run_dir/active_swarm.${BASHPID:-$$}.tmp"
     if [ -w "$run_dir" ]; then
       echo "$swarm_id" > "$tmp_run"
       if ! mv -f "$tmp_run" "$run_dir/active_swarm" 2>&1; then
@@ -324,7 +324,7 @@ knot_set_active_swarm() {
   user_home="$(knot_detect_user_home)"
   local state_dir="$user_home/.local/state/knot"
   mkdir -p "$state_dir"
-  local tmp_state="$state_dir/active_swarm.$$.tmp"
+  local tmp_state="$state_dir/active_swarm.${BASHPID:-$$}.tmp"
   echo "$swarm_id" > "$tmp_state"
   mv -f "$tmp_state" "$state_dir/active_swarm"
 }

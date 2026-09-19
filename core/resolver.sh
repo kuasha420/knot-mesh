@@ -266,7 +266,7 @@ if [ -z "$RESOLVED_IP" ]; then
   exit 1
 fi
 
-lease_tmp="${LEASE_FILE}.$$.tmp"
+lease_tmp="${LEASE_FILE}.${BASHPID:-$$}.tmp"
 echo "$RESOLVED_IP" > "$lease_tmp"
 mv -f "$lease_tmp" "$LEASE_FILE" 2>/dev/null || cat "$lease_tmp" > "$LEASE_FILE"
 rm -f "$lease_tmp"
