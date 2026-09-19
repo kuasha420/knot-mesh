@@ -1154,6 +1154,32 @@ class Database:
                 );
             """)
 
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS council_threads (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    category TEXT DEFAULT 'general',
+                    url TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_council_threads_run ON council_threads(run_id);")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS council_messages (
+                    id TEXT PRIMARY KEY,
+                    thread_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'PROGRESS',
+                    body TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_council_msgs_thread ON council_messages(thread_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_council_msgs_time ON council_messages(created_at);")
+
             self.sync_native_antigravity_projects(conn)
 
         conn.close()
@@ -2099,6 +2125,135 @@ class Database:
                 broadcast_event("artifact_lease_expired", {"name": name, "expired_from": locked_by})
 
     # -------------------------------------------------------------
+    # Swarm Council Registry & Message Board
+    # -------------------------------------------------------------
+
+    def create_council_thread(self, thread_id: str, run_id: str, title: str, body: str, category: str = "general", url: str = "") -> dict:
+        conn = self.get_connection()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        if not url:
+            url = f"knot://mesh/council/{thread_id}"
+        with conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO council_threads (id, run_id, title, body, category, url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (thread_id, run_id or thread_id, title, body, category, url, now_iso)
+            )
+        return {
+            "id": thread_id,
+            "number": 1,
+            "url": url,
+            "title": title
+        }
+
+    def post_council_message(self, msg_id: str, thread_id: str, run_id: str, node_id: str, status: str, body: str, created_at: str = "") -> dict:
+        conn = self.get_connection()
+        now_iso = created_at or datetime.now(timezone.utc).isoformat()
+        url = f"knot://mesh/council/{thread_id}#{msg_id}"
+        with conn:
+            conn.execute(
+                "INSERT INTO council_messages (id, thread_id, run_id, node_id, status, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (msg_id, thread_id, run_id, node_id, status, body, now_iso)
+            )
+        return {
+            "id": msg_id,
+            "url": url,
+            "createdAt": now_iso
+        }
+
+    def get_council_thread(self, thread_id: str) -> dict:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, run_id, title, body, url, created_at FROM council_threads WHERE id = ? OR run_id = ?",
+            (thread_id, thread_id)
+        )
+        t_row = cur.fetchone()
+        if not t_row:
+            tid, trun, ttitle, tbody, turl, ttime = (
+                thread_id,
+                thread_id,
+                f"Mesh Council Mission: {thread_id}",
+                "Mesh registry mission thread",
+                f"knot://mesh/council/{thread_id}",
+                datetime.now(timezone.utc).isoformat()
+            )
+        else:
+            tid, trun, ttitle, tbody, turl, ttime = t_row["id"], t_row["run_id"], t_row["title"], t_row["body"], t_row["url"], t_row["created_at"]
+
+        cur.execute(
+            "SELECT id, run_id, node_id, status, body, created_at FROM council_messages WHERE thread_id = ? OR run_id = ? ORDER BY created_at ASC",
+            (tid, tid)
+        )
+        m_rows = cur.fetchall()
+        comments_nodes = []
+        for r in m_rows:
+            mid, mrun, mnode, mstat, mbody, mtime = r["id"], r["run_id"], r["node_id"], r["status"], r["body"], r["created_at"]
+            header = f"<!-- KNOT-NODE: {mnode} | RUN: {mrun} | STATUS: {mstat} -->\n"
+            full_body = header + mbody if not mbody.startswith("<!-- KNOT-NODE:") else mbody
+            comments_nodes.append({
+                "id": mid,
+                "createdAt": mtime,
+                "author": {"login": mnode},
+                "body": full_body
+            })
+        return {
+            "id": tid,
+            "number": 1,
+            "title": ttitle,
+            "url": turl,
+            "body": tbody,
+            "createdAt": ttime,
+            "comments": {
+                "totalCount": len(comments_nodes),
+                "nodes": comments_nodes
+            }
+        }
+
+    def get_council_delta(self, thread_id: str, last_count: int = 0) -> dict:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, run_id, node_id, status, body, created_at FROM council_messages WHERE thread_id = ? ORDER BY created_at ASC",
+            (thread_id,)
+        )
+        rows = cur.fetchall()
+        total = len(rows)
+        if total <= last_count:
+            return {"totalCount": total, "new_comments": []}
+        new_rows = rows[last_count:]
+        new_comments = []
+        for r in new_rows:
+            mid, mrun, mnode, mstat, mbody, mtime = r["id"], r["run_id"], r["node_id"], r["status"], r["body"], r["created_at"]
+            header = f"<!-- KNOT-NODE: {mnode} | RUN: {mrun} | STATUS: {mstat} -->\n"
+            full_body = header + mbody if not mbody.startswith("<!-- KNOT-NODE:") else mbody
+            new_comments.append({
+                "id": mid,
+                "createdAt": mtime,
+                "author": {"login": mnode},
+                "body": full_body
+            })
+        return {"totalCount": total, "new_comments": new_comments}
+
+    def list_council_threads(self) -> list[dict]:
+        conn = self.get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, run_id, title, url, created_at, (SELECT COUNT(*) FROM council_messages WHERE thread_id = council_threads.id) as msg_count FROM council_threads ORDER BY created_at DESC"
+        )
+        rows = cur.fetchall()
+        threads = []
+        for r in rows:
+            threads.append({
+                "id": r["id"],
+                "run_id": r["run_id"],
+                "title": r["title"],
+                "url": r["url"],
+                "created_at": r["created_at"],
+                "messages": r["msg_count"]
+            })
+        return threads
+
+    # -------------------------------------------------------------
     # Node Heartbeat & Telemetry
     # -------------------------------------------------------------
 
@@ -2735,6 +2890,18 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             before_ts = int(query.get("before_ts", [0])[0]) or None
             self._send_json(self.db.list_chat_messages(conv_id=conv_id, limit=limit, before_ts=before_ts))
 
+        elif path == "/council/threads":
+            self._send_json(self.db.list_council_threads())
+
+        elif path.startswith("/council/threads/") and "/delta" in path:
+            tid = path.replace("/council/threads/", "").split("/delta")[0].strip()
+            last_count = int(query.get("last_count", [0])[0])
+            self._send_json(self.db.get_council_delta(tid, last_count=last_count))
+
+        elif path.startswith("/council/threads/"):
+            tid = path.replace("/council/threads/", "").strip()
+            self._send_json(self.db.get_council_thread(tid))
+
         elif path == "/artifacts/leases":
             self._send_json(self.db.list_artifact_leases())
 
@@ -3304,6 +3471,27 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 meta=meta
             )
             self._send_json(msg, 201)
+
+        elif path == "/council/threads":
+            tid = body.get("id", "").strip() or str(uuid.uuid4())
+            run_id = body.get("run_id", tid).strip()
+            title = body.get("title", tid).strip()
+            tbody = body.get("body", "").strip()
+            category = body.get("category", "general").strip()
+            url = body.get("url", f"knot://mesh/council/{tid}").strip()
+            res = self.db.create_council_thread(tid, run_id, title, tbody, category, url)
+            self._send_json(res, 201)
+
+        elif path.startswith("/council/threads/") and path.endswith("/reply"):
+            tid = path.replace("/council/threads/", "").replace("/reply", "").strip()
+            msg_id = body.get("id", "").strip() or f"msg_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+            run_id = body.get("run_id", tid).strip()
+            node_id = body.get("node_id", "desktop").strip()
+            status = body.get("status", "PROGRESS").strip()
+            mbody = body.get("body", "").strip()
+            created_at = body.get("created_at", "").strip()
+            res = self.db.post_council_message(msg_id, tid, run_id, node_id, status, mbody, created_at)
+            self._send_json(res, 201)
 
         elif path == "/artifacts/lock":
             name = body.get("name", "").strip()

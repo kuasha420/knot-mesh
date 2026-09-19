@@ -48,6 +48,10 @@ council_start() {
   local prompt_text=""
   local prompt_file=""
   local nodes=""
+  local proj_override=""
+  local db="ghd"
+  local interactive=0
+  local tiling="grid"
   local dry_run=0
 
   while [ $# -gt 0 ]; do
@@ -57,6 +61,10 @@ council_start() {
       --prompt) prompt_text="$2"; shift 2 ;;
       --prompt-file) prompt_file="$2"; shift 2 ;;
       --nodes) nodes="$2"; shift 2 ;;
+      --project) proj_override="$2"; shift 2 ;;
+      --db) db="$2"; shift 2 ;;
+      --interactive) interactive=1; shift ;;
+      --tiling) tiling="$2"; shift 2 ;;
       --dry-run) dry_run=1; shift ;;
       -h|--help)
         echo "Usage: knot council start [options]"
@@ -67,6 +75,10 @@ council_start() {
         echo "  --prompt <text>      Base mission prompt text"
         echo "  --prompt-file <path> File containing base mission prompt"
         echo "  --nodes <list>       Comma-separated nodes (default: all online)"
+        echo "  --project <name>     Target project name (default: auto-detected)"
+        echo "  --db <ghd|mesh>      Registry backend: ghd (GitHub Discussions, default) or mesh (Mesh DB)"
+        echo "  --interactive        Launch Confluence cockpit with all nodes connected without dispatching prompts"
+        echo "  --tiling <layout>    Cockpit layout: grid (default), sidebyside, splits, tall, fat, stacked"
         echo "  --dry-run            Scaffold prompts and session configs without launching"
         return 0
         ;;
@@ -80,8 +92,17 @@ council_start() {
   # Run automated housekeeping first
   council_clean 7
 
-  knot_log_info "Initiating Swarm Council mission..."
-  echo -e "  Mode: ${C_CYAN}${mode}${C_RESET} | Pack: ${C_CYAN}${pack}${C_RESET}"
+  if [ $interactive -eq 1 ]; then
+    mode="confluence"
+    if [ "$db" = "ghd" ]; then
+      db="mesh"
+    fi
+    knot_log_info "Initiating Interactive Swarm Council Cockpit..."
+    echo -e "  Backend: ${C_CYAN}${db}${C_RESET} | Tiling: ${C_CYAN}${tiling}${C_RESET}"
+  else
+    knot_log_info "Initiating Swarm Council mission..."
+    echo -e "  Mode: ${C_CYAN}${mode}${C_RESET} | Pack: ${C_CYAN}${pack}${C_RESET} | Backend: ${C_CYAN}${db}${C_RESET} | Tiling: ${C_CYAN}${tiling}${C_RESET}"
+  fi
 
   # Stage 0: Audit tools
   echo -e "  ${C_CYAN}[0/7] Auditing tools and fleet availability...${C_RESET}"
@@ -101,15 +122,44 @@ council_start() {
     return 1
   }
   local proj_name
-  proj_name="$(echo "$sync_out" | jq -r '.project_name // "knot-mesh"')"
+  if [ -n "$proj_override" ]; then
+    proj_name="$proj_override"
+  else
+    proj_name="$(echo "$sync_out" | jq -r '.project_name // "knot-mesh"')"
+  fi
 
-  # Stage 2: Create GitHub Discussion thread
-  echo -e "  ${C_CYAN}[2/7] Creating GitHub Discussion registry...${C_RESET}"
+  # Stage 2: Create Mission registry thread
   local disc_res disc_id disc_url
   local run_id="run_$(date +%Y%m%d_%H%M%S)_$(head -c 4 /dev/urandom | xxd -p)"
 
-  if [ $dry_run -eq 0 ]; then
-    local disc_body="## Knot Swarm Council Mission Registry
+  if [ "$db" = "mesh" ]; then
+    echo -e "  ${C_CYAN}[2/7] Creating Mesh DB registry thread...${C_RESET}"
+    if [ $dry_run -eq 0 ]; then
+      local disc_body="## Knot Swarm Council Mission Registry (Mesh DB)
+
+- **Run ID**: \`$run_id\`
+- **Initiated**: $(date -u)
+- **Project**: \`$proj_name\`
+- **Pack**: \`$pack\`
+- **Interactive**: $([ $interactive -eq 1 ] && echo "Yes" || echo "No")
+
+All node checkpoints and audit deliverables will be posted here."
+      disc_res="$(python3 "$SCRIPTS_DIR/mesh_db.py" create --title "Swarm Council Mission: $run_id" --body "$disc_body" --run-id "$run_id" 2>&1)" || {
+        knot_log_err "Could not create mesh db registry: $disc_res"
+        return 1
+      }
+      disc_id="$(echo "$disc_res" | jq -r '.id')"
+      disc_url="$(echo "$disc_res" | jq -r '.url')"
+      echo -e "  Mesh registry thread created: ${C_GREEN}${disc_url}${C_RESET}"
+    else
+      disc_id="$run_id"
+      disc_url="knot://mesh/council/$run_id"
+      echo -e "  ${C_YELLOW}[DRY RUN] Skipping mesh db thread creation.${C_RESET}"
+    fi
+  else
+    echo -e "  ${C_CYAN}[2/7] Creating GitHub Discussion registry...${C_RESET}"
+    if [ $dry_run -eq 0 ]; then
+      local disc_body="## Knot Swarm Council Mission Registry
 
 - **Run ID**: \`$run_id\`
 - **Initiated**: $(date -u)
@@ -117,39 +167,44 @@ council_start() {
 - **Pack**: \`$pack\`
 
 All node checkpoints and final audit deliverables will be posted here."
-    disc_res="$(python3 "$SCRIPTS_DIR/gh_discussion.py" create --title "Swarm Council Mission: $run_id" --body "$disc_body" 2>&1)" || {
-      knot_log_err "Could not create discussion thread: $disc_res"
-      return 1
-    }
-    disc_id="$(echo "$disc_res" | jq -r '.id')"
-    disc_url="$(echo "$disc_res" | jq -r '.url')"
-    echo -e "  Discussion thread created: ${C_GREEN}${disc_url}${C_RESET}"
-  else
-    disc_id="DRY_RUN_ID"
-    disc_url="https://github.com/kuasha420/knot-mesh/discussions"
-    echo -e "  ${C_YELLOW}[DRY RUN] Skipping discussion creation.${C_RESET}"
+      disc_res="$(python3 "$SCRIPTS_DIR/gh_discussion.py" create --title "Swarm Council Mission: $run_id" --body "$disc_body" 2>&1)" || {
+        knot_log_err "Could not create discussion thread: $disc_res"
+        return 1
+      }
+      disc_id="$(echo "$disc_res" | jq -r '.id')"
+      disc_url="$(echo "$disc_res" | jq -r '.url')"
+      echo -e "  Discussion thread created: ${C_GREEN}${disc_url}${C_RESET}"
+    else
+      disc_id="DRY_RUN_ID"
+      disc_url="https://github.com/kuasha420/knot-mesh/discussions"
+      echo -e "  ${C_YELLOW}[DRY RUN] Skipping discussion creation.${C_RESET}"
+    fi
   fi
 
-  # Stage 3: Scaffold prompts
-  echo -e "  ${C_CYAN}[3/7] Scaffolding tailored node prompts (1.5x coverage)...${C_RESET}"
-  local scaffold_cmd=(python3 "$SCRIPTS_DIR/scaffolder.py" --run-id "$run_id" --pack "$pack" --discussion-url "$disc_url")
-  if [ -n "$prompt_file" ]; then scaffold_cmd+=(--prompt-file "$prompt_file"); fi
-  if [ -n "$prompt_text" ]; then scaffold_cmd+=(--prompt "$prompt_text"); fi
-  if [ -n "$nodes" ]; then scaffold_cmd+=(--nodes "$nodes"); fi
-  if [ $dry_run -eq 1 ]; then scaffold_cmd+=(--dry-run); fi
+  # Stage 3: Scaffold prompts (if not interactive)
+  if [ $interactive -eq 0 ]; then
+    echo -e "  ${C_CYAN}[3/7] Scaffolding tailored node prompts (1.5x coverage)...${C_RESET}"
+    local scaffold_cmd=(python3 "$SCRIPTS_DIR/scaffolder.py" --run-id "$run_id" --pack "$pack" --discussion-url "$disc_url" --db "$db")
+    if [ -n "$prompt_file" ]; then scaffold_cmd+=(--prompt-file "$prompt_file"); fi
+    if [ -n "$prompt_text" ]; then scaffold_cmd+=(--prompt "$prompt_text"); fi
+    if [ -n "$nodes" ]; then scaffold_cmd+=(--nodes "$nodes"); fi
+    if [ $dry_run -eq 1 ]; then scaffold_cmd+=(--dry-run); fi
 
-  local scaffold_res
-  scaffold_res="$("${scaffold_cmd[@]}")"
-  if command -v jq >/dev/null 2>&1; then
-    local cov_msg
-    cov_msg="$(echo "$scaffold_res" | jq -r '.actual_coverage | "  Coverage ratio achieved: \(.)x"')"
-    echo "$cov_msg"
+    local scaffold_res
+    scaffold_res="$("${scaffold_cmd[@]}")"
+    if command -v jq >/dev/null 2>&1; then
+      local cov_msg
+      cov_msg="$(echo "$scaffold_res" | jq -r '.actual_coverage | "  Coverage ratio achieved: \(.)x"')"
+      echo "$cov_msg"
+    fi
+  else
+    echo -e "  ${C_CYAN}[3/7] Interactive mode: skipping autonomous prompt scaffolding.${C_RESET}"
   fi
 
   # Save run metadata
   local missions_dir="$HOME/.config/knot/missions/$run_id"
   mkdir -p "$missions_dir"
-  echo "{\"run_id\":\"$run_id\",\"disc_id\":\"$disc_id\",\"disc_url\":\"$disc_url\",\"mode\":\"$mode\",\"project\":\"$proj_name\"}" > "$missions_dir/meta.json"
+  echo "{\"run_id\":\"$run_id\",\"disc_id\":\"$disc_id\",\"disc_url\":\"$disc_url\",\"mode\":\"$mode\",\"project\":\"$proj_name\",\"db\":\"$db\",\"tiling\":\"$tiling\",\"interactive\":$interactive}" > "$missions_dir/meta.json"
 
   if [ $dry_run -eq 1 ]; then
     knot_log_ok "Dry run completed successfully for $run_id."
@@ -157,12 +212,21 @@ All node checkpoints and final audit deliverables will be posted here."
   fi
 
   # Stage 4 & 5: Mode selection and delivery
-  echo -e "  ${C_CYAN}[4-5/7] Delivering prompts via mode: ${C_BOLD}${mode}${C_RESET}..."
-  bash "$SCRIPTS_DIR/deliver.sh" "$mode" "$run_id" "$proj_name"
+  if [ $interactive -eq 1 ]; then
+    echo -e "  ${C_CYAN}[4-5/7] Spawning interactive spatial cockpit (tiling: ${C_BOLD}${tiling}${C_RESET})..."
+  else
+    echo -e "  ${C_CYAN}[4-5/7] Delivering prompts via mode: ${C_BOLD}${mode}${C_RESET} (tiling: ${C_BOLD}${tiling}${C_RESET})..."
+  fi
+  bash "$SCRIPTS_DIR/deliver.sh" "$mode" "$run_id" "$proj_name" "$tiling" "$interactive" "$nodes"
 
   echo ""
-  knot_log_ok "Swarm Council mission $run_id successfully launched!"
-  echo -e "  Discussion: ${C_CYAN}$disc_url${C_RESET}"
+  if [ $interactive -eq 1 ]; then
+    knot_log_ok "Interactive Swarm Cockpit session $run_id launched!"
+  else
+    knot_log_ok "Swarm Council mission $run_id successfully launched!"
+  fi
+  echo -e "  Registry:   ${C_CYAN}$disc_url${C_RESET}"
+  echo -e "  Reply:      ${C_YELLOW}knot council reply $run_id --status <status> --body <text>${C_RESET}"
   echo -e "  Status:     ${C_YELLOW}knot council status $run_id${C_RESET}"
   echo -e "  Attach:     ${C_YELLOW}knot council attach <node_id> $run_id${C_RESET}"
   echo -e "  Reconcile:  ${C_YELLOW}knot council reconcile $run_id${C_RESET}"
@@ -191,15 +255,101 @@ council_status() {
     return 1
   fi
 
-  local disc_id disc_url
+  local disc_id disc_url db_type
   disc_id="$(jq -r '.disc_id' "$meta_file")"
   disc_url="$(jq -r '.disc_url' "$meta_file")"
+  db_type="$(jq -r '.db // "auto"' "$meta_file")"
 
   echo -e "${C_BOLD}--- Swarm Council Mission Status: $run_id ---${C_RESET}"
-  echo -e "Discussion: ${C_CYAN}$disc_url${C_RESET}"
+  echo -e "Registry:   ${C_CYAN}$disc_url${C_RESET}"
+  echo -e "Backend:    ${C_YELLOW}$db_type${C_RESET}"
   echo ""
 
-  python3 "$SCRIPTS_DIR/reconcile.py" --discussion-id "$disc_id" --run-id "$run_id"
+  python3 "$SCRIPTS_DIR/reconcile.py" --discussion-id "$disc_id" --run-id "$run_id" --db-backend "$db_type"
+}
+
+council_reply() {
+  local run_id="${1:-}"
+  if [ -z "$run_id" ]; then
+    echo "Usage: knot council reply <run_id> [--node <id>] [--status <status>] [--body <text>]"
+    return 1
+  fi
+  shift
+
+  local node="$(hostname -s)"
+  if [ -n "${KNOT_NODE_ID:-}" ]; then node="$KNOT_NODE_ID"; fi
+  local status="PROGRESS"
+  local body=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --node) node="$2"; shift 2 ;;
+      --status) status="$2"; shift 2 ;;
+      --body) body="$2"; shift 2 ;;
+      *)
+        knot_log_err "Unknown option: $1"
+        return 1
+        ;;
+    esac
+  done
+
+  if [ -z "$body" ]; then
+    if [ ! -t 0 ]; then
+      body="$(cat)"
+    else
+      knot_log_err "Message body required via --body or stdin."
+      return 1
+    fi
+  fi
+
+  local missions_dir="$HOME/.config/knot/missions"
+  local meta_file="$missions_dir/$run_id/meta.json"
+  local db_type="mesh"
+  local disc_id="$run_id"
+
+  if [ -f "$meta_file" ]; then
+    db_type="$(jq -r '.db // "mesh"' "$meta_file")"
+    disc_id="$(jq -r '.disc_id // ""' "$meta_file")"
+    if [ -z "$disc_id" ]; then disc_id="$run_id"; fi
+  fi
+
+  if [ "$db_type" = "mesh" ]; then
+    python3 "$SCRIPTS_DIR/mesh_db.py" reply --discussion-id "$disc_id" --run-id "$run_id" --node-id "$node" --status "$status" --body "$body"
+  else
+    python3 "$SCRIPTS_DIR/gh_discussion.py" reply --discussion-id "$disc_id" --run-id "$run_id" --node-id "$node" --status "$status" --body "$body"
+  fi
+  knot_log_ok "Reply posted for node '$node' (Status: $status) to mission $run_id"
+}
+
+council_list() {
+  local db_filter="${1:-}"
+  echo -e "${C_BOLD}--- Knot Swarm Council Missions ---${C_RESET}"
+  local missions_dir="$HOME/.config/knot/missions"
+  if [ -d "$missions_dir" ]; then
+    local count=0
+    for m in $(ls -td "$missions_dir"/run_* 2>/dev/null); do
+      local rid
+      rid="$(basename "$m")"
+      local m_meta="$m/meta.json"
+      local m_db="mesh"
+      local m_mode="confluence"
+      local m_proj="knot-mesh"
+      if [ -f "$m_meta" ]; then
+        m_db="$(jq -r '.db // "mesh"' "$m_meta")"
+        m_mode="$(jq -r '.mode // "confluence"' "$m_meta")"
+        m_proj="$(jq -r '.project // "knot-mesh"' "$m_meta")"
+      fi
+      if [ -n "$db_filter" ] && [ "$db_filter" != "$m_db" ]; then
+        continue
+      fi
+      echo -e "  • ${C_CYAN}$rid${C_RESET} [backend: ${C_YELLOW}$m_db${C_RESET} | mode: $m_mode | project: $m_proj]"
+      count=$((count + 1))
+      if [ $count -ge 15 ]; then break; fi
+    done
+    if [ $count -eq 0 ]; then
+      echo "  (No matching council missions found)"
+    fi
+  fi
 }
 
 council_attach() {
@@ -242,11 +392,12 @@ council_reconcile() {
     return 1
   fi
 
-  local disc_id
+  local disc_id db_type
   disc_id="$(jq -r '.disc_id' "$meta_file")"
+  db_type="$(jq -r '.db // "auto"' "$meta_file")"
   local out_file="$missions_dir/$run_id/reconciled_report.md"
 
-  python3 "$SCRIPTS_DIR/reconcile.py" --discussion-id "$disc_id" --run-id "$run_id" --out-file "$out_file"
+  python3 "$SCRIPTS_DIR/reconcile.py" --discussion-id "$disc_id" --run-id "$run_id" --db-backend "$db_type" --out-file "$out_file"
   cat "$out_file"
 }
 

@@ -107,3 +107,59 @@ Every `agy` runner persists its session state into local SQLite (`~/.gemini/anti
   ```bash
   knot council attach <node_id> [run_id]
   ```
+
+---
+
+## 5. Mesh Database Registry (`--db mesh`)
+
+To support offline swarms, fast developer iteration, or hermetic testing without polluting GitHub Discussions:
+- Pass `--db mesh` to `knot council start`.
+- Registry threads and milestone updates are stored in the Mesh DB (backed by Knot Hub TLS REST API `:4242` across physical strands, with automatic fallback to local SQLite at `~/.config/knot/council.db`).
+- Checkpoints and deliverables are posted directly via the CLI:
+  ```bash
+  knot council reply <run_id> --node <node_id> --status <25%|50%|75%|ALERT|FINAL> --body "<message>"
+  # Or pipe complete markdown deliverables:
+  knot council reply <run_id> --node <node_id> --status FINAL < deliverable.md
+  ```
+
+---
+
+## 6. Interactive Spatial Cockpit & Tiling Engine
+
+### A. Interactive Multi-Node Cockpit (`--interactive`)
+To launch a live cockpit with interactive shells across all swarm nodes without dispatching autonomous mission prompts:
+```bash
+knot council start --interactive [--tiling <layout>] [--project <name>]
+```
+Each pane connects to its respective node in the project directory, sets environment variables (`KNOT_NODE_ID`, `KNOT_COUNCIL_RUN_ID`), renders a cybernetic status banner, and presents an interactive shell.
+
+### B. Cockpit Tiling Layouts (`--tiling <layout>`)
+Customize the Kitty window topology for both autonomous and interactive sessions:
+- `grid` *(default)*: Balanced NxM matrix (ideal for ultrawide displays)
+- `sidebyside` / `horizontal`: Full-height side-by-side vertical columns
+- `splits`: Flexible BSP-style splits
+- `tall`: Primary master pane on the left, auxiliary panes stacked on the right
+- `fat`: Primary master pane on top, auxiliary panes side-by-side on bottom
+- `stacked` / `vertical`: Full-width stacked rows
+
+---
+
+## 7. Command Reference
+
+```bash
+# Autonomous Mission
+knot council start [--mode <mode>] [--db <ghd|mesh>] [--tiling <layout>] [--nodes <list>] [--prompt <text>]
+
+# Interactive Multi-Node Cockpit
+knot council start --interactive [--tiling <layout>] [--nodes <list>]
+
+# Mission Lifecycle & Coordination
+knot council status [run_id]                  # Inspect real-time status matrix & milestones
+knot council reply <run_id> [options]         # Post status checkpoint or final report
+knot council reconcile [run_id]               # Compile consolidated audit report
+knot council list [--db <ghd|mesh>]           # List recent missions
+knot council attach <node_id> [run_id]        # Attach directly to node's agy session
+knot council copy                             # Load staged prompt into local clipboard
+knot council kill <run_id>                    # Halt all mission processes across fleet
+knot council clean [days]                     # Prune mission artifacts older than N days
+```

@@ -103,7 +103,7 @@ def load_topology(knot_root):
     }
 
 
-def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="knot-mesh"):
+def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="knot-mesh", tiling="grid", interactive=False):
     knot_bin = os.path.join(knot_root, "bin/knot")
 
     # Resolve dynamic palette with topological near-neighbor separation
@@ -114,12 +114,27 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
         except Exception:
             pass
 
+    tiling_layouts = {
+        "grid": "layout grid",
+        "sidebyside": "layout horizontal",
+        "horizontal": "layout horizontal",
+        "splits": "layout splits",
+        "tall": "layout tall:bias=50;full_size=1",
+        "fat": "layout fat:bias=50;full_size=1",
+        "stacked": "layout vertical",
+        "vertical": "layout vertical",
+        "stack": "layout stack",
+    }
+    active_layout = tiling_layouts.get(tiling.lower(), "layout grid")
+
     lines = [
         "# Swarm Council Confluence Session",
         f"# Run ID: {run_id}",
+        f"# Tiling Mode: {tiling} ({active_layout})",
+        f"# Interactive Mode: {interactive}",
         "# SIGHUP resilience: trap '' HUP",
-        "enabled_layouts grid,splits,tall,fat",
-        "layout grid",
+        "enabled_layouts grid,splits,tall,fat,horizontal,vertical,stack",
+        active_layout,
         ""
     ]
 
@@ -159,10 +174,40 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
         with open(pane_script, "w") as ps:
             ps.write("#!/usr/bin/env bash\n")
             ps.write("trap '' HUP\n")
-            if node in [local_host, "desktop", "localhost"]:
-                ps.write(f'exec "{missions_dir}/launch.sh"\n')
+            if interactive:
+                # Interactive Cockpit Pane: sets environment, prints banner, opens interactive shell in project directory
+                if node in [local_host, "desktop", "localhost"]:
+                    ps.write(f'export KNOT_NODE_ID="{node}"\n')
+                    ps.write(f'export KNOT_COUNCIL_RUN_ID="{run_id}"\n')
+                    ps.write(f'export KNOT_HUB_URL="https://127.0.0.1:4242"\n')
+                    ps.write(f'PDIR="$("{knot_root}/skills/swarm-council/scripts/resolve_project.py" "{project_name}" 2>/dev/null || echo "{knot_root}")"\n')
+                    ps.write('if [ -d "$PDIR" ]; then cd "$PDIR"; fi\n')
+                    ps.write(f'echo -e "\\033[1;36m╔══════════════════════════════════════════════════════════════════════╗\\033[0m"\n')
+                    ps.write(f'echo -e "\\033[1;36m║\\033[0m  🛰️  \\033[1mKnot Swarm Interactive Cockpit: @[{node}]\\033[0m ({desc})"\n')
+                    ps.write(f'echo -e "\\033[1;36m║\\033[0m  Project:   \\033[33m{project_name}\\033[0m ($PWD)"\n')
+                    ps.write(f'echo -e "\\033[1;36m║\\033[0m  Registry:  \\033[35mknot://mesh/council/{run_id}\\033[0m"\n')
+                    ps.write(f'echo -e "\\033[1;36m║\\033[0m  Commands:  \\033[32magy\\033[0m | \\033[32mknot council reply {run_id} --status ... --body ...\\033[0m"\n')
+                    ps.write(f'echo -e "\\033[1;36m╚══════════════════════════════════════════════════════════════════════╝\\033[0m"\n')
+                    ps.write('echo ""\n')
+                    ps.write('exec bash -i\n')
+                else:
+                    remote_cmd = (
+                        f"export KNOT_NODE_ID='{node}' KNOT_COUNCIL_RUN_ID='{run_id}'; "
+                        f"if [ -d \\\"Dev/{project_name}\\\" ]; then cd \\\"Dev/{project_name}\\\"; elif [ -d \\\"{project_name}\\\" ]; then cd \\\"{project_name}\\\"; fi; "
+                        f"echo -e '\\033[1;36m╔══════════════════════════════════════════════════════════════════════╗\\033[0m'; "
+                        f"echo -e '\\033[1;36m║\\033[0m  🛰️  \\033[1mKnot Swarm Interactive Cockpit: @[{node}]\\033[0m ({desc})'; "
+                        f"echo -e '\\033[1;36m║\\033[0m  Project:   \\033[33m{project_name}\\033[0m (\\$PWD)'; "
+                        f"echo -e '\\033[1;36m║\\033[0m  Registry:  \\033[35mknot://mesh/council/{run_id}\\033[0m'; "
+                        f"echo -e '\\033[1;36m║\\033[0m  Commands:  \\033[32magy\\033[0m | \\033[32mknot council reply {run_id} --status ... --body ...\\033[0m'; "
+                        f"echo -e '\\033[1;36m╚══════════════════════════════════════════════════════════════════════╝\\033[0m'; "
+                        f"echo ''; exec bash -i"
+                    )
+                    ps.write(f'exec "{knot_bin}" exec -tt {node} "{remote_cmd}"\n')
             else:
-                ps.write(f'exec "{knot_bin}" exec -t {node} "trap \'\' HUP; ~/.config/knot/missions/{run_id}/launch.sh; exec bash"\n')
+                if node in [local_host, "desktop", "localhost"]:
+                    ps.write(f'exec "{missions_dir}/launch.sh"\n')
+                else:
+                    ps.write(f'exec "{knot_bin}" exec -t {node} "trap \'\' HUP; ~/.config/knot/missions/{run_id}/launch.sh; exec bash"\n')
         os.chmod(pane_script, 0o755)
 
         lines.append(f"launch --cwd={knot_root} {pane_script}")
@@ -176,6 +221,8 @@ def main():
     parser.add_argument("--run-id", required=True, help="Mission run ID")
     parser.add_argument("--nodes", default="", help="Comma-separated nodes")
     parser.add_argument("--project", default="knot-mesh", help="Antigravity project name")
+    parser.add_argument("--tiling", default="grid", help="Cockpit window tiling layout: grid, sidebyside, splits, tall, fat, stacked")
+    parser.add_argument("--interactive", action="store_true", help="Launch interactive multi-node cockpit without prompt dispatch")
     parser.add_argument("--dry-run", action="store_true", help="Generate config without launching Kitty")
 
     args = parser.parse_args()
@@ -200,7 +247,9 @@ def main():
         nodes=nodes,
         missions_dir=missions_dir,
         knot_root=knot_root,
-        project_name=args.project
+        project_name=args.project,
+        tiling=args.tiling,
+        interactive=args.interactive
     )
 
     session_file = os.path.join(missions_dir, "kitty_session.conf")

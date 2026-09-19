@@ -118,7 +118,7 @@ def calculate_chunk_distribution(chunks, nodes, target_coverage=1.5):
     actual_coverage = sum(len(v) for v in node_assignments.values()) / float(num_chunks)
     return node_assignments, actual_coverage
 
-def scaffold_prompt(node, base_prompt, assigned_chunks, run_id, discussion_url, pack_name, sidequest_pct=30):
+def scaffold_prompt(node, base_prompt, assigned_chunks, run_id, discussion_url, pack_name, sidequest_pct=30, db="ghd"):
     profile = DOMAIN_PROFILES.get(node, {
         "title": "Mesh Node",
         "hardware": "Generic Arch Linux workstation",
@@ -127,13 +127,24 @@ def scaffold_prompt(node, base_prompt, assigned_chunks, run_id, discussion_url, 
 
     chunk_list_md = "\n".join([f"  - **{c['name']}**: `{', '.join(c['paths'])}`" for c in assigned_chunks])
 
+    comm_title = "Mesh Council Communication Protocol" if db == "mesh" else "GitHub Discussion Communication Protocol"
+    cli_reply_hint = ""
+    if db == "mesh":
+        cli_reply_hint = f"""- **Posting Updates via CLI**:
+  You can post your checkpoints and reports directly from bash:
+  `knot council reply {run_id} --node {node} --status <25%|50%|75%|ALERT|FINAL> --body '<message>'`
+  or pipe markdown:
+  `knot council reply {run_id} --node {node} --status FINAL < report.md`
+
+"""
+
     prompt = f"""# Knot Swarm Council Mission: Node @[{node}]
 
 **Run ID**: `{run_id}`  
 **Node Role**: {profile['title']} (`{node}`)  
 **Hardware Profile**: {profile['hardware']}  
 **Pack**: `{pack_name}`  
-**Discussion Registry**: {discussion_url}  
+**Registry**: {discussion_url}  
 
 ---
 
@@ -172,8 +183,8 @@ Dedicate ~{sidequest_pct}% of your mission effort to autonomous deep-dive explor
 
 ---
 
-## 6. GitHub Discussion Communication Protocol
-All progress must be reported to the discussion thread:
+## 6. {comm_title}
+All progress must be reported to the mission registry:
 `{discussion_url}`
 
 - **Header Requirement & Visual Self-Identification**: Every single reply posted MUST begin with:
@@ -183,7 +194,7 @@ All progress must be reported to the discussion thread:
   **Assigned Chunks**: {', '.join([c['name'] for c in assigned_chunks])}
   ```
 
-- **Compact Milestone Checkpoints (25%, 50%, 75%)**:
+{cli_reply_hint}- **Compact Milestone Checkpoints (25%, 50%, 75%)**:
   - **MANDATORY CONCISENESS RULE**: Keep interim checkpoints strictly under 15-20 lines.
   - **DO NOT** output the full audit discoveries, large code dumps, or exhaustive file listings in checkpoints!
   - **STRICT FOCUS FOR CHECKPOINTS**:
@@ -206,6 +217,7 @@ def main():
     parser.add_argument("--pack", default="audit-parity", help="Template pack name")
     parser.add_argument("--run-id", default="", help="Optional run identifier")
     parser.add_argument("--discussion-url", default="https://github.com/kuasha420/knot-mesh/discussions", help="Discussion thread URL")
+    parser.add_argument("--db", default="ghd", choices=["ghd", "mesh"], help="Registry backend: ghd (default) or mesh")
     parser.add_argument("--nodes", default="", help="Comma-separated list of nodes (auto-discovered if empty)")
     parser.add_argument("--coverage", type=float, default=1.5, help="Target codebase coverage ratio")
     parser.add_argument("--out-dir", default="", help="Output directory for generated prompt files")
@@ -273,7 +285,8 @@ def main():
             run_id=run_id,
             discussion_url=args.discussion_url,
             pack_name=args.pack,
-            sidequest_pct=sidequest_pct
+            sidequest_pct=sidequest_pct,
+            db=args.db
         )
 
         out_path = os.path.join(out_dir, f"{node}_prompt.md")

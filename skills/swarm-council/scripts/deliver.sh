@@ -7,9 +7,12 @@ set -euo pipefail
 MODE="${1:-confluence}"
 RUN_ID="${2:-}"
 PROJECT="${3:-knot-mesh}"
+TILING="${4:-grid}"
+INTERACTIVE="${5:-0}"
+NODES="${6:-}"
 
 if [ -z "$RUN_ID" ]; then
-  echo "Usage: $0 <confluence|headless|tui|gui|suggested> <run_id> [project_name]"
+  echo "Usage: $0 <confluence|headless|tui|gui|suggested> <run_id> [project_name] [tiling] [interactive] [nodes]"
   exit 1
 fi
 
@@ -31,13 +34,21 @@ fi
 
 case "$MODE" in
   confluence)
-    echo "==> Staging prompt files and launchers across mesh..."
-    for pfile in "$MISSIONS_DIR"/*_prompt.md; do
-      [ -f "$pfile" ] || continue
-      node_id="$(basename "$pfile" | sed 's/_prompt.md//')"
-      
-      launcher_script="$MISSIONS_DIR/${node_id}_launch.sh"
-      cat << 'EOF_LAUNCH' > "$launcher_script"
+    if [ "$INTERACTIVE" = "1" ] || [ "$INTERACTIVE" = "true" ]; then
+      echo "==> Spawning Interactive Confluence Spatial Cockpit in Kitty..."
+      local_conf_cmd=(python3 "$SCRIPT_DIR/confluence.py" --run-id "$RUN_ID" --project "$PROJECT" --tiling "$TILING" --interactive)
+      if [ -n "$NODES" ]; then
+        local_conf_cmd+=(--nodes "$NODES")
+      fi
+      "${local_conf_cmd[@]}"
+    else
+      echo "==> Staging prompt files and launchers across mesh..."
+      for pfile in "$MISSIONS_DIR"/*_prompt.md; do
+        [ -f "$pfile" ] || continue
+        node_id="$(basename "$pfile" | sed 's/_prompt.md//')"
+        
+        launcher_script="$MISSIONS_DIR/${node_id}_launch.sh"
+        cat << 'EOF_LAUNCH' > "$launcher_script"
 #!/usr/bin/env bash
 trap '' HUP
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:$PATH"
@@ -81,26 +92,29 @@ if [ -d "$PROJECT_DIR" ]; then
 fi
 exec agy --project "$PROJECT_NAME" --dangerously-skip-permissions -i "$(< "$PROMPT_FILE")"
 EOF_LAUNCH
-      sed -i "s|RUN_ID_PLACEHOLDER|$RUN_ID|g" "$launcher_script"
-      sed -i "s|PROJECT_PLACEHOLDER|$PROJECT|g" "$launcher_script"
-      sed -i "s|NODE_ID_PLACEHOLDER|$node_id|g" "$launcher_script"
-      chmod +x "$launcher_script"
+        sed -i "s|RUN_ID_PLACEHOLDER|$RUN_ID|g" "$launcher_script"
+        sed -i "s|PROJECT_PLACEHOLDER|$PROJECT|g" "$launcher_script"
+        sed -i "s|NODE_ID_PLACEHOLDER|$node_id|g" "$launcher_script"
+        chmod +x "$launcher_script"
 
-      if [ "$node_id" = "desktop" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(hostname -s)" ]; then
-        cp "$pfile" "$MISSIONS_DIR/prompt.md"
-        cp "$launcher_script" "$MISSIONS_DIR/launch.sh"
-      else
-        "$KNOT_ROOT/bin/knot" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
-        cat "$pfile" | "$KNOT_ROOT/bin/knot" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
-        cat "$launcher_script" | "$KNOT_ROOT/bin/knot" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/launch.sh && chmod +x ~/.config/knot/missions/$RUN_ID/launch.sh"
+        if [ "$node_id" = "desktop" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(hostname -s)" ]; then
+          cp "$pfile" "$MISSIONS_DIR/prompt.md"
+          cp "$launcher_script" "$MISSIONS_DIR/launch.sh"
+        else
+          "$KNOT_ROOT/bin/knot" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
+          cat "$pfile" | "$KNOT_ROOT/bin/knot" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
+          cat "$launcher_script" | "$KNOT_ROOT/bin/knot" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/launch.sh && chmod +x ~/.config/knot/missions/$RUN_ID/launch.sh"
+        fi
+      done
+      echo "==> Spawning Confluence Spatial Cockpit in Kitty..."
+      ACTIVE_NODES="$(python3 -c 'import glob, os, sys, re; p=glob.glob(os.path.join(sys.argv[1], "*_prompt.md")); print(",".join(re.sub(r"_prompt\.md$", "", os.path.basename(x)) for x in p))' "$MISSIONS_DIR")"
+      local_conf_cmd=(python3 "$SCRIPT_DIR/confluence.py" --run-id "$RUN_ID" --project "$PROJECT" --tiling "$TILING")
+      if [ -n "$ACTIVE_NODES" ]; then
+        local_conf_cmd+=(--nodes "$ACTIVE_NODES")
+      elif [ -n "$NODES" ]; then
+        local_conf_cmd+=(--nodes "$NODES")
       fi
-    done
-    echo "==> Spawning Confluence Spatial Cockpit in Kitty..."
-    ACTIVE_NODES="$(python3 -c 'import glob, os, sys, re; p=glob.glob(os.path.join(sys.argv[1], "*_prompt.md")); print(",".join(re.sub(r"_prompt\.md$", "", os.path.basename(x)) for x in p))' "$MISSIONS_DIR")"
-    if [ -n "$ACTIVE_NODES" ]; then
-      python3 "$SCRIPT_DIR/confluence.py" --run-id "$RUN_ID" --project "$PROJECT" --nodes "$ACTIVE_NODES"
-    else
-      python3 "$SCRIPT_DIR/confluence.py" --run-id "$RUN_ID" --project "$PROJECT"
+      "${local_conf_cmd[@]}"
     fi
     ;;
 

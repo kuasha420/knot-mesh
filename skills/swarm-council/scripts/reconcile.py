@@ -12,10 +12,35 @@ import json
 import argparse
 import subprocess
 
-def fetch_thread_data(discussion_id):
+def fetch_thread_data(discussion_id, backend="auto", run_id=""):
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    gh_helper = os.path.join(script_dir, "gh_discussion.py")
-    out = subprocess.check_output([gh_helper, "get_thread", "--discussion-id", discussion_id], text=True)
+    
+    if backend == "auto":
+        # Check meta.json if run_id is known
+        if run_id:
+            meta_path = os.path.expanduser(f"~/.config/knot/missions/{run_id}/meta.json")
+            if os.path.exists(meta_path):
+                try:
+                    with open(meta_path) as mf:
+                        mdata = json.load(mf)
+                        if mdata.get("db") == "mesh":
+                            backend = "mesh"
+                        elif mdata.get("db") == "ghd":
+                            backend = "ghd"
+                except Exception:
+                    pass
+        if backend == "auto":
+            if discussion_id.startswith("mesh_") or discussion_id.startswith("run_") or not discussion_id.startswith("D_"):
+                backend = "mesh"
+            else:
+                backend = "ghd"
+
+    if backend == "mesh":
+        helper = os.path.join(script_dir, "mesh_db.py")
+    else:
+        helper = os.path.join(script_dir, "gh_discussion.py")
+
+    out = subprocess.check_output([helper, "get_thread", "--discussion-id", discussion_id], text=True)
     return json.loads(out)
 
 def parse_comments(thread_data, target_run_id):
@@ -108,13 +133,14 @@ def generate_reconciled_report(thread_data, node_reports, target_run_id):
 
 def main():
     parser = argparse.ArgumentParser(description="Swarm Council Discussion Reconciler")
-    parser.add_argument("--discussion-id", required=True, help="GitHub Discussion node ID")
+    parser.add_argument("--discussion-id", required=True, help="Discussion node ID or Mesh thread ID")
     parser.add_argument("--run-id", default="", help="Specific run ID to reconcile")
+    parser.add_argument("--db-backend", default="auto", choices=["auto", "ghd", "mesh"], help="Backend: auto (default), ghd, or mesh")
     parser.add_argument("--out-file", default="", help="Output markdown report path")
 
     args = parser.parse_args()
 
-    thread_data = fetch_thread_data(args.discussion_id)
+    thread_data = fetch_thread_data(args.discussion_id, backend=args.db_backend, run_id=args.run_id)
     node_reports = parse_comments(thread_data, args.run_id)
     report_md = generate_reconciled_report(thread_data, node_reports, args.run_id)
 
