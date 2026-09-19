@@ -165,7 +165,7 @@ def main():
         state.nodes[n] = NodeScore(node_id=n)
 
     db_path = get_mesh_db_path()
-    last_checked_id = 0
+    seen_ids = set()
 
     docs_dir = os.path.join(args.project_root, "docs")
     os.makedirs(docs_dir, exist_ok=True)
@@ -185,13 +185,15 @@ def main():
                 conn = sqlite3.connect(db_path, timeout=5)
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT id, node_id, status, body, created_at FROM council_messages WHERE run_id = ? AND id > ? ORDER BY id ASC",
-                    (args.run_id, last_checked_id)
+                    "SELECT id, node_id, status, body, created_at FROM council_messages WHERE run_id = ? ORDER BY rowid ASC",
+                    (args.run_id,)
                 )
                 rows = cur.fetchall()
                 for row in rows:
                     msg_id, node_id, status, body, created_at = row
-                    last_checked_id = max(last_checked_id, msg_id)
+                    if msg_id in seen_ids:
+                        continue
+                    seen_ids.add(msg_id)
 
                     if node_id in state.nodes and "Volley Returned" in body:
                         ms_match = re.search(r"Solve Time:\s*([\d\.]+)ms", body)
@@ -220,8 +222,8 @@ def main():
                         print(f"  [VOLLEY VERIFIED] @{node_id} solved in {solve_ms:.1f}ms (+{pts_awarded} pts, Streak: {state.streak_multiplier}x)")
 
                 conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"  [DB ERROR]: {e}")
 
         md = generate_leaderboard_md(state, args.project_root)
         with open(leaderboard_file, "w") as f:

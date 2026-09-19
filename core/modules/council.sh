@@ -317,6 +317,7 @@ council_status() {
   echo -e "Backend:    ${C_YELLOW}$db_type${C_RESET}"
   echo ""
 
+  export KNOT_HUB_URL="${KNOT_HUB_URL:-$(hub_resolve_url 2>/dev/null || echo "https://127.0.0.1:4242")}"
   python3 "$SCRIPTS_DIR/reconcile.py" --discussion-id "$disc_id" --run-id "$run_id" --db-backend "$db_type"
 }
 
@@ -365,6 +366,7 @@ council_reply() {
     if [ -z "$disc_id" ]; then disc_id="$run_id"; fi
   fi
 
+  export KNOT_HUB_URL="${KNOT_HUB_URL:-$(hub_resolve_url 2>/dev/null || echo "https://127.0.0.1:4242")}"
   if [ "$db_type" = "mesh" ]; then
     python3 "$SCRIPTS_DIR/mesh_db.py" reply --discussion-id "$disc_id" --run-id "$run_id" --node-id "$node" --status "$status" --body "$body"
   else
@@ -415,6 +417,18 @@ council_steer() {
   fi
 
   if [ ! -S "$sock" ]; then
+    local anchor="desktop"
+    if [ -f "$meta_file" ]; then
+      anchor="$(jq -r '.anchor // "desktop"' "$meta_file")"
+    fi
+    local my_h=""
+    my_h="$(knot_detect_hostname 2>/dev/null || uname -n | cut -d. -f1)"
+    if [ "$my_h" != "$anchor" ] && command -v knot >/dev/null 2>&1; then
+      if knot exec "$anchor" "test -S /tmp/kitty-council-$run_id.sock" >/dev/null 2>&1; then
+        knot exec "$anchor" "knot council steer '$node' $(printf %q "$prompt_text") '$run_id'"
+        return $?
+      fi
+    fi
     knot_log_err "Kitty control socket not found for run '$run_id' at $sock."
     echo "Ensure the cockpit was launched with Kitty remote control enabled."
     return 1
