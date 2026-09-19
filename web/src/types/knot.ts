@@ -238,7 +238,14 @@ export interface MeshActionResult {
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected';
 
-export type CockpitViewMode = 'grid' | 'chat' | 'radar' | 'dag' | 'artifacts';
+export type CockpitViewMode = 'grid' | 'chat' | 'radar' | 'dag' | 'artifacts' | 'kanban';
+
+export interface TaskTokenTelemetry {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCostUsd?: number;
+}
 
 export interface MeshTopologyOutput {
   name: string;

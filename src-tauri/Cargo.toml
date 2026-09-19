@@ -1,0 +1,23 @@
+[package]
+name = "knot-kafe"
+version = "1.5.0"
+description = "Knot Kommand Kafe - Lightweight Swarm Desktop Cockpit"
+authors = ["Arafat Zahan <kuasha420>", "Knot Swarm Council"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-notification = "2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "z"
+strip = true
