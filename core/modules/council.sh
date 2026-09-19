@@ -251,9 +251,17 @@ All node checkpoints and final audit deliverables will be posted here."
   # Save run metadata
   local missions_dir="$HOME/.config/knot/missions/$run_id"
   mkdir -p "$missions_dir"
-  local local_host
-  local_host="$(hostname -s)"
-  echo "{\"run_id\":\"$run_id\",\"disc_id\":\"$disc_id\",\"disc_url\":\"$disc_url\",\"mode\":\"$mode\",\"project\":\"$proj_name\",\"db\":\"$db\",\"tiling\":\"$tiling\",\"pack\":\"$pack\",\"anchor\":\"$local_host\",\"opening_node\":\"$local_host\",\"interactive\":$interactive,\"nodes\":\"$nodes\",\"status\":\"ACTIVE\",\"created_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$missions_dir/meta.json"
+  if [ -f "$missions_dir/meta.json" ] && command -v jq >/dev/null 2>&1; then
+    local tmp_meta
+    tmp_meta="$(mktemp)"
+    jq --arg disc_id "$disc_id" --arg disc_url "$disc_url" --arg mode "$mode" --arg project "$proj_name" --arg db "$db" --arg tiling "$tiling" --argjson interactive "$interactive" \
+      '. + {disc_id: $disc_id, disc_url: $disc_url, mode: $mode, project: $project, db: $db, tiling: $tiling, interactive: $interactive, status: "ACTIVE"}' \
+      "$missions_dir/meta.json" > "$tmp_meta" && mv "$tmp_meta" "$missions_dir/meta.json"
+  else
+    local local_host
+    local_host="$(hostname -s)"
+    echo "{\"run_id\":\"$run_id\",\"disc_id\":\"$disc_id\",\"disc_url\":\"$disc_url\",\"mode\":\"$mode\",\"project\":\"$proj_name\",\"db\":\"$db\",\"tiling\":\"$tiling\",\"pack\":\"$pack\",\"anchor\":\"$local_host\",\"opening_node\":\"$local_host\",\"interactive\":$interactive,\"nodes\":\"$nodes\",\"status\":\"ACTIVE\",\"created_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$missions_dir/meta.json"
+  fi
 
   if [ $dry_run -eq 1 ]; then
     if [ $interactive -eq 1 ]; then
