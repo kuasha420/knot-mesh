@@ -25,6 +25,28 @@ echo "$SRCINFO" | grep -q "depends = deskflow"
 echo "$SRCINFO" | grep -q "optdepends = kscreen-doctor"
 echo "  -> makepkg --printsrcinfo generation: OK"
 
+echo "=== [Test 2b] PKGBUILD Packaging Verification ==="
+PKG_TEST_DIR="$(mktemp -d)"
+(
+  export pkgdir="$PKG_TEST_DIR"
+  export srcdir="$KNOT_ROOT"
+  # shellcheck source=PKGBUILD
+  source "$KNOT_ROOT/PKGBUILD"
+  package
+)
+if [ ! -d "$PKG_TEST_DIR/usr/lib/knot-mesh/skills/swarm-council" ]; then
+  echo "Error: skills/swarm-council missing from package build output!" >&2
+  exit 1
+fi
+for bin_name in knot knot-installer knot-agent knot-hub knot-autounlock knot-stripd; do
+  if [ ! -L "$PKG_TEST_DIR/usr/bin/$bin_name" ]; then
+    echo "Error: /usr/bin/$bin_name symlink missing from package build output!" >&2
+    exit 1
+  fi
+done
+rm -rf "$PKG_TEST_DIR"
+echo "  -> PKGBUILD package step installs skills and all binary symlinks: OK"
+
 echo "=== [Test 3] Bootstrap Installer Isolation Run ==="
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT

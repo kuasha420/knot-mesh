@@ -1213,7 +1213,7 @@ case "${1:-}" in
     cmd_update "$@"
     ;;
   -v|--version|version)
-    echo "knot-mesh version ${KNOT_VERSION:-1.0.0-rc3}"
+    echo "knot-mesh version ${KNOT_VERSION:-1.0.0-rc4}"
     ;;
   mcp)
     shift

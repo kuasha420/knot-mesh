@@ -37,8 +37,8 @@ package() {
     local destdir="${pkgdir}/usr/lib/knot-mesh"
     mkdir -p "${destdir}" "${pkgdir}/usr/bin"
 
-    # Copy mesh core, bin, and templates
-    cp -r core bin templates "${destdir}/"
+    # Copy mesh core, bin, templates, and skills
+    cp -r core bin templates skills "${destdir}/"
 
     # Copy systemd units if present
     if [ -d "systemd" ]; then
@@ -54,6 +54,8 @@ package() {
     ln -sf "/usr/lib/knot-mesh/bin/knot" "${pkgdir}/usr/bin/knot"
     ln -sf "/usr/lib/knot-mesh/bin/knot-installer" "${pkgdir}/usr/bin/knot-installer"
     ln -sf "/usr/lib/knot-mesh/bin/knot-agent" "${pkgdir}/usr/bin/knot-agent"
+    ln -sf "/usr/lib/knot-mesh/bin/knot-hub" "${pkgdir}/usr/bin/knot-hub"
+    ln -sf "/usr/lib/knot-mesh/bin/knot-autounlock" "${pkgdir}/usr/bin/knot-autounlock"
     ln -sf "/usr/lib/knot-mesh/bin/knot-stripd" "${pkgdir}/usr/bin/knot-stripd"
 
     # Install license if present
