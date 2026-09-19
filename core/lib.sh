@@ -423,13 +423,91 @@ knot_is_anchor() {
   fi
 
   local a_manifest=""
-  if a_manifest="$(knot_get_manifest_path "$anchor_id" 2>/dev/null)"; then
-    local a_host
-    a_host="$(awk -F'"' '/"hostname":/ {print $4}' "$a_manifest" 2>/dev/null || true)"
+  if a_manifest="$(knot_get_manifest_path "$anchor_id" 2>&1)"; then
+    local a_host=""
+    a_host="$(awk -F'"' '/"hostname":/ {print $4}' "$a_manifest")"
     if [ -n "$a_host" ] && [ "$my_host" = "$a_host" ]; then
       return 0
     fi
   fi
 
   return 1
+}
+
+# Detects whether the installation is "dev" (live Git worktree) or "prod" (packaged / standalone release)
+knot_detect_install_type() {
+  local check_root="${1:-${KNOT_ROOT:-}}"
+  if [ -z "$check_root" ]; then
+    check_root="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+  fi
+
+  local user_home
+  user_home="$(knot_detect_user_home)"
+
+  # 1. Explicit user override/marker
+  if [ -f "$user_home/.config/knot/install_type" ]; then
+    local marker
+    marker="$(tr -d '[:space:]' < "$user_home/.config/knot/install_type")"
+    if [ "$marker" = "dev" ] || [ "$marker" = "prod" ]; then
+      echo "$marker"
+      return 0
+    fi
+  fi
+
+  # 2. Check if check_root is inside a git working tree
+  if [ -d "$check_root/.git" ] || git -C "$check_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "dev"
+    return 0
+  fi
+
+  # 3. Check if ~/.local/bin/knot is a symlink pointing to a git repo
+  if [ -L "$user_home/.local/bin/knot" ]; then
+    local target=""
+    if target="$(readlink -f "$user_home/.local/bin/knot" 2>&1)"; then
+      if [ -n "$target" ]; then
+        local tdir
+        tdir="$(dirname "$(dirname "$target")")"
+        if [ -d "$tdir/.git" ] || git -C "$tdir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+          echo "dev"
+          return 0
+        fi
+      fi
+    fi
+  fi
+
+  echo "prod"
+  return 0
+}
+
+# Enforces lockout between dev and prod operations.
+# Usage: knot_enforce_lockout <required_mode: dev|prod> <command_invoked> <force_flag: 0|1>
+knot_enforce_lockout() {
+  local req_mode="$1"
+  local cmd_name="$2"
+  local force="${3:-0}"
+
+  local actual_mode
+  actual_mode="$(knot_detect_install_type)"
+
+  if [ "$force" -eq 1 ]; then
+    return 0
+  fi
+
+  if [ "$actual_mode" = "dev" ] && [ "$req_mode" = "prod" ]; then
+    knot_log_err "Installation Lockout: This node is running a DEVELOPMENT installation (Git worktree)."
+    echo -e "  Executing production '${cmd_name}' would overwrite Git checkouts or fail to heal dev drift."
+    echo -e "  -> ${C_CYAN}Use '${cmd_name} --dev' instead.${C_RESET}"
+    echo -e "  (To override this safety lockout, specify --force-prod)"
+    return 1
+  fi
+
+  if [ "$actual_mode" = "prod" ] && [ "$req_mode" = "dev" ]; then
+    knot_log_err "Installation Lockout: This node is running a PRODUCTION installation (not a Git worktree)."
+    echo -e "  Executing development '${cmd_name}' requires active Git repositories and dev symlinks."
+    echo -e "  -> ${C_CYAN}Use '${cmd_name}' (production release mode) instead.${C_RESET}"
+    echo -e "  (To override this safety lockout, specify --force-dev)"
+    return 1
+  fi
+
+  return 0
 }

@@ -99,31 +99,57 @@ knot repair --all                  # Fleet-wide repair across all swarm nodes
 ---
 
 ### `knot sync`
-Synchronizes declarative swarm manifests, screen topologies, and profile configurations.
+Synchronizes declarative swarm manifests, screen topologies, and profile configurations across the mesh.
 
 ```bash
 knot sync                          # Standalone sync: pull latest manifests from Anchor
 knot sync <node_id>                # Anchor mode: push configuration to a specific Strand
 knot sync --all                    # Anchor mode: push configuration to all active Strands
+knot sync --dev                    # Dev mode: auto-heal local symlinks, global hooks, and Antigravity drift
+knot sync --dev --all              # Dev mode: auto-heal dev environment & sync topology across all Strands
+knot sync --dev <node_id>          # Dev mode: auto-heal dev environment on a specific Strand
 ```
+
+- **Options**:
+  - `--dev`: Development synchronization mode. Auto-heals local/remote development drift:
+    - Sets `~/.config/knot/install_type` marker to `dev`.
+    - Restores binary symlinks (`~/.local/bin/knot`, `knot-installer`) to active Git worktrees.
+    - Symlinks global Antigravity skill (`~/.gemini/config/skills/swarm-council`).
+    - Configures global Antigravity lifecycle hooks (`~/.gemini/config/hooks.json`).
+    - Auto-heals Antigravity settings (`useAiCredits: false`, `useG1Credits: false`, dark theme).
+  - `--force-prod`: Override development lockout to execute production sync on a Git development node.
+  - `--force-dev`: Override production lockout to execute development sync on a packaged/standalone node.
+- **Safety Lockout**:
+  - Running production `knot sync` on a dev installation is hard-blocked to protect local checkouts and configurations from being overwritten.
+  - In fleet sync (`--all`), Strand install types are checked; production nodes skip dev drift healing and dev nodes skip binary tarball overwrites.
 
 ---
 
 ### `knot update`
-Swarm-wide binary and core module updater. Checks for new releases or synchronizes code changes from the Anchor across all Strands.
+Swarm-wide binary and core module updater. Checks for new releases or synchronizes code changes across the mesh.
 
 ```bash
+# Production Release Mode
 knot update                        # Check and update local node from GitHub release
-knot update --all [-f]             # Anchor mode: rollout update across all active Strands
+knot update --all [-f]             # Anchor mode: rollout release update across all active Strands
 knot update <node_id> [-f]         # Anchor mode: rollout update to a specific Strand
+
+# Development Mode (Git Mesh)
+knot update --dev                  # Dev mode: fast-forward git pull on local repository & restart worker daemons
+knot update --dev --all            # Dev mode: fleet-wide git pull, binary audit, service restart & status reconciliation
+knot update --dev <node_id>        # Dev mode: update a specific Strand via git pull
 ```
 
 - **Options**:
-  - `-f, --force`: Force re-synchronization even if the remote tag or commit hash matches.
-- **Workflow**:
-  - Anchor updates local binaries.
-  - Automatically pushes `bin/` and `core/` to target strands via `rsync` (or streaming `tar` fallback).
-  - Atomically reloads background user services (`knot-agent`, `knot-stripd`) without interrupting active KVM sessions.
+  - `--dev`: Development update mode. Orchestrates `git -C <repo> pull --ff-only` across Anchor and Strands, audits executable permissions, heals symlinks, restarts background worker daemons (`knot-agent`, `knot-stripd`, `knot-hub`) without interrupting active KVM (`knot-deskflow`), and runs mesh status reconciliation.
+  - `-f, --force`: Force re-synchronization even if the remote tag matches.
+  - `--force-prod`: Override development lockout to execute production update on a Git development node.
+  - `--force-dev`: Override production lockout to execute development update on a packaged/standalone node.
+- **Safety Lockout**:
+  - Running production `knot update` on a development installation is hard-blocked to prevent overwriting active Git worktrees with release tarballs.
+  - During production fleet rollout (`knot update --all`), any Strand running a development installation is safely skipped with a warning.
+- **KVM Resilience**:
+  - Updates only restart background agent daemons; `knot-deskflow.service` and `knot-autounlock.service` are never interrupted, guaranteeing zero display flicker or input dropouts.
 
 ---
 

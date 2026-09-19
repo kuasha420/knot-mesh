@@ -16,8 +16,33 @@ swarm_sync_anchor_push() {
   local nodes_dir="$3"
   local topo_file="$4"
   local swarm_conf="$5"
+  local dev_mode="${6:-0}"
+  local force_prod="${7:-0}"
 
   knot_log_info "Pushing swarm configuration to Strand '$target'..."
+
+  # Check for remote install type if running in production mode
+  if [ "$dev_mode" -eq 0 ]; then
+    local is_remote_dev=0
+    local probe_dev=""
+    if probe_dev="$(ssh -o BatchMode=yes -o ConnectTimeout=4 "$target" '
+      if [ -f "$HOME/.config/knot/install_type" ]; then
+        grep -q "^dev$" "$HOME/.config/knot/install_type"
+      elif [ -d "$HOME/Dev/knot-mesh/.git" ] || [ -d "$HOME/knot-mesh/.git" ]; then
+        exit 0
+      else
+        exit 1
+      fi
+    ' 2>&1)"; then
+      is_remote_dev=1
+    fi
+
+    if [ "$is_remote_dev" -eq 1 ] && [ "$force_prod" -eq 0 ]; then
+      knot_log_warn "Strand '$target' is running a DEVELOPMENT installation. Skipping production file push & sync."
+      echo -e "  (Use 'knot sync --dev $target' or pass --force-prod to override)"
+      return 0
+    fi
+  fi
 
   # 1. Connectivity probe
   local probe_out=""
@@ -117,19 +142,21 @@ swarm_sync_anchor_push() {
     knot_log_warn "Notice: Remote system state update on $target: $state_err"
   fi
 
-  # 6. Synchronize updated Knot CLI scripts to remote installation if found
-  local remote_bin=""
-  if remote_bin="$(ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new "$target" "readlink -f \$(which knot 2>&1) 2>&1")"; then
-    if [ -n "$remote_bin" ] && [[ "$remote_bin" =~ ^/ ]] && [[ "$remote_bin" =~ /knot$ ]]; then
-      local remote_knot_root
-      remote_knot_root="$(dirname "$(dirname "$remote_bin")")"
-      if [ -d "$KNOT_ROOT/bin" ] && [ -d "$KNOT_ROOT/core" ]; then
-        ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new "$target" "mkdir -p \"\$HOME/.local/share/knot-mesh\" \"$remote_knot_root/bin\" \"$remote_knot_root/core\"" 2>&1
-        if [ "$has_rsync" -eq 1 ]; then
-          rsync -az -e "ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new" "$KNOT_ROOT/bin/" "${target}:${remote_knot_root}/bin/" 2>&1
-          rsync -az -e "ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new" "$KNOT_ROOT/core/" "${target}:${remote_knot_root}/core/" 2>&1
-        else
-          tar -czf - -C "$KNOT_ROOT" bin core | ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new "$target" "tar -xzf - -C \"$remote_knot_root\"" 2>&1
+  # 6. Synchronize updated Knot CLI scripts to remote installation if found (production only)
+  if [ "$dev_mode" -eq 0 ]; then
+    local remote_bin=""
+    if remote_bin="$(ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new "$target" "readlink -f \$(which knot 2>&1) 2>&1")"; then
+      if [ -n "$remote_bin" ] && [[ "$remote_bin" =~ ^/ ]] && [[ "$remote_bin" =~ /knot$ ]]; then
+        local remote_knot_root
+        remote_knot_root="$(dirname "$(dirname "$remote_bin")")"
+        if [ -d "$KNOT_ROOT/bin" ] && [ -d "$KNOT_ROOT/core" ]; then
+          ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new "$target" "mkdir -p \"\$HOME/.local/share/knot-mesh\" \"$remote_knot_root/bin\" \"$remote_knot_root/core\"" 2>&1
+          if [ "$has_rsync" -eq 1 ]; then
+            rsync -az -e "ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new" "$KNOT_ROOT/bin/" "${target}:${remote_knot_root}/bin/" 2>&1
+            rsync -az -e "ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new" "$KNOT_ROOT/core/" "${target}:${remote_knot_root}/core/" 2>&1
+          else
+            tar -czf - -C "$KNOT_ROOT" bin core | ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new "$target" "tar -xzf - -C \"$remote_knot_root\"" 2>&1
+          fi
         fi
       fi
     fi
@@ -137,8 +164,15 @@ swarm_sync_anchor_push() {
 
   # 7. Dispatch remote knot sync on the Strand to recompile client Deskflow config
   knot_log_info "Executing remote knot sync on '$target'..."
+  local remote_sync_cmd="export PATH=\"\$HOME/.local/bin:/usr/local/bin:\$PATH\"; knot sync"
+  if [ "$dev_mode" -eq 1 ]; then
+    remote_sync_cmd="$remote_sync_cmd --dev"
+  elif [ "$force_prod" -eq 1 ]; then
+    remote_sync_cmd="$remote_sync_cmd --force-prod"
+  fi
+
   local remote_sync_out=""
-  if ! remote_sync_out="$(ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new "$target" "export PATH=\"\$HOME/.local/bin:/usr/local/bin:\$PATH\"; knot sync" 2>&1)"; then
+  if ! remote_sync_out="$(ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new "$target" "$remote_sync_cmd" 2>&1)"; then
     knot_log_err "Remote knot sync failed on '$target': $remote_sync_out"
     return 1
   fi
@@ -264,5 +298,299 @@ except Exception as e:
   kdeconnect_sync_mesh
 
   knot_log_ok "Strand mesh synchronization complete."
+  return 0
+}
+
+# Heals development configuration drift on the local node
+swarm_sync_dev_heal_local() {
+  local knot_root="$KNOT_ROOT"
+  local home
+  home="$(knot_detect_user_home)"
+
+  knot_log_info "Healing development environment drift locally..."
+
+  # 1. Set explicit installation type marker to dev
+  mkdir -p "$home/.config/knot"
+  echo "dev" > "$home/.config/knot/install_type"
+
+  # 2. Binary symlinks: ensure ~/.local/bin/knot and knot-installer point to active repo
+  mkdir -p "$home/.local/bin"
+  if [ -x "$knot_root/bin/knot" ]; then
+    ln -sf "$knot_root/bin/knot" "$home/.local/bin/knot"
+    chmod +x "$knot_root/bin/knot"
+  fi
+  if [ -x "$knot_root/bin/knot-installer" ]; then
+    ln -sf "$knot_root/bin/knot-installer" "$home/.local/bin/knot-installer"
+    chmod +x "$knot_root/bin/knot-installer"
+  fi
+
+  # 3. Global Antigravity skill symlink
+  mkdir -p "$home/.gemini/config/skills"
+  if [ -d "$knot_root/skills/swarm-council" ]; then
+    ln -sfn "$knot_root/skills/swarm-council" "$home/.gemini/config/skills/swarm-council"
+  fi
+
+  # 4. Global Antigravity lifecycle hook: ~/.gemini/config/hooks.json
+  cat << 'EOF_HOOKS' > "$home/.config/knot/hooks.json.tmp"
+{
+  "swarm-council-coordinator": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "python3 ~/.gemini/config/skills/swarm-council/scripts/council_hook.py",
+        "timeout": 5
+      }
+    ]
+  }
+}
+EOF_HOOKS
+  mv "$home/.config/knot/hooks.json.tmp" "$home/.gemini/config/hooks.json"
+  chmod 644 "$home/.gemini/config/hooks.json"
+
+  # 5. Antigravity settings auto-healing
+  python3 - << 'PY_EOF'
+import json, os
+
+home = os.path.expanduser("~")
+p1 = os.path.join(home, ".gemini/config/config.json")
+p2 = os.path.join(home, ".gemini/antigravity-cli/settings.json")
+
+if os.path.exists(p1):
+    try:
+        with open(p1, "r") as f:
+            d = json.load(f)
+        u = d.setdefault("userSettings", {})
+        u["useAiCredits"] = False
+        u["useG1Credits"] = False
+        u["themeMode"] = "THEME_MODE_DARK"
+        with open(p1, "w") as f:
+            json.dump(d, f, indent=2)
+    except Exception:
+        pass
+
+if os.path.exists(p2):
+    try:
+        with open(p2, "r") as f:
+            d = json.load(f)
+        d["useAiCredits"] = False
+        d["useG1Credits"] = False
+        d["accepted_latest_terms_of_service"] = True
+        d["theme"] = "dark"
+        d["theme_mode"] = "THEME_MODE_DARK"
+        with open(p2, "w") as f:
+            json.dump(d, f, indent=2)
+    except Exception:
+        pass
+PY_EOF
+
+  knot_log_ok "Local development environment and Antigravity customizations healed."
+  return 0
+}
+
+# Heals development configuration drift remotely on a specific strand
+swarm_sync_dev_heal_remote() {
+  local target="$1"
+  knot_log_info "Healing development environment drift on Strand '$target'..."
+
+  if ! ssh -o BatchMode=yes -o ConnectTimeout=4 "$target" "true" 2>&1; then
+    knot_log_warn "Strand '$target' is unreachable over SSH. Skipping dev healing."
+    return 1
+  fi
+
+  local remote_cmd='
+    set -euo pipefail
+    DEV_DIR=""
+    for cand in "$HOME/Dev/knot-mesh" "$HOME/knot-mesh" "$HOME/.local/share/knot-mesh"; do
+      if [ -d "$cand/.git" ]; then
+        DEV_DIR="$cand"
+        break
+      fi
+    done
+
+    if [ -z "$DEV_DIR" ]; then
+      echo "ERROR: No knot-mesh git repository found on target node."
+      exit 1
+    fi
+
+    mkdir -p "$HOME/.config/knot" "$HOME/.local/bin" "$HOME/.gemini/config/skills"
+    echo "dev" > "$HOME/.config/knot/install_type"
+
+    ln -sf "$DEV_DIR/bin/knot" "$HOME/.local/bin/knot"
+    chmod +x "$DEV_DIR/bin/knot"
+    if [ -x "$DEV_DIR/bin/knot-installer" ]; then
+      ln -sf "$DEV_DIR/bin/knot-installer" "$HOME/.local/bin/knot-installer"
+      chmod +x "$DEV_DIR/bin/knot-installer"
+    fi
+
+    if [ -d "$DEV_DIR/skills/swarm-council" ]; then
+      ln -sfn "$DEV_DIR/skills/swarm-council" "$HOME/.gemini/config/skills/swarm-council"
+    fi
+
+    cat << "EOF_HOOK" > "$HOME/.gemini/config/hooks.json"
+{
+  "swarm-council-coordinator": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "python3 ~/.gemini/config/skills/swarm-council/scripts/council_hook.py",
+        "timeout": 5
+      }
+    ]
+  }
+}
+EOF_HOOK
+    chmod 644 "$HOME/.gemini/config/hooks.json"
+
+    python3 - << "PY_INNER"
+import json, os
+home = os.path.expanduser("~")
+p1 = os.path.join(home, ".gemini/config/config.json")
+p2 = os.path.join(home, ".gemini/antigravity-cli/settings.json")
+for p in [p1, p2]:
+    if os.path.exists(p):
+        try:
+            with open(p, "r") as f: d = json.load(f)
+            if "userSettings" in d:
+                d["userSettings"].update({"useAiCredits": False, "useG1Credits": False, "themeMode": "THEME_MODE_DARK"})
+            else:
+                d.update({"useAiCredits": False, "useG1Credits": False, "accepted_latest_terms_of_service": True, "theme": "dark", "theme_mode": "THEME_MODE_DARK"})
+            with open(p, "w") as f: json.dump(d, f, indent=2)
+        except Exception: pass
+PY_INNER
+    echo "OK: $DEV_DIR"
+  '
+
+  local heal_out=""
+  if heal_out="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$remote_cmd" 2>&1)"; then
+    knot_log_ok "Strand '$target' dev environment healed ($heal_out)."
+    return 0
+  else
+    knot_log_err "Failed to heal dev environment on '$target': $heal_out"
+    return 1
+  fi
+}
+
+# Master development synchronization entrypoint
+swarm_sync_dev() {
+  local target="${1:-}"
+  local force="${2:-0}"
+
+  knot_enforce_lockout "dev" "knot sync" "$force" || return 1
+
+  swarm_sync_dev_heal_local
+
+  local active_swarm
+  active_swarm="$(knot_get_active_swarm)"
+  local my_host
+  my_host="$(knot_detect_hostname)"
+  local is_anchor=0
+  if knot_is_anchor; then
+    is_anchor=1
+  fi
+
+  if [ "$is_anchor" -eq 1 ]; then
+    if [ "$target" = "--all" ]; then
+      knot_log_info "Synchronizing development mesh across all active Strands..."
+      ssh_sync_authorized_keys
+      ssh_sync_client_config
+      deskflow_configure
+      kdeconnect_sync_mesh
+
+      local nodes_dir=""
+      if ! nodes_dir="$(knot_get_nodes_dir)"; then
+        knot_log_err "No nodes directory found for active swarm '$active_swarm'"
+        return 1
+      fi
+
+      local topo_file=""
+      local user_home
+      user_home="$(knot_detect_user_home)"
+      if [ -r "$user_home/.config/knot/swarms/${active_swarm}/topology.json" ]; then
+        topo_file="$user_home/.config/knot/swarms/${active_swarm}/topology.json"
+      fi
+
+      local swarm_conf=""
+      if [ -r "$user_home/.config/knot/swarms/${active_swarm}/swarm.conf" ]; then
+        swarm_conf="$user_home/.config/knot/swarms/${active_swarm}/swarm.conf"
+      fi
+
+      local sync_count=0
+      for manifest in "$nodes_dir/"*.json; do
+        [ -e "$manifest" ] || continue
+        local id role
+        id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+        role="$(awk -F'"' '/"role":/ {print $4}' "$manifest")"
+        if [ "$role" = "anchor" ] || [ "$id" = "$my_host" ]; then
+          continue
+        fi
+
+        # Probe remote install type
+        local r_type=""
+        if ! r_type="$(ssh -o BatchMode=yes -o ConnectTimeout=4 "$id" '
+          if [ -f "$HOME/.config/knot/install_type" ]; then
+            tr -d "[:space:]" < "$HOME/.config/knot/install_type"
+          elif [ -d "$HOME/Dev/knot-mesh/.git" ] || [ -d "$HOME/knot-mesh/.git" ]; then
+            echo "dev"
+          else
+            echo "prod"
+          fi
+        ' 2>&1)"; then
+          knot_log_warn "Notice: Unable to probe install type on '$id': $r_type"
+          r_type="unknown"
+        fi
+
+        if [ "$r_type" = "prod" ] && [ "$force" -eq 0 ]; then
+          knot_log_warn "Strand '$id' is a PRODUCTION installation. Skipping dev drift healing (use --force-dev to override)."
+          swarm_sync_anchor_push "$id" "$active_swarm" "$nodes_dir" "$topo_file" "$swarm_conf" 0 1
+          sync_count=$((sync_count + 1))
+          continue
+        fi
+
+        swarm_sync_dev_heal_remote "$id"
+        swarm_sync_anchor_push "$id" "$active_swarm" "$nodes_dir" "$topo_file" "$swarm_conf" 1
+        sync_count=$((sync_count + 1))
+      done
+      knot_log_ok "Mesh-wide development synchronization complete ($sync_count Strands updated and healed)."
+    elif [ -n "$target" ] && [ "$target" != "$my_host" ] && [ "$target" != "local" ] && [ "$target" != "localhost" ]; then
+      local r_type=""
+      if ! r_type="$(ssh -o BatchMode=yes -o ConnectTimeout=4 "$target" '
+        if [ -f "$HOME/.config/knot/install_type" ]; then
+          tr -d "[:space:]" < "$HOME/.config/knot/install_type"
+        elif [ -d "$HOME/Dev/knot-mesh/.git" ] || [ -d "$HOME/knot-mesh/.git" ]; then
+          echo "dev"
+        else
+          echo "prod"
+        fi
+      ' 2>&1)"; then
+        knot_log_warn "Notice: Unable to probe install type on '$target': $r_type"
+        r_type="unknown"
+      fi
+
+      if [ "$r_type" = "prod" ] && [ "$force" -eq 0 ]; then
+        knot_log_err "Strand '$target' is a PRODUCTION installation. Skipping dev sync (use --force-dev to override)."
+        return 1
+      fi
+
+      swarm_sync_dev_heal_remote "$target"
+      local nodes_dir=""
+      if nodes_dir="$(knot_get_nodes_dir)"; then
+        local user_home
+        user_home="$(knot_detect_user_home)"
+        local topo_file="$user_home/.config/knot/swarms/${active_swarm}/topology.json"
+        local swarm_conf="$user_home/.config/knot/swarms/${active_swarm}/swarm.conf"
+        swarm_sync_anchor_push "$target" "$active_swarm" "$nodes_dir" "$topo_file" "$swarm_conf" 1
+      fi
+      knot_log_ok "Development synchronization to Strand '$target' complete."
+    else
+      ssh_sync_authorized_keys
+      ssh_sync_client_config
+      deskflow_configure
+      kdeconnect_sync_mesh
+      knot_log_ok "Local Anchor development configuration synchronized."
+    fi
+  else
+    swarm_sync_strand_pull
+  fi
+
   return 0
 }
