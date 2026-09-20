@@ -21,6 +21,8 @@ optdepends=(
     'kscreen-doctor: Wayland display auto-discovery on KDE Plasma 6'
     'wlr-randr: Wayland display auto-discovery for wlroots compositors'
     'libnotify: Desktop notification support for KVM cursor locking'
+    'webkit2gtk-4.1: Knot Kommand Kafe Tauri v2 native desktop container'
+    'gtk3: Native system tray and Wayland/X11 container support'
 )
 source=("knot-mesh-${pkgver}.tar.gz::https://github.com/kuasha420/knot-mesh/archive/refs/tags/v1.0.0-rc4.tar.gz")
 sha256sums=('SKIP')
@@ -45,9 +47,16 @@ package() {
         cp -r systemd "${destdir}/"
     fi
 
-    # Copy web if present
+    # Copy web and src-tauri if present
     if [ -d "web" ]; then
         cp -r web "${destdir}/"
+    fi
+    if [ -d "src-tauri" ]; then
+        cp -r src-tauri "${destdir}/"
+        if [ -f "src-tauri/target/release/knot-kafe" ]; then
+            install -Dm755 "src-tauri/target/release/knot-kafe" "${destdir}/bin/knot-kafe"
+            ln -sf "/usr/lib/knot-mesh/bin/knot-kafe" "${pkgdir}/usr/bin/knot-kafe"
+        fi
     fi
 
     # Symlink executables to /usr/bin

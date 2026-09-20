@@ -9,6 +9,9 @@ __pycache__/
 # Build & Web artifacts
 node_modules/
 .cache/
+src-tauri/target/
+src-tauri/gen/
+target/
 
 # Local Swarm Profiles & Registries (Keep examples only)
 swarms.d/*.conf

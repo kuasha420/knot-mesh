@@ -681,10 +681,30 @@ cmd_web() {
     open)
       knot_log_info "Opening Knot Kommand Kafe..."
       local target_url="${hub_url}/kafe"
-      if command -v xdg-open >/dev/null 2>&1; then
-        xdg-open "$target_url" >/dev/null 2>&1 || true
+      if type xdg-open >/dev/null; then
+        xdg-open "$target_url"
       fi
       echo -e "${C_BOLD}☕ Knot Kommand Kafe:${C_RESET} ${C_CYAN}$target_url${C_RESET}"
+      ;;
+    desktop|tauri)
+      local tauri_bin="$KNOT_ROOT/src-tauri/target/release/knot-kafe"
+      if [ ! -f "$tauri_bin" ]; then
+        tauri_bin="$KNOT_ROOT/src-tauri/target/debug/knot-kafe"
+      fi
+      if [ -f "$tauri_bin" ]; then
+        knot_log_info "Launching Knot Kommand Kafe (Tauri v2 Desktop Container)..."
+        "$tauri_bin" "$@"
+      else
+        knot_log_info "Compiling Knot Kommand Kafe Tauri v2 desktop container..."
+        cargo build --manifest-path "$KNOT_ROOT/src-tauri/Cargo.toml"
+        "$KNOT_ROOT/src-tauri/target/debug/knot-kafe" "$@"
+      fi
+      ;;
+    build-desktop)
+      knot_log_info "Building release Tauri v2 desktop container..."
+      pnpm --dir "$web_dir" build
+      cargo build --release --manifest-path "$KNOT_ROOT/src-tauri/Cargo.toml"
+      knot_log_ok "Desktop container compiled to src-tauri/target/release/knot-kafe (<50MB RAM footprint)."
       ;;
     dev)
       knot_log_info "Starting Knot Cockpit development server (Vite HMR)..."
@@ -704,7 +724,7 @@ cmd_web() {
       pnpm --dir "$web_dir" typecheck
       ;;
     *)
-      echo "Usage: knot kafe [open|dev|build|install|typecheck]"
+      echo "Usage: knot kafe [open|desktop|build-desktop|dev|build|install|typecheck]"
       exit 1
       ;;
   esac
