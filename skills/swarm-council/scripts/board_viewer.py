@@ -18,6 +18,7 @@ import select
 import signal
 import urllib.request
 import urllib.error
+import http.client
 import ssl
 import argparse
 from datetime import datetime, timezone
@@ -56,16 +57,45 @@ NODE_ICONS = {
 
 
 def try_hub_request(path: str, hub_url: str = DEFAULT_HUB_URL, timeout: float = 1.5) -> Optional[Any]:
-    """Queries Knot Hub REST API with self-signed certificate tolerance."""
+    """Queries Knot Hub REST API with proper TLS verification gating and narrow exception handling."""
     url = f"{hub_url.rstrip('/')}{path}"
     req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+
+    ctx: Optional[ssl.SSLContext] = None
+    if url.startswith("https://"):
+        ctx = ssl.create_default_context()
+        hub_ca = os.path.expanduser("~/.config/knot/tls/hub.crt")
+        if not os.path.exists(hub_ca):
+            hub_ca = "/etc/knot/tls/hub.crt"
+
+        ca_loaded = False
+        if os.path.exists(hub_ca):
+            try:
+                ctx.load_verify_locations(cafile=hub_ca)
+                ca_loaded = True
+            except (ssl.SSLError, OSError) as e:
+                if os.environ.get("KNOT_DEBUG"):
+                    sys.stderr.write(f"[DEBUG] Failed to load Hub CA cert ({hub_ca}): {e}\n")
+
+        if not ca_loaded:
+            allow_insecure = (
+                os.environ.get("KNOT_INSECURE_TLS", "").lower() in ("1", "true", "yes")
+                or os.environ.get("KNOT_SKIP_TLS_VERIFY", "").lower() in ("1", "true", "yes")
+                or any(h in hub_url for h in ("127.0.0.1", "localhost", "::1"))
+            )
+            if allow_insecure:
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+
     try:
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+        kwargs: Dict[str, Any] = {"timeout": timeout}
+        if ctx is not None:
+            kwargs["context"] = ctx
+        with urllib.request.urlopen(req, **kwargs) as resp:
             return json.loads(resp.read().decode("utf-8"))
-    except Exception:
+    except (urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError, TimeoutError, OSError) as e:
+        if os.environ.get("KNOT_DEBUG"):
+            sys.stderr.write(f"[DEBUG] Hub request to {url} failed: {e}\n")
         return None
 
 
@@ -89,14 +119,14 @@ class CouncilBoardModel:
             return []
 
         try:
-            conn = sqlite3.connect(self.db_path, timeout=5.0)
-            conn.row_factory = sqlite3.Row
-            cur = conn.cursor()
-            cur.execute("SELECT * FROM council_threads ORDER BY created_at DESC")
-            rows = [dict(r) for r in cur.fetchall()]
-            conn.close()
-            return rows
-        except Exception:
+            with sqlite3.connect(self.db_path, timeout=5.0) as conn:
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM council_threads ORDER BY created_at DESC")
+                return [dict(r) for r in cur.fetchall()]
+        except sqlite3.Error as e:
+            if os.environ.get("KNOT_DEBUG"):
+                sys.stderr.write(f"[DEBUG] SQLite error fetching council threads from {self.db_path}: {e}\n")
             return []
 
     def fetch_messages(self, thread_id: str) -> List[Dict[str, Any]]:
@@ -109,17 +139,17 @@ class CouncilBoardModel:
             return []
 
         try:
-            conn = sqlite3.connect(self.db_path, timeout=5.0)
-            conn.row_factory = sqlite3.Row
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT * FROM council_messages WHERE thread_id = ? OR run_id = ? ORDER BY created_at ASC",
-                (thread_id, thread_id),
-            )
-            rows = [dict(r) for r in cur.fetchall()]
-            conn.close()
-            return rows
-        except Exception:
+            with sqlite3.connect(self.db_path, timeout=5.0) as conn:
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT * FROM council_messages WHERE thread_id = ? OR run_id = ? ORDER BY created_at ASC",
+                    (thread_id, thread_id),
+                )
+                return [dict(r) for r in cur.fetchall()]
+        except sqlite3.Error as e:
+            if os.environ.get("KNOT_DEBUG"):
+                sys.stderr.write(f"[DEBUG] SQLite error fetching messages for thread {thread_id}: {e}\n")
             return []
 
 
@@ -369,8 +399,9 @@ def run_interactive_loop(model: CouncilBoardModel, poll_interval: float = 2.0) -
             import tty
             old_term_settings = termios.tcgetattr(sys.stdin)
             tty.setcbreak(sys.stdin.fileno())
-        except Exception:
-            pass
+        except (ImportError, OSError) as e:
+            if os.environ.get("KNOT_DEBUG"):
+                sys.stderr.write(f"[DEBUG] Terminal raw mode setup failed: {e}\n")
 
     # Alternate screen buffer & hide cursor
     sys.stdout.write("\033[?1049h\033[?25l")
@@ -384,8 +415,9 @@ def run_interactive_loop(model: CouncilBoardModel, poll_interval: float = 2.0) -
             try:
                 import termios
                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_term_settings)
-            except Exception:
-                pass
+            except (ImportError, OSError) as e:
+                if os.environ.get("KNOT_DEBUG"):
+                    sys.stderr.write(f"[DEBUG] Terminal reset failed: {e}\n")
 
     try:
         threads = model.fetch_threads()

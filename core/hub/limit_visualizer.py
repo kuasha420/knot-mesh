@@ -20,6 +20,7 @@ import select
 import argparse
 import urllib.request
 import urllib.error
+import http.client
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -53,17 +54,66 @@ NODE_ROLES = {
 
 
 def try_hub_request(path: str, hub_url: str = DEFAULT_HUB_URL, timeout: float = 1.5) -> Optional[Any]:
-    """Queries Knot Hub REST API with self-signed certificate tolerance."""
+    """Queries Knot Hub REST API with proper TLS verification gating and narrow exception handling."""
     url = f"{hub_url.rstrip('/')}{path}"
     req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+
+    ctx: Optional[ssl.SSLContext] = None
+    if url.startswith("https://"):
+        ctx = ssl.create_default_context()
+        hub_ca = os.path.expanduser("~/.config/knot/tls/hub.crt")
+        if not os.path.exists(hub_ca):
+            hub_ca = "/etc/knot/tls/hub.crt"
+
+        ca_loaded = False
+        if os.path.exists(hub_ca):
+            try:
+                ctx.load_verify_locations(cafile=hub_ca)
+                ca_loaded = True
+            except (ssl.SSLError, OSError) as e:
+                if os.environ.get("KNOT_DEBUG"):
+                    sys.stderr.write(f"[DEBUG] Failed to load Hub CA cert ({hub_ca}): {e}\n")
+
+        if not ca_loaded:
+            allow_insecure = (
+                os.environ.get("KNOT_INSECURE_TLS", "").lower() in ("1", "true", "yes")
+                or os.environ.get("KNOT_SKIP_TLS_VERIFY", "").lower() in ("1", "true", "yes")
+                or any(h in hub_url for h in ("127.0.0.1", "localhost", "::1"))
+            )
+            if allow_insecure:
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+
     try:
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+        kwargs: Dict[str, Any] = {"timeout": timeout}
+        if ctx is not None:
+            kwargs["context"] = ctx
+        with urllib.request.urlopen(req, **kwargs) as resp:
             return json.loads(resp.read().decode("utf-8"))
-    except Exception:
+    except (urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError, TimeoutError, OSError) as e:
+        if os.environ.get("KNOT_DEBUG"):
+            sys.stderr.write(f"[DEBUG] Hub request to {url} failed: {e}\n")
         return None
+
+
+def format_power_string(power_info: Optional[Dict[str, Any]], is_offline: bool = False) -> str:
+    """Derives a human-readable power/battery string dynamically from node telemetry."""
+    if is_offline:
+        return "Offline"
+    if not isinstance(power_info, dict):
+        return "AC Power"
+    bat = power_info.get("battery_percent")
+    src = power_info.get("power_source") or power_info.get("source") or "AC"
+    if bat is not None:
+        if src == "BATTERY":
+            return f"Bat {bat}%"
+        elif src == "AC":
+            return f"Bat {bat}% (AC)"
+        else:
+            return f"Bat {bat}% ({src})"
+    if src:
+        return f"{src} Power" if src in ("AC", "DC") else str(src)
+    return "AC Power"
 
 
 def render_progress_bar(fraction: Optional[float], is_offline: bool = False, width: int = 10) -> str:
@@ -100,7 +150,9 @@ def parse_countdown_seconds(reset_iso: str) -> int:
         now = datetime.now(timezone.utc)
         diff = dt - now
         return max(0, int(diff.total_seconds()))
-    except Exception:
+    except (ValueError, TypeError) as e:
+        if os.environ.get("KNOT_DEBUG"):
+            sys.stderr.write(f"[DEBUG] Failed to parse reset countdown ISO '{reset_iso}': {e}\n")
         return 0
 
 
@@ -167,7 +219,7 @@ class QuotaDataAggregator:
                         nodes.append({
                             "id": nid,
                             "hostname": d.get("hostname", nid),
-                            "status": "ONLINE" if nid == os.environ.get("KNOT_NODE_ID", "laptop") else "ONLINE",
+                            "status": "ONLINE",
                             "ip": d.get("ip_hint", "127.0.0.1"),
                             "selected_model": "gemini-3.8-flash-high" if "deck" in nid or "ally" in nid else "gemini-3.1-pro-high",
                             "quota_5h_gemini": 1.0,
@@ -178,8 +230,9 @@ class QuotaDataAggregator:
                                 "account": {"email": "operator@knot.mesh", "subscription": "Google AI Pro"},
                             },
                         })
-            except Exception:
-                pass
+            except (json.JSONDecodeError, OSError) as e:
+                if os.environ.get("KNOT_DEBUG"):
+                    sys.stderr.write(f"[DEBUG] Failed to parse node manifest {fn}: {e}\n")
 
         for def_id in default_node_ids:
             if def_id not in seen:
@@ -247,7 +300,9 @@ class LimitVisualizerRenderer:
             if isinstance(qdata, str):
                 try:
                     qdata = json.loads(qdata)
-                except Exception:
+                except (json.JSONDecodeError, TypeError) as e:
+                    if os.environ.get("KNOT_DEBUG"):
+                        sys.stderr.write(f"[DEBUG] Failed to parse quota_data JSON for {nid}: {e}\n")
                     qdata = {}
 
             g_5h = n.get("quota_5h_gemini", 1.0)
@@ -257,11 +312,13 @@ class LimitVisualizerRenderer:
 
             bar_5h = render_progress_bar(g_5h, is_offline=is_offline, width=bar_width)
             bar_wk = render_progress_bar(g_wk, is_offline=is_offline, width=bar_width)
+            pwr_info = power.get(nid) if isinstance(power, dict) else None
+            pwr_str = format_power_string(pwr_info, is_offline=is_offline)
 
             # Node card box
             border_len = max(10, w - 2)
             lines.append(f"{C_CYAN}┌── {icon} {C_BOLD}@{nid}{C_RESET} {C_DIM}({role_desc}){C_RESET} ── {status_str} {C_CYAN}{'─' * max(2, border_len - len(nid) - len(role_desc) - 20)}┐{C_RESET}")
-            lines.append(f"{C_CYAN}│{C_RESET} Model: {C_BCYAN}{model_name}{C_RESET} • Auth: {C_BGREEN}Valid{C_RESET}")
+            lines.append(f"{C_CYAN}│{C_RESET} Model: {C_BCYAN}{model_name}{C_RESET} • Auth: {C_BGREEN}Valid{C_RESET} • Power: {pwr_str}")
             lines.append(f"{C_CYAN}│{C_RESET} 5-Hour Limit: {bar_5h}  {C_DIM}Reset: {rst_5h_str}{C_RESET}")
             lines.append(f"{C_CYAN}│{C_RESET} Weekly Limit: {bar_wk}  {C_DIM}Reset: {rst_wk_str}{C_RESET}")
             lines.append(f"{C_CYAN}└──{'─' * border_len}┘{C_RESET}")
@@ -302,7 +359,9 @@ class LimitVisualizerRenderer:
             if isinstance(qdata, str):
                 try:
                     qdata = json.loads(qdata)
-                except Exception:
+                except (json.JSONDecodeError, TypeError) as e:
+                    if os.environ.get("KNOT_DEBUG"):
+                        sys.stderr.write(f"[DEBUG] Failed to parse quota_data JSON for {nid}: {e}\n")
                     qdata = {}
 
             g_5h = n.get("quota_5h_gemini", 1.0)
@@ -313,9 +372,8 @@ class LimitVisualizerRenderer:
             bar_5h = render_progress_bar(g_5h, is_offline=is_offline, width=8)
             bar_wk = render_progress_bar(g_wk, is_offline=is_offline, width=8)
 
-            pwr_str = "AC Power"
-            if nid in ("steamdeck", "rog-ally"):
-                pwr_str = "Bat 84% (AC)"
+            pwr_info = power.get(nid) if isinstance(power, dict) else None
+            pwr_str = format_power_string(pwr_info, is_offline=is_offline)
 
             lines.append(header_fmt % (
                 f"{icon} @{nid}",
@@ -343,8 +401,9 @@ def run_interactive_loop(aggregator: QuotaDataAggregator, poll_interval: float =
             import tty
             old_term_settings = termios.tcgetattr(sys.stdin)
             tty.setcbreak(sys.stdin.fileno())
-        except Exception:
-            pass
+        except (ImportError, OSError) as e:
+            if os.environ.get("KNOT_DEBUG"):
+                sys.stderr.write(f"[DEBUG] Terminal raw mode setup failed: {e}\n")
 
     # Alternate screen buffer & hide cursor
     sys.stdout.write("\033[?1049h\033[?25l")
@@ -357,8 +416,9 @@ def run_interactive_loop(aggregator: QuotaDataAggregator, poll_interval: float =
             try:
                 import termios
                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_term_settings)
-            except Exception:
-                pass
+            except (ImportError, OSError) as e:
+                if os.environ.get("KNOT_DEBUG"):
+                    sys.stderr.write(f"[DEBUG] Terminal reset failed: {e}\n")
 
     try:
         paused = False

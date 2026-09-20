@@ -43,6 +43,7 @@ from core.hub.limit_visualizer import (
     render_progress_bar,
     parse_countdown_seconds,
     format_countdown_string,
+    format_power_string,
 )
 
 
@@ -62,6 +63,17 @@ def test_board_viewer_empty_db(tmp_path):
     snapshot = renderer.render_snapshot(width=80, height=24)
     assert "KNOT SWARM COUNCIL MESSAGE BOARD" in snapshot
     assert "No active council mission threads found" in snapshot
+
+
+def test_board_viewer_sqlite_error(tmp_path):
+    # Corrupt or invalid SQLite database file
+    corrupt_db = str(tmp_path / "corrupt.db")
+    with open(corrupt_db, "w", encoding="utf-8") as f:
+        f.write("NOT A SQLITE FILE")
+
+    model = CouncilBoardModel(db_path=corrupt_db, hub_url="http://invalid.hub.local:9999")
+    assert model.fetch_threads() == []
+    assert model.fetch_messages("any_thread") == []
 
 
 def test_board_viewer_sqlite_flow(tmp_path):
@@ -248,6 +260,13 @@ def test_limit_visualizer_helpers():
     secs = parse_countdown_seconds(future_iso)
     assert 580 <= secs <= 605
 
+    # Power string derivation
+    assert format_power_string({"battery_percent": 84, "power_source": "BATTERY"}) == "Bat 84%"
+    assert format_power_string({"battery_percent": 98, "power_source": "AC"}) == "Bat 98% (AC)"
+    assert format_power_string({"power_source": "AC"}) == "AC Power"
+    assert format_power_string(None, is_offline=True) == "Offline"
+    assert format_power_string(None, is_offline=False) == "AC Power"
+
 
 def test_limit_visualizer_rendering():
     mock_aggregator = MagicMock()
@@ -303,6 +322,8 @@ def test_limit_visualizer_rendering():
     assert "5-HOUR QUOTA" in wide
     assert "WEEKLY BUDGET" in wide
     assert "@desktop" in wide
+    assert "Bat 98% (AC)" in wide
+    assert "AC Power" in wide
 
 
 # ==============================================================================
