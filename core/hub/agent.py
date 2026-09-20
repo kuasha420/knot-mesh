@@ -645,12 +645,10 @@ class HubClient:
         return bool(resp and resp.get("ok"))
 
     def get_swarm_activity(self, timeout_sec: int = 1800) -> dict:
-        try:
-            req = urllib.request.Request(f"{self.hub_url}/swarm/activity?timeout={timeout_sec}", headers={"Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=3.0) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except Exception:
-            return {"active": False, "reasons": ["hub_unreachable"]}
+        data = self._get(f"/swarm/activity?timeout_sec={timeout_sec}", timeout=3.0)
+        if data and isinstance(data, dict):
+            return data
+        return {"active": False, "reasons": ["hub_unreachable"]}
 
     def claim_task(self, node_id: str, capabilities: list[str]) -> dict | None:
         resp = self._post("/tasks/claim", {
