@@ -469,10 +469,15 @@ antigravity_swarm_test() {
 # Display model quotas across the mesh
 antigravity_swarm_quota() {
   local target="${1:-all}"
+  if [ "$target" = "watch" ] || [ "$target" = "live" ] || [ "$target" = "--live" ] || [ "$target" = "--watch" ]; then
+    if [ $# -gt 0 ]; then
+      shift
+    fi
+    exec python3 "$KNOT_ROOT/core/hub/limit_visualizer.py" "$@"
+  fi
+
   local hub_url=""
-  if command -v hub_resolve_url >/dev/null 2>&1; then
-    hub_url="$(hub_resolve_url)"
-  elif [ -n "${KNOT_HUB_URL:-}" ]; then
+  if [ -n "${KNOT_HUB_URL:-}" ]; then
     hub_url="$KNOT_HUB_URL"
   else
     hub_url="https://127.0.0.1:4242"
