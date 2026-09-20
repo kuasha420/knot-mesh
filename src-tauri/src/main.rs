@@ -171,11 +171,18 @@ fn main() {
             let quit_i = MenuItem::with_id(app, "quit", "Quit Kafe", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&toggle_i, &handheld_i, &quit_i])?;
 
-            let _tray = TrayIconBuilder::with_id("main-tray")
-                .icon(app.default_window_icon().unwrap().clone())
+            let mut tray_builder = TrayIconBuilder::with_id("main-tray")
                 .tooltip("Knot Kommand Kafe")
                 .menu(&menu)
-                .show_menu_on_left_click(false)
+                .show_menu_on_left_click(false);
+
+            if let Some(icon) = app.default_window_icon() {
+                tray_builder = tray_builder.icon(icon.clone());
+            } else {
+                eprintln!("[warn] Default window icon not found for system tray; proceeding without icon");
+            }
+
+            let _tray = tray_builder
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "toggle" => {
                         if let Some(window) = app.get_webview_window("main") {

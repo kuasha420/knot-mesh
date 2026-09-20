@@ -191,13 +191,13 @@ body {
   .knot-handheld-scaling a,
   .knot-handheld-scaling input,
   .knot-handheld-scaling select {
-    min-height: 44px;
+    min-height: 48px;
     touch-action: manipulation;
   }
 }
 
 .knot-handheld-scaling {
-  --handheld-target-min: 44px;
+  --handheld-target-min: 48px;
 }
 
 .knot-handheld-scaling button,

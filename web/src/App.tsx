@@ -444,7 +444,14 @@ export const App: React.FC = () => {
                     {rightTab === 'dag' ? (
                       <DagMatrix tasks={tasks} embedded />
                     ) : rightTab === 'kanban' ? (
-                      <BlackboardKanban tasks={tasks} nodes={nodes} onRefresh={() => void refreshAll()} embedded />
+                      <BlackboardKanban
+                        tasks={tasks}
+                        nodes={nodes}
+                        onRefresh={() => void refreshAll()}
+                        handheldMode={handheldMode}
+                        onToggleHandheld={toggleHandheldMode}
+                        embedded
+                      />
                     ) : (
                       <ArtifactVault
                         leases={leases}
@@ -501,7 +508,14 @@ export const App: React.FC = () => {
                   {rightTab === 'dag' ? (
                     <DagMatrix tasks={tasks} embedded />
                   ) : rightTab === 'kanban' ? (
-                    <BlackboardKanban tasks={tasks} nodes={nodes} onRefresh={() => void refreshAll()} embedded />
+                    <BlackboardKanban
+                      tasks={tasks}
+                      nodes={nodes}
+                      onRefresh={() => void refreshAll()}
+                      handheldMode={handheldMode}
+                      onToggleHandheld={toggleHandheldMode}
+                      embedded
+                    />
                   ) : (
                     <ArtifactVault
                       leases={leases}
@@ -563,6 +577,8 @@ export const App: React.FC = () => {
               tasks={tasks}
               nodes={nodes}
               onRefresh={() => void refreshAll()}
+              handheldMode={handheldMode}
+              onToggleHandheld={toggleHandheldMode}
             />
           </div>
         )}
