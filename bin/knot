@@ -4,7 +4,7 @@ set -euo pipefail
 # Knot - Multi-Device Mesh Orchestrator CLI
 
 KNOT_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
-KNOT_VERSION="${KNOT_VERSION:-1.0.0}"
+KNOT_VERSION="1.0.0"
 source "$KNOT_ROOT/core/lib.sh"
 source "$KNOT_ROOT/core/gitops.sh"
 source "$KNOT_ROOT/core/modules/ssh.sh"
@@ -1268,7 +1268,7 @@ cmd_update() {
   fi
 
   if [ "$target" = "local" ]; then
-    local local_ver="${KNOT_VERSION:-1.0.0-rc3}"
+    local local_ver="${KNOT_VERSION:-1.0.0}"
     knot_log_info "Checking for latest Knot Mesh release (current: v${local_ver})..."
 
     local remote_tag=""
@@ -1659,7 +1659,7 @@ case "${1:-}" in
     cmd_update "$@"
     ;;
   -v|--version|version)
-    echo "knot-mesh version ${KNOT_VERSION:-1.0.0-rc4}"
+    echo "knot-mesh version ${KNOT_VERSION:-1.0.0}"
     ;;
   mcp)
     shift
