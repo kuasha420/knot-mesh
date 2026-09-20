@@ -51,7 +51,7 @@ echo "PASSED"
 echo -n "4. Testing Stage 3 prompt scaffolder 1.5x coverage... "
 scaffold_out="$(python3 "$COUNCIL_SCRIPTS/scaffolder.py" --dry-run --nodes desktop,laptop,rog-ally,steamdeck --coverage 1.5)"
 actual_cov="$(echo "$scaffold_out" | jq -r '.actual_coverage')"
-if (( $(echo "$actual_cov < 1.4 || $actual_cov > 1.6" | bc -l) )); then
+if ! python3 -c "import sys; cov = float('$actual_cov'); sys.exit(0 if 1.4 <= cov <= 1.6 else 1)"; then
   echo "FAILED (Actual coverage $actual_cov out of range 1.4-1.6)"
   exit 1
 fi
@@ -190,7 +190,7 @@ echo -n "10. Testing reconciler report generation from Mesh DB... "
 python3 "$COUNCIL_SCRIPTS/mesh_db.py" --db-path "$test_db" reply --discussion-id "test_mesh_$$" --run-id "test_mesh_$$" --node-id "desktop" --status "FINAL" --body "All checks passed. READY FOR GA." >/dev/null
 python3 "$COUNCIL_SCRIPTS/mesh_db.py" --db-path "$test_db" reply --discussion-id "test_mesh_$$" --run-id "test_mesh_$$" --node-id "laptop" --status "FINAL" --body "CUDA verified. READY FOR GA." >/dev/null
 
-report_out="$(python3 "$COUNCIL_SCRIPTS/reconcile.py" --discussion-id "test_mesh_$$" --run-id "test_mesh_$$" --db-backend mesh)"
+report_out="$(python3 "$COUNCIL_SCRIPTS/reconcile.py" --discussion-id "test_mesh_$$" --run-id "test_mesh_$$" --db-backend mesh --db-path "$test_db")"
 if ! echo "$report_out" | grep -q "READY FOR GA"; then
   echo "FAILED (Reconciled report missing READY FOR GA verdict)"
   exit 1
@@ -310,7 +310,7 @@ if [ -d "$purr_dir" ]; then
   # Test dynamic chunking in scaffolder.py
   purr_scaffold="$(python3 "$COUNCIL_SCRIPTS/scaffolder.py" --project-dir "$purr_dir" --dry-run)"
   purr_cov="$(echo "$purr_scaffold" | jq -r '.actual_coverage')"
-  if (( $(echo "$purr_cov < 1.4 || $purr_cov > 1.6" | bc -l) )); then
+  if ! python3 -c "import sys; cov = float('$purr_cov'); sys.exit(0 if 1.4 <= cov <= 1.6 else 1)"; then
     echo "FAILED (Actual coverage on purr $purr_cov out of range 1.4-1.6)"
     exit 1
   fi

@@ -167,7 +167,9 @@ council_start() {
 
   # Stage 2: Create Mission registry thread
   local disc_res disc_id disc_url
-  local run_id="run_$(date +%Y%m%d_%H%M%S)_$(head -c 4 /dev/urandom | xxd -p)"
+  local rand_hex
+  rand_hex="$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+  local run_id="run_$(date +%Y%m%d_%H%M%S)_${rand_hex}"
 
   if [ "$db" = "mesh" ]; then
     echo -e "  ${C_CYAN}[2/7] Creating Mesh DB registry thread...${C_RESET}"

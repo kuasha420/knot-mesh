@@ -12,7 +12,7 @@ import json
 import argparse
 import subprocess
 
-def fetch_thread_data(discussion_id, backend="auto", run_id=""):
+def fetch_thread_data(discussion_id, backend="auto", run_id="", db_path=""):
     script_dir = os.path.dirname(os.path.realpath(__file__))
     
     if backend == "auto":
@@ -40,7 +40,11 @@ def fetch_thread_data(discussion_id, backend="auto", run_id=""):
     else:
         helper = os.path.join(script_dir, "gh_discussion.py")
 
-    out = subprocess.check_output([helper, "get_thread", "--discussion-id", discussion_id], text=True)
+    cmd = [helper]
+    if db_path and backend == "mesh":
+        cmd.extend(["--db-path", db_path])
+    cmd.extend(["get_thread", "--discussion-id", discussion_id])
+    out = subprocess.check_output(cmd, text=True)
     return json.loads(out)
 
 def parse_comments(thread_data, target_run_id):
@@ -136,11 +140,12 @@ def main():
     parser.add_argument("--discussion-id", required=True, help="Discussion node ID or Mesh thread ID")
     parser.add_argument("--run-id", default="", help="Specific run ID to reconcile")
     parser.add_argument("--db-backend", default="auto", choices=["auto", "ghd", "mesh"], help="Backend: auto (default), ghd, or mesh")
+    parser.add_argument("--db-path", default="", help="Custom SQLite database path for mesh backend")
     parser.add_argument("--out-file", default="", help="Output markdown report path")
 
     args = parser.parse_args()
 
-    thread_data = fetch_thread_data(args.discussion_id, backend=args.db_backend, run_id=args.run_id)
+    thread_data = fetch_thread_data(args.discussion_id, backend=args.db_backend, run_id=args.run_id, db_path=args.db_path)
     node_reports = parse_comments(thread_data, args.run_id)
     report_md = generate_reconciled_report(thread_data, node_reports, args.run_id)
 
