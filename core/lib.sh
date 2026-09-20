@@ -20,7 +20,7 @@ knot_log_warn() { echo -e "${C_YELLOW}[!]${C_RESET} $*" >&2; }
 knot_log_err()  { echo -e "${C_RED}[✗]${C_RESET} $*" >&2; }
 
 KNOT_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
-export KNOT_VERSION="${KNOT_VERSION:-1.0.0-rc4}"
+export KNOT_VERSION="${KNOT_VERSION:-1.0.0}"
 
 
 knot_detect_user() {
