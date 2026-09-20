@@ -98,6 +98,11 @@ if ! grep -q "trap '' HUP" "$session_file"; then
   echo "FAILED (Missing SIGHUP protection trap in session file)"
   exit 1
 fi
+desktop_pane="$HOME/.config/knot/missions/$test_run_id/confluence_desktop.sh"
+if [ ! -f "$desktop_pane" ] || ! grep -q "sleep 5 || break" "$desktop_pane"; then
+  echo "FAILED (Missing persistent reconnection supervisor loop in $desktop_pane)"
+  exit 1
+fi
 rm -rf "$HOME/.config/knot/missions/$test_run_id"
 echo "PASSED"
 
@@ -162,7 +167,7 @@ if grep -q "exec bash -i" "$desktop_pane"; then
   echo "FAILED (Found bare bash in interactive pane script - must be agy TUI)"
   exit 1
 fi
-if ! grep -q 'exec agy --project "knot-mesh" --dangerously-skip-permissions' "$desktop_pane"; then
+if ! grep -q 'agy --project "knot-mesh" --dangerously-skip-permissions' "$desktop_pane"; then
   echo "FAILED (Expected zero-token agy invocation without prompt in pane script)"
   exit 1
 fi
@@ -178,7 +183,7 @@ if ! grep -q "layout tall" "$tiling_conf"; then
   echo "FAILED (Expected layout tall in session conf)"
   exit 1
 fi
-if ! grep -q 'exec agy --project "knot-mesh" --dangerously-skip-permissions -c' "$desktop_pane"; then
+if ! grep -q 'agy --project "knot-mesh" --dangerously-skip-permissions -c' "$desktop_pane"; then
   echo "FAILED (Expected agy -c in resume pane script)"
   exit 1
 fi
@@ -435,5 +440,84 @@ if ! echo "$usage_out" | grep -q "Usage: knot council steer"; then
 fi
 echo "PASSED"
 
+# 20. Cockpit Self-Healing & Topology Guard (knot council heal)
+echo -n "20. Testing knot council heal in mock Kitty environment... "
+heal_test_run="test_heal_$$"
+heal_missions_dir="$HOME/.config/knot/missions/$heal_test_run"
+mkdir -p "$heal_missions_dir"
+mock_sock="/tmp/test_kitty_sock_$$.sock"
+python3 -c "import socket; s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.bind('$mock_sock')"
+
+cat <<EOF > "$heal_missions_dir/meta.json"
+{
+  "run_id": "$heal_test_run",
+  "nodes": "desktop,laptop,rog-ally",
+  "socket": "$mock_sock",
+  "status": "ACTIVE"
+}
+EOF
+
+echo '#!/usr/bin/env bash' > "$heal_missions_dir/confluence_desktop.sh"
+echo '#!/usr/bin/env bash' > "$heal_missions_dir/confluence_laptop.sh"
+echo '#!/usr/bin/env bash' > "$heal_missions_dir/confluence_rog-ally.sh"
+chmod +x "$heal_missions_dir"/confluence_*.sh
+
+cat <<EOF > "$heal_missions_dir/kitty_session.conf"
+title 🟣 desktop (Anchor)
+launch $heal_missions_dir/confluence_desktop.sh
+title 🔵 laptop (Worker)
+launch $heal_missions_dir/confluence_laptop.sh
+title 🔴 rog-ally (Worker)
+launch $heal_missions_dir/confluence_rog-ally.sh
+EOF
+
+mock_bin_dir="/tmp/mock_bin_$$"
+mkdir -p "$mock_bin_dir"
+mock_log="/tmp/mock_kitty_heal_$$.log"
+rm -f "$mock_log"
+
+cat <<'EOF' > "$mock_bin_dir/kitty"
+#!/usr/bin/env bash
+if [ "${1:-}" = "@" ]; then
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --to) shift 2 ;;
+      ls)
+        echo '[{"tabs": [{"windows": [{"id": 1, "title": "🟣 desktop (Anchor)"}, {"id": 2, "title": "🔵 laptop (Worker)"}]}]}]'
+        exit 0
+        ;;
+      launch)
+        shift
+        echo "LAUNCH: $*" >> "$MOCK_LOG"
+        exit 0
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+fi
+exit 1
+EOF
+chmod +x "$mock_bin_dir/kitty"
+
+heal_out="$(MOCK_LOG="$mock_log" PATH="$mock_bin_dir:$PATH" "$KNOT_ROOT/bin/knot" council heal "$heal_test_run")"
+
+if ! echo "$heal_out" | grep -q "Restored pane for @\[rog-ally\] in cockpit"; then
+  echo "FAILED (knot council heal did not report restoring rog-ally: $heal_out)"
+  rm -rf "$heal_missions_dir" "$mock_bin_dir" "$mock_sock" "$mock_log"
+  exit 1
+fi
+
+if [ ! -f "$mock_log" ] || ! grep -q "confluence_rog-ally.sh" "$mock_log"; then
+  echo "FAILED (Mock kitty did not receive launch call for confluence_rog-ally.sh)"
+  rm -rf "$heal_missions_dir" "$mock_bin_dir" "$mock_sock" "$mock_log"
+  exit 1
+fi
+
+rm -rf "$heal_missions_dir" "$mock_bin_dir" "$mock_sock" "$mock_log"
+echo "PASSED"
+
 echo ""
-echo "=== All 19 Swarm Council Tests PASSED Successfully! ==="
+echo "=== All 20 Swarm Council Tests PASSED Successfully! ==="

@@ -812,6 +812,135 @@ council_kill() {
   knot_log_ok "Council run $run_id halted across fleet."
 }
 
+council_heal() {
+  local run_id="${1:-}"
+  local missions_dir="$HOME/.config/knot/missions"
+
+  if [ -z "$run_id" ]; then
+    local latest=""
+    if [ -d "$missions_dir" ]; then
+      while IFS= read -r m; do
+        [ -n "$m" ] || continue
+        if [ -f "$m/meta.json" ]; then
+          latest="$(basename "$m")"
+          break
+        fi
+      done < <(_council_list_runs "$missions_dir")
+    fi
+    if [ -n "$latest" ]; then
+      run_id="$latest"
+    else
+      knot_log_err "No active council run found to heal."
+      return 1
+    fi
+  fi
+
+  local meta_file="$missions_dir/$run_id/meta.json"
+  local sock="/tmp/kitty-council-$run_id.sock"
+  if [ ! -S "$sock" ] && [ -f "$meta_file" ]; then
+    local configured_sock
+    configured_sock="$(jq -r '.socket // ""' "$meta_file")"
+    if [ -n "$configured_sock" ] && [ -S "$configured_sock" ]; then
+      sock="$configured_sock"
+    fi
+  fi
+
+  if [ ! -S "$sock" ]; then
+    knot_log_err "Kitty control socket not found for run '$run_id' at $sock."
+    echo "Ensure the cockpit was launched with Kitty remote control enabled."
+    return 1
+  fi
+
+  local kitty_ls=""
+  if ! kitty_ls="$(kitty @ --to "unix:$sock" ls 2>&1)"; then
+    knot_log_err "Failed to query Kitty socket at $sock: $kitty_ls"
+    return 1
+  fi
+
+  local active_titles
+  active_titles="$(printf '%s' "$kitty_ls" | jq -r '.. | objects | select(has("title")) | .title')"
+
+  local target_nodes=()
+  if [ -f "$meta_file" ]; then
+    local meta_nodes
+    meta_nodes="$(jq -r '.nodes // ""' "$meta_file")"
+    if [ -n "$meta_nodes" ]; then
+      IFS=',' read -r -a target_nodes <<< "$meta_nodes"
+    fi
+  fi
+  if [ ${#target_nodes[@]} -eq 0 ]; then
+    local pscripts
+    shopt -s nullglob
+    pscripts=("$missions_dir/$run_id"/confluence_*.sh)
+    shopt -u nullglob
+    for ps in "${pscripts[@]}"; do
+      local bname
+      bname="$(basename "$ps")"
+      local nid="${bname#confluence_}"
+      nid="${nid%.sh}"
+      if [ -n "$nid" ]; then
+        target_nodes+=("$nid")
+      fi
+    done
+  fi
+
+  if [ ${#target_nodes[@]} -eq 0 ]; then
+    knot_log_err "No target nodes discovered for mission $run_id."
+    return 1
+  fi
+
+  local missing_nodes=()
+  for node in "${target_nodes[@]}"; do
+    if ! echo "$active_titles" | grep -q "$node"; then
+      missing_nodes+=("$node")
+    fi
+  done
+
+  if [ ${#missing_nodes[@]} -eq 0 ]; then
+    knot_log_ok "Cockpit topology is healthy: all nodes are active in Kitty."
+    return 0
+  fi
+
+  knot_log_warn "Detected missing cockpit pane(s): ${missing_nodes[*]}"
+  local healed_count=0
+  for node in "${missing_nodes[@]}"; do
+    local pane_script="$missions_dir/$run_id/confluence_${node}.sh"
+    if [ ! -f "$pane_script" ]; then
+      knot_log_warn "Pane script not found for node '$node' at $pane_script, skipping."
+      continue
+    fi
+
+    local win_title=""
+    local conf_file="$missions_dir/$run_id/kitty_session.conf"
+    if [ -f "$conf_file" ]; then
+      win_title="$(awk -v script="confluence_${node}.sh" '
+        $0 ~ script { if (prev ~ /^title /) print substr(prev, 7) }
+        { prev = $0 }
+      ' "$conf_file")"
+    fi
+    if [ -z "$win_title" ]; then
+      win_title="🛰️ $node ($node node)"
+    fi
+
+    knot_log_info "Healing missing cockpit pane for @[$node]..."
+    local launch_err=""
+    if launch_err="$(kitty @ --to "unix:$sock" launch --title "$win_title" --cwd="$KNOT_ROOT" "$pane_script" 2>&1)"; then
+      knot_log_ok "Restored pane for @[$node] in cockpit (Run: $run_id)"
+      healed_count=$((healed_count + 1))
+    else
+      knot_log_err "Failed to heal pane for @[$node]: $launch_err"
+    fi
+  done
+
+  if [ "$healed_count" -gt 0 ]; then
+    knot_log_ok "Cockpit topology self-healing complete: restored $healed_count missing pane(s)."
+    return 0
+  else
+    knot_log_err "Self-healing failed: no panes could be restored."
+    return 1
+  fi
+}
+
 council_board() {
   exec python3 "$KNOT_ROOT/skills/swarm-council/scripts/board_viewer.py" "$@"
 }

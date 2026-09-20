@@ -636,10 +636,11 @@ cmd_council() {
     challenge) council_challenge "$@" ;;
     db) council_db "$@" ;;
     board|live|viewer) council_board "$@" ;;
+    heal) council_heal "$@" ;;
     audit) bash "$KNOT_ROOT/skills/swarm-council/scripts/audit_tools.sh" "$@" ;;
     sync) bash "$KNOT_ROOT/skills/swarm-council/scripts/project_sync.sh" "$@" ;;
     *)
-      echo "Usage: knot council <start|resume|status|reply|list|attach|reconcile|steer|challenge|db|board|copy|clean|kill|audit|sync> [options]"
+      echo "Usage: knot council <start|resume|status|reply|list|attach|reconcile|steer|challenge|db|board|heal|copy|clean|kill|audit|sync> [options]"
       ;;
   esac
 }

@@ -211,12 +211,18 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
                     ps.write(f'echo -e "\\033[1;36m║\\033[0m  Commands:  \\033[32mknot council reply\\033[0m | \\033[32mknot council status\\033[0m"\n')
                     ps.write(f'echo -e "\\033[1;36m╚══════════════════════════════════════════════════════════════════════╝\\033[0m"\n')
                     ps.write('echo ""\n')
-                    ps.write(f'{agy_cmd}\n')
-                else:
+                    ps.write('while true; do\n')
                     if resume:
-                        remote_agy = f'exec agy --project \\"{project_name}\\" --dangerously-skip-permissions -c'
+                        ps.write(f'  agy --project "{project_name}" --dangerously-skip-permissions -c\n')
                     else:
-                        remote_agy = f'exec agy --project \\"{project_name}\\" --dangerously-skip-permissions'
+                        ps.write(f'  agy --project "{project_name}" --dangerously-skip-permissions\n')
+                    ps.write('  EXIT_CODE=$?\n')
+                    ps.write(f'  echo -e "\\n\\033[1;33m[!] Cockpit pane for @[{node}] disconnected (exit code $EXIT_CODE).\\033[0m"\n')
+                    ps.write('  echo -e "Reconnecting in 5 seconds (Press Ctrl+C to drop to rescue shell)..."\n')
+                    ps.write('  sleep 5 || break\n')
+                    ps.write('done\n')
+                    ps.write('exec bash\n')
+                else:
                     remote_cmd = (
                         f"trap '' HUP; "
                         f"export KNOT_NODE_ID='{node}' KNOT_COUNCIL_RUN_ID='{run_id}' KNOT_HUB_URL='https://127.0.0.1:4242' KNOT_COUNCIL_DB='mesh' KNOT_PROJECT='{project_name}' KNOT_PEERS='{','.join(nodes)}' PATH=\"\\$HOME/.local/bin:/usr/local/bin:/usr/bin:\\$PATH\"; "
@@ -228,14 +234,35 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
                         f"echo -e '\\033[1;36m║\\033[0m  Mode:      \\033[32m{mode_label}\\033[0m'; "
                         f"echo -e '\\033[1;36m║\\033[0m  Commands:  \\033[32mknot council reply\\033[0m | \\033[32mknot council status\\033[0m'; "
                         f"echo -e '\\033[1;36m╚══════════════════════════════════════════════════════════════════════╝\\033[0m'; "
-                        f"echo ''; {remote_agy}"
+                        f"echo ''; exec agy --project \\\"{project_name}\\\" --dangerously-skip-permissions -c"
                     )
-                    ps.write(f'exec "{knot_bin}" exec -tt {node} "{remote_cmd}"\n')
+                    ps.write('while true; do\n')
+                    ps.write(f'  "{knot_bin}" exec -tt {node} "{remote_cmd}"\n')
+                    ps.write('  EXIT_CODE=$?\n')
+                    ps.write(f'  echo -e "\\n\\033[1;33m[!] Cockpit pane for @[{node}] disconnected (exit code $EXIT_CODE).\\033[0m"\n')
+                    ps.write('  echo -e "Reconnecting in 5 seconds (Press Ctrl+C to drop to rescue shell)..."\n')
+                    ps.write('  sleep 5 || break\n')
+                    ps.write('done\n')
+                    ps.write('exec bash\n')
             else:
                 if node in [local_node, "localhost"]:
-                    ps.write(f'exec "{missions_dir}/launch.sh"\n')
+                    ps.write('while true; do\n')
+                    ps.write(f'  "{missions_dir}/launch.sh"\n')
+                    ps.write('  EXIT_CODE=$?\n')
+                    ps.write(f'  echo -e "\\n\\033[1;33m[!] Cockpit pane for @[{node}] disconnected (exit code $EXIT_CODE).\\033[0m"\n')
+                    ps.write('  echo -e "Reconnecting in 5 seconds (Press Ctrl+C to drop to rescue shell)..."\n')
+                    ps.write('  sleep 5 || break\n')
+                    ps.write('done\n')
+                    ps.write('exec bash\n')
                 else:
-                    ps.write(f'exec "{knot_bin}" exec -tt {node} "trap \'\' HUP; ~/.config/knot/missions/{run_id}/launch.sh; exec bash"\n')
+                    ps.write('while true; do\n')
+                    ps.write(f'  "{knot_bin}" exec -tt {node} "trap \'\' HUP; ~/.config/knot/missions/{run_id}/launch.sh; exec bash"\n')
+                    ps.write('  EXIT_CODE=$?\n')
+                    ps.write(f'  echo -e "\\n\\033[1;33m[!] Cockpit pane for @[{node}] disconnected (exit code $EXIT_CODE).\\033[0m"\n')
+                    ps.write('  echo -e "Reconnecting in 5 seconds (Press Ctrl+C to drop to rescue shell)..."\n')
+                    ps.write('  sleep 5 || break\n')
+                    ps.write('done\n')
+                    ps.write('exec bash\n')
         os.chmod(pane_script, 0o755)
 
         lines.append(f"launch --cwd={knot_root} {pane_script}")

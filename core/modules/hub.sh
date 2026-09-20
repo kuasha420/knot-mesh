@@ -817,7 +817,7 @@ cmd_sleep() {
       knot_log_info "Enforcing wholesale sleep prevention across swarm for ${mins} minutes..."
       local resp
       resp="$(curl -k -s -X POST "$hub_url/swarm/wake" -H "Content-Type: application/json" -d "{\"duration_sec\": $duration_sec}")"
-      if echo "$resp" | grep -q '"ok":true'; then
+      if echo "$resp" | grep -qE '"ok"\s*:\s*true'; then
         knot_log_ok "Sleep prevention lock enforced on all nodes on AC power for ${mins} minutes."
       else
         knot_log_err "Failed to set wake hold: $resp"
@@ -828,7 +828,7 @@ cmd_sleep() {
       knot_log_info "Releasing manual swarm wake hold..."
       local resp
       resp="$(curl -k -s -X POST "$hub_url/swarm/sleep-allow" -H "Content-Type: application/json" -d "{}")"
-      if echo "$resp" | grep -q '"ok":true'; then
+      if echo "$resp" | grep -qE '"ok"\s*:\s*true'; then
         knot_log_ok "Manual wake hold released. Swarm will sleep naturally when idle."
       else
         knot_log_err "Failed to release wake hold: $resp"
