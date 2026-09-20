@@ -140,9 +140,6 @@ def detect_node_id() -> str:
 
     # 4. Known fallback mappings for physical Knot fleet machines
     known_mappings = {
-        "kuasha-z490ud": "desktop",
-        "devbox": "laptop",
-        "psl-0000": "rog-ally",
         "steamdeck-eos": "steamdeck",
     }
     if hostname in known_mappings:
@@ -939,7 +936,7 @@ class AgentWorker:
             or (os.path.expanduser("~/.local/share/knot-mesh") if os.path.isdir(os.path.expanduser("~/.local/share/knot-mesh")) else None)
             or (os.path.expanduser("~/knot-mesh") if os.path.isdir(os.path.expanduser("~/knot-mesh")) else None)
             or (os.path.expanduser("~/knot") if os.path.isdir(os.path.expanduser("~/knot")) else None)
-            or os.path.expanduser("~/Dev/knot")
+            or os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
         )
         cmd = ["systemd-run", "--user", "--pipe"] + get_headless_systemd_env()
         if os.path.isdir(knot_dir):
@@ -1438,10 +1435,10 @@ class AgentWorker:
                             ]:
                                 if os.path.exists(cand):
                                     palace.ingest_antigravity_transcript(cand, session_id, self.node_id)
-                                    print(f"[*] Ingested transcript for session {session_id[:8]} into SurrealDB.")
+                                    print(f"[*] Ingested transcript for session {session_id[:8]} into Memory Palace.")
                                     break
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            print(f"[!] Memory Palace transcript ingest failed for session {session_id[:8]}: {e}", file=sys.stderr)
                     threading.Thread(target=_bg_ingest, daemon=True).start()
 
                 # Refresh quota in background after task completion
@@ -1497,7 +1494,7 @@ def resolve_hub_url() -> str:
                 break
 
     # If this machine is the anchor, connect directly to loopback
-    if my_host in (anchor_host.lower(), anchor_id.lower(), "desktop", "kuasha-z490ud"):
+    if my_host in (anchor_host.lower(), anchor_id.lower(), "desktop"):
         return f"https://127.0.0.1:{hub_port}"
 
     # Try resolving Anchor IP via resolver.sh first (vital for strands where hostnames lack DNS)

@@ -93,7 +93,7 @@ cat << JSON_EOF > "$SWARM_NODES/rog-ally.json"
   "id": "rog-ally",
   "hostname": "$detected_h",
   "aliases": ["worker-beta", "handheld-rog"],
-  "user": "psl",
+  "user": "user_b",
   "role": "strand"
 }
 JSON_EOF
@@ -112,7 +112,7 @@ cat << JSON_EOF > "$SWARM_NODES/laptop.json"
   "id": "laptop",
   "hostname": "laptop-linux",
   "aliases": ["worker-alpha"],
-  "user": "psl",
+  "user": "user_b",
   "role": "strand"
 }
 JSON_EOF
@@ -126,7 +126,7 @@ cat << JSON_EOF > "$SWARM_NODES/desktop.json"
   "id": "desktop",
   "hostname": "mock-anchor-box",
   "aliases": ["workstation-anchor"],
-  "user": "kuasha",
+  "user": "user_a",
   "role": "anchor",
   "port": 42069,
   "ip_hint": "192.168.68.153"
@@ -138,7 +138,7 @@ cat << JSON_EOF > "$SWARM_NODES/steamdeck.json"
   "id": "steamdeck",
   "hostname": "steamdeck-jupiter",
   "aliases": ["worker-gamma"],
-  "user": "jimha",
+  "user": "user_c",
   "role": "strand",
   "port": 22,
   "ip_hint": "192.168.68.188"
@@ -177,42 +177,42 @@ echo "  -> knot exec remote subshell export contract: OK"
 
 echo "=== [Test 7] Cross-Node User Home Path Normalization ==="
 # 7a. Bash knot_path_normalize tests
-p1="$(knot_path_normalize "/home/kuasha/Dev/knot-mesh" "/home/psl")"
-[ "$p1" = "/home/psl/Dev/knot-mesh" ] || { echo "Expected /home/psl/Dev/knot-mesh, got $p1" >&2; exit 1; }
+p1="$(knot_path_normalize "/home/user_a/Dev/knot-mesh" "/home/user_b")"
+[ "$p1" = "/home/user_b/Dev/knot-mesh" ] || { echo "Expected /home/user_b/Dev/knot-mesh, got $p1" >&2; exit 1; }
 
-p2="$(knot_path_normalize "/home/psl/Dev/knot-mesh" "/home/jimha")"
-[ "$p2" = "/home/jimha/Dev/knot-mesh" ] || { echo "Expected /home/jimha/Dev/knot-mesh, got $p2" >&2; exit 1; }
+p2="$(knot_path_normalize "/home/user_b/Dev/knot-mesh" "/home/user_c")"
+[ "$p2" = "/home/user_c/Dev/knot-mesh" ] || { echo "Expected /home/user_c/Dev/knot-mesh, got $p2" >&2; exit 1; }
 
-p3="$(knot_path_normalize "file:///home/kuasha/Dev/knot-mesh" "/home/psl")"
-[ "$p3" = "file:///home/psl/Dev/knot-mesh" ] || { echo "Expected file:///home/psl/Dev/knot-mesh, got $p3" >&2; exit 1; }
+p3="$(knot_path_normalize "file:///home/user_a/Dev/knot-mesh" "/home/user_b")"
+[ "$p3" = "file:///home/user_b/Dev/knot-mesh" ] || { echo "Expected file:///home/user_b/Dev/knot-mesh, got $p3" >&2; exit 1; }
 
-p4="$(knot_path_normalize "~/Dev/knot-mesh" "/home/jimha")"
-[ "$p4" = "/home/jimha/Dev/knot-mesh" ] || { echo "Expected /home/jimha/Dev/knot-mesh, got $p4" >&2; exit 1; }
+p4="$(knot_path_normalize "~/Dev/knot-mesh" "/home/user_c")"
+[ "$p4" = "/home/user_c/Dev/knot-mesh" ] || { echo "Expected /home/user_c/Dev/knot-mesh, got $p4" >&2; exit 1; }
 
 # 7b. Portable format conversions
-port_out="$(knot_path_to_portable "/home/kuasha/Dev/knot-mesh")"
+port_out="$(knot_path_to_portable "/home/user_a/Dev/knot-mesh")"
 [ "$port_out" = "~/Dev/knot-mesh" ] || { echo "Expected ~/Dev/knot-mesh, got $port_out" >&2; exit 1; }
 
-port_uri="$(knot_path_to_portable "file:///home/kuasha/Dev/knot-mesh")"
+port_uri="$(knot_path_to_portable "file:///home/user_a/Dev/knot-mesh")"
 [ "$port_uri" = "file://~/Dev/knot-mesh" ] || { echo "Expected file://~/Dev/knot-mesh, got $port_uri" >&2; exit 1; }
 
-from_port="$(knot_path_from_portable "$port_uri" "/home/jimha")"
-[ "$from_port" = "file:///home/jimha/Dev/knot-mesh" ] || { echo "Expected file:///home/jimha/Dev/knot-mesh, got $from_port" >&2; exit 1; }
+from_port="$(knot_path_from_portable "$port_uri" "/home/user_c")"
+[ "$from_port" = "file:///home/user_c/Dev/knot-mesh" ] || { echo "Expected file:///home/user_c/Dev/knot-mesh, got $from_port" >&2; exit 1; }
 
 # 7c. CLI worktree normalize command
-cli_norm="$("$KNOT_ROOT/bin/knot" worktree normalize "/home/kuasha/Dev/knot" "/home/psl")"
-[ "$cli_norm" = "/home/psl/Dev/knot" ] || { echo "Expected /home/psl/Dev/knot from CLI, got $cli_norm" >&2; exit 1; }
+cli_norm="$("$KNOT_ROOT/bin/knot" worktree normalize "/home/user_a/Dev/knot-mesh" "/home/user_b")"
+[ "$cli_norm" = "/home/user_b/Dev/knot-mesh" ] || { echo "Expected /home/user_b/Dev/knot-mesh from CLI, got $cli_norm" >&2; exit 1; }
 
 # 7d. Python Database.normalize_home_path test
 python3 -c "
 import sys
 sys.path.insert(0, '$KNOT_ROOT')
 from core.hub.hub import Database
-assert Database.normalize_home_path('/home/kuasha/Dev/knot', '/home/psl') == '/home/psl/Dev/knot'
-assert Database.normalize_home_path('file:///home/kuasha/Dev/knot', '/home/jimha') == 'file:///home/jimha/Dev/knot'
-assert Database.normalize_home_path('~/Dev/knot', '/home/psl') == '/home/psl/Dev/knot'
+assert Database.normalize_home_path('/home/user_a/Dev/knot-mesh', '/home/user_b') == '/home/user_b/Dev/knot-mesh'
+assert Database.normalize_home_path('file:///home/user_a/Dev/knot-mesh', '/home/user_c') == 'file:///home/user_c/Dev/knot-mesh'
+assert Database.normalize_home_path('~/Dev/knot-mesh', '/home/user_b') == '/home/user_b/Dev/knot-mesh'
 "
-echo "  -> Cross-node path normalization (/home/kuasha <-> /home/psl <-> /home/jimha): OK"
+echo "  -> Cross-node path normalization (/home/user_a <-> /home/user_b <-> /home/user_c): OK"
 
 echo "=== [Test 8] Automated Git Worktree Provisioning (Zero Duplicate Clones) ==="
 SAMPLE_REPO="$TMP_DIR/test_repo"
@@ -265,8 +265,8 @@ ssh_cfg="$SSH_DIR/config"
 grep -q "Host desktop" "$ssh_cfg" || { echo "Missing 'Host desktop' in ~/.ssh/config" >&2; exit 1; }
 grep -q "Host desktop.audit-swarm" "$ssh_cfg" || { echo "Missing 'Host desktop.audit-swarm' in ~/.ssh/config" >&2; exit 1; }
 grep -q "ProxyCommand.*desktop" "$ssh_cfg" || { echo "ProxyCommand does not target canonical desktop" >&2; exit 1; }
-grep -q "User kuasha" "$ssh_cfg" || { echo "Missing User kuasha in ~/.ssh/config" >&2; exit 1; }
-grep -q "User jimha" "$ssh_cfg" || { echo "Missing User jimha in ~/.ssh/config" >&2; exit 1; }
+grep -q "User user_a" "$ssh_cfg" || { echo "Missing User user_a in ~/.ssh/config" >&2; exit 1; }
+grep -q "User user_c" "$ssh_cfg" || { echo "Missing User user_c in ~/.ssh/config" >&2; exit 1; }
 echo "  -> SSH client config compilation with canonical node IDs & user isolation: OK"
 
 echo ""

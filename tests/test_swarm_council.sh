@@ -302,7 +302,7 @@ echo "PASSED"
 
 # 15. Multi-Project Portability & Dynamic Codebase Chunking
 echo -n "15. Testing dynamic chunking and repo auto-detection on external project... "
-purr_dir="/home/kuasha/Dev/purr"
+purr_dir="${PURR_DIR:-$HOME/Dev/purr}"
 if [ -d "$purr_dir" ]; then
   # Test auto-detection in audit_tools.sh
   purr_audit="$(cd "$purr_dir" && bash "$COUNCIL_SCRIPTS/audit_tools.sh")"

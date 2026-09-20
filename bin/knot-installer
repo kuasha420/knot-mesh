@@ -234,13 +234,13 @@ USER_SWARM_CONF
 {
   "id": "${anchor_id}",
   "hostname": "${host}",
-  "user": "${USER:-psl}",
+  "user": "${USER:-knot}",
   "role": "anchor",
   "ip_hint": "${lan_ip}",
   "port": $(knot_detect_sshd_port),
   "arch": "$(uname -m)",
   "os": "Arch Linux / KDE Plasma 6 Wayland",
-  "aliases": ["devbox", "ally", "rog-ally", "psl-0000"],
+  "aliases": ["anchor"],
   "display": ${display_json},
   "network": {
     "ssh_port": $(knot_detect_sshd_port)
@@ -887,7 +887,7 @@ main() {
       cmd_uninstall "$@"
       ;;
     -v|--version|version)
-      echo "knot-mesh version 1.0.0"
+      echo "knot-mesh version ${KNOT_VERSION:-1.0.0-rc5}"
       ;;
     -h|--help|help)
       usage

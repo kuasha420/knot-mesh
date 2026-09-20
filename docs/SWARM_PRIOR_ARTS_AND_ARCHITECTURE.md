@@ -95,7 +95,7 @@ Antigravity CLI and SDK agents enforce **progressive disclosure** to protect con
 ### 2. Node Persona & Prompt Specialization
 System prompts across the Knot Swarm are tiered by hardware role:
 - **Anchor (`desktop`)**: *Master Architect & Coordinator*. Oversees overall system design, breaks complex objectives into blackboard tasks, reviews submitted solutions, and manages gitops merges.
-- **Strand-Laptop (`devbox`)**: *Heavy Compute & Test Engineer*. Dedicated to compilation, parallel test suites, and GPU-accelerated evaluations.
+- **Strand-Laptop (`laptop`)**: *Heavy Compute & Test Engineer*. Dedicated to compilation, parallel test suites, and GPU-accelerated evaluations.
 - **Strand-Handheld (`handheld`)**: *Embedded, Input & Handheld Specialist*. Dedicated to gamepad input validation, Wayland scaling/display tests, and low-power battery-efficient background verification.
 
 ---

@@ -170,7 +170,7 @@ knot-installer join 192.168.68.153:4242 839201.cf2e3f93b4fbc23a
 Once the Strand connects, the Anchor terminal updates with an interactive prompt:
 
 ```text
-[✓] Strand connected: laptop (devbox)
+[✓] Strand connected: laptop
 
 Where is 'laptop' positioned relative to this Anchor?
   [1] Left (default)

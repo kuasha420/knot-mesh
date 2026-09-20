@@ -82,4 +82,4 @@ $$\text{Score} = 100 + \left\lfloor \frac{1000}{\max(\Delta t_{\text{ms}}, 50)} 
 
 - Direct Wiki URL: `https://github.com/kuasha420/knot-mesh/wiki`
 
-- Local Mirror & Committed Proof: [`docs/LEADERBOARD.md`](file:///home/kuasha/Dev/knot-mesh/docs/LEADERBOARD.md)
+- Local Mirror & Committed Proof: [`docs/LEADERBOARD.md`](docs/LEADERBOARD.md)

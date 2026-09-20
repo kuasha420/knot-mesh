@@ -1,1 +1,0 @@
-{"name":"knot_gpu_status","description":"Query GPU hardware status, CUDA availability, driver versions, and telemetry for a target node (default: 'laptop').","parameters":{"properties":{"target":{"default":"laptop","description":"Target node to query GPU status for (default: 'laptop').","type":"string"}},"type":"object"}}

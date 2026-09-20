@@ -84,7 +84,7 @@ class SwarmVisionDetector:
 
             if not node_lines:
                 node_lines = [
-                    "- devbox (role: strand laptop, 1920x1080)",
+                    "- laptop (role: strand laptop, 1920x1080)",
                     "- PurrfectSoftwareLimited (role: strand workstation desktop monitor, 2560x1440)",
                     "- rog-ally (role: anchor workstation, primary external display DP-2 2560x1440, internal eDP-1 1920x1080)",
                     "- steamdeck-eos (role: strand handheld gaming PC, 1280x800)"
@@ -110,7 +110,7 @@ class SwarmVisionDetector:
                 f"     * The bottom edge left 50% [0, 50] routes locally via OS to eDP-1.\n"
                 f"     * Any downward transition to an external handheld (e.g. steamdeck-eos) must route from the right half: span [50, 100], target_span [0, 100].\n"
                 f"     * steamdeck-eos routes up: span [0, 100], target_span [50, 100].\n"
-                f"   - Laptops sitting lower on the left (e.g. devbox): span [25, 100], target_span [0, 85]. Reciprocal on devbox right: span [0, 85], target_span [25, 100].\n"
+                f"   - Laptops sitting lower on the left (e.g. laptop): span [25, 100], target_span [0, 85]. Reciprocal on laptop right: span [0, 85], target_span [25, 100].\n"
                 f"   - Aligned monitors on the right (e.g. PurrfectSoftwareLimited): span [0, 100], target_span [0, 100]. Reciprocal on right left: span [0, 100], target_span [0, 100].\n"
                 f"8. Synthesize a complete bidirectional reciprocal layout dictionary for Deskflow KVM.\n"
                 f"9. Provide concise, high-level reasoning.\n\n"
@@ -122,8 +122,8 @@ class SwarmVisionDetector:
                 f"    {{\n"
                 f'      "box_2d": [ymin, xmin, ymax, xmax],\n'
                 f'      "device_type": "laptop",\n'
-                f'      "device_name": "devbox",\n'
-                f'      "matched_node_id": "devbox",\n'
+                f'      "device_name": "laptop",\n'
+                f'      "matched_node_id": "laptop",\n'
                 f'      "position_relative_to_anchor": "left",\n'
                 f'      "span": [25, 100],\n'
                 f'      "confidence": 0.95,\n'
@@ -132,11 +132,11 @@ class SwarmVisionDetector:
                 f"  ],\n"
                 f'  "proposed_layout": {{\n'
                 f'    "{anchor_node_id}": {{\n'
-                f'      "left": {{"node": "devbox", "span": [25, 100], "target_span": [0, 85]}},\n'
+                f'      "left": {{"node": "laptop", "span": [25, 100], "target_span": [0, 85]}},\n'
                 f'      "right": {{"node": "PurrfectSoftwareLimited", "span": [0, 100], "target_span": [0, 100]}},\n'
                 f'      "down": {{"node": "steamdeck-eos", "span": [50, 100], "target_span": [0, 100]}}\n'
                 f"    }},\n"
-                f'    "devbox": {{\n'
+                f'    "laptop": {{\n'
                 f'      "right": {{"node": "{anchor_node_id}", "span": [0, 85], "target_span": [25, 100]}}\n'
                 f"    }},\n"
                 f'    "PurrfectSoftwareLimited": {{\n'

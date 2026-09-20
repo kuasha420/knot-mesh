@@ -166,7 +166,7 @@ class OfflineVisionDetector:
         known_nodes = swarm_nodes or []
         known_node_ids = [n.get("id") for n in known_nodes if n.get("id")]
         if not known_node_ids:
-            known_node_ids = ["rog-ally", "devbox", "PurrfectSoftwareLimited", "steamdeck-eos"]
+            known_node_ids = ["rog-ally", "laptop", "PurrfectSoftwareLimited", "steamdeck-eos"]
 
         anchor_node_id = anchor_id or "rog-ally"
         if anchor_node_id not in known_node_ids and known_node_ids:
@@ -281,7 +281,7 @@ class OfflineVisionDetector:
 
                 # Heuristic bonus
                 h_bonus = 0.0
-                if dtype == "laptop" and ("devbox" in nid_lower or "laptop" in nid_lower or "laptop" in c_caps):
+                if dtype == "laptop" and ("laptop" in nid_lower or "laptop" in c_caps or c_manifest.get("role") == "laptop"):
                     h_bonus += 0.50
                 elif dtype == "handheld_pc":
                     # Disambiguate Steam Deck vs ROG Ally handhelds
@@ -301,7 +301,7 @@ class OfflineVisionDetector:
                     h_bonus += 0.45
 
                 # Spatial position bonus
-                if z["expected_position"] == "left" and ("devbox" in nid_lower or "laptop" in nid_lower):
+                if z["expected_position"] == "left" and ("laptop" in nid_lower or c_manifest.get("role") == "laptop"):
                     h_bonus += 0.25
                 if z["expected_position"] == "right" and ("purrfect" in nid_lower or "psl" in nid_lower):
                     h_bonus += 0.25
@@ -384,7 +384,7 @@ class OfflineVisionDetector:
                     opp_span = [0, 100]
                     opp_target_span = [0, 100]
             elif pos == "left":
-                if "devbox" in nid.lower() or s.get("device_type") == "laptop":
+                if "laptop" in nid.lower() or s.get("device_type") == "laptop":
                     # Laptop sits lower on desk relative to elevated center widescreen monitor
                     span = [25, 100]
                     target_span = [0, 85]

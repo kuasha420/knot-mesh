@@ -1,6 +1,6 @@
 # Maintainer: Arafat Zahan <kuasha420>
 pkgname=knot-mesh
-pkgver=1.0.0.rc4
+pkgver=1.0.0.rc5
 pkgrel=1
 pkgdesc="Distributed workspace mesh for Arch Linux / KDE Plasma 6 Wayland"
 arch=('any')
@@ -24,14 +24,14 @@ optdepends=(
     'webkit2gtk-4.1: Knot Kommand Kafe Tauri v2 native desktop container'
     'gtk3: Native system tray and Wayland/X11 container support'
 )
-source=("knot-mesh-${pkgver}.tar.gz::https://github.com/kuasha420/knot-mesh/archive/refs/tags/v1.0.0-rc4.tar.gz")
+source=("knot-mesh-${pkgver}.tar.gz::https://github.com/kuasha420/knot-mesh/archive/refs/tags/v1.0.0-rc5.tar.gz")
 sha256sums=('SKIP')
 
 package() {
     if [ -d "${srcdir}/${pkgname}-${pkgver}" ]; then
         cd "${srcdir}/${pkgname}-${pkgver}"
-    elif [ -d "${srcdir}/${pkgname}-1.0.0-rc4" ]; then
-        cd "${srcdir}/${pkgname}-1.0.0-rc4"
+    elif [ -d "${srcdir}/${pkgname}-1.0.0-rc5" ]; then
+        cd "${srcdir}/${pkgname}-1.0.0-rc5"
     else
         cd "${srcdir}"
     fi

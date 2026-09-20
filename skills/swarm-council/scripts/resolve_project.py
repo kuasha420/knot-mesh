@@ -35,7 +35,7 @@ def resolve_project_dir(project_target=None):
                                 fpath = uri[7:].rstrip("/")
                                 if os.path.isdir(fpath):
                                     return fpath
-                                # If username differs across fleet nodes (e.g. /home/psl vs /home/kuasha)
+                                # If username differs across fleet nodes (e.g. /home/alice vs /home/bob)
                                 bname = os.path.basename(fpath)
                                 for cand in [
                                     os.path.join(home, "Dev", bname),

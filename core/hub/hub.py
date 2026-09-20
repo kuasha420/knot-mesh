@@ -319,9 +319,6 @@ def get_canonical_node_id(node_id: str) -> str:
                 except Exception:
                     pass
     known_mappings = {
-        "kuasha-z490ud": "desktop",
-        "devbox": "laptop",
-        "psl-0000": "rog-ally",
         "steamdeck-eos": "steamdeck",
     }
     return known_mappings.get(nid_lower, node_id)
@@ -1613,8 +1610,7 @@ class Database:
     @staticmethod
     def normalize_home_path(path_or_uri: str, target_home: str | None = None) -> str:
         """
-        Normalizes paths between different user home directories
-        (/home/kuasha <-> /home/psl <-> /home/jimha).
+        Normalizes paths between different user home directories.
         Preserves file:// prefix if present.
         """
         if not path_or_uri:
@@ -1649,7 +1645,7 @@ class Database:
 
         projects_dir = os.path.expanduser("~/.gemini/config/projects")
         now = int(time.time())
-        knot_root = os.path.expanduser("~/Dev/knot")
+        knot_root = KNOT_ROOT
         knot_folder_uri = f"file://{knot_root}/"
 
         if os.path.isdir(projects_dir):
@@ -3328,7 +3324,7 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 return
 
             cmd = list(allowed_actions[action])
-            knot_path = shutil.which("knot") or os.path.expanduser("~/Dev/knot/bin/knot")
+            knot_path = shutil.which("knot") or os.path.join(KNOT_ROOT, "bin", "knot")
             cmd[0] = knot_path
 
             try:
@@ -3372,7 +3368,7 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 self._send_error("Fields 'target' and 'command' are required", 400)
                 return
 
-            knot_path = shutil.which("knot") or os.path.expanduser("~/Dev/knot/bin/knot")
+            knot_path = shutil.which("knot") or os.path.join(KNOT_ROOT, "bin", "knot")
             cmd = [knot_path, "exec", target, command]
 
             try:

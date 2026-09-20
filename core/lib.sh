@@ -20,7 +20,7 @@ knot_log_warn() { echo -e "${C_YELLOW}[!]${C_RESET} $*" >&2; }
 knot_log_err()  { echo -e "${C_RED}[✗]${C_RESET} $*" >&2; }
 
 KNOT_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
-export KNOT_VERSION="1.0.0"
+export KNOT_VERSION="1.0.0-rc5"
 
 
 knot_detect_user() {
@@ -258,7 +258,7 @@ knot_detect_node_id() {
   echo "${h_short:-${h:-localhost}}"
 }
 
-# Cross-Node User Home Path Normalization (/home/kuasha <-> /home/psl <-> /home/jimha)
+# Cross-Node User Home Path Normalization
 knot_path_normalize() {
   local raw_path="${1:-}"
   local target_home="${2:-}"

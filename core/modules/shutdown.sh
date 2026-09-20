@@ -100,14 +100,6 @@ shutdown_stop_local_services() {
       knot_log_info "Stopping knot-hub.service..."
       systemctl --user stop knot-hub.service || knot_log_warn "Failed to stop knot-hub.service"
     fi
-    if systemctl --user is-active --quiet knot-pocketbase.service; then
-      knot_log_info "Stopping knot-pocketbase.service (flushing SQLite checkpoint)..."
-      systemctl --user stop knot-pocketbase.service || knot_log_warn "Failed to stop knot-pocketbase.service"
-    fi
-    if systemctl --user is-active --quiet knot-surrealdb.service; then
-      knot_log_info "Stopping knot-surrealdb.service (flushing RocksDB WAL)..."
-      systemctl --user stop knot-surrealdb.service || knot_log_warn "Failed to stop knot-surrealdb.service"
-    fi
   fi
 
   sync
@@ -139,8 +131,6 @@ shutdown_resume_local_services() {
   fi
 
   if [ -n "$anchor_host" ] && [ "$my_host" = "$anchor_host" ]; then
-    systemctl --user start knot-surrealdb.service 2>/dev/null || true
-    systemctl --user start knot-pocketbase.service 2>/dev/null || true
     systemctl --user start knot-hub.service 2>/dev/null || true
   fi
   systemctl --user start knot-agent.service 2>/dev/null || true

@@ -263,19 +263,7 @@ topology_align_internal() {
   knot_log_info "Probing and aligning local internal display placement..."
 
   if command -v kscreen-doctor >/dev/null; then
-    local kout
-    kout="$(kscreen-doctor -j 2>/dev/null || true)"
-    
-    # Check if this is the ROG Ally multi-display setup (DP-2 + eDP-1)
-    if echo "$kout" | grep -q '"DP-2"' && echo "$kout" | grep -q '"eDP-1"'; then
-      knot_log_info "Detected ASUS ROG Ally multi-display setup (DP-2 external widescreen + eDP-1 handheld console)"
-      knot_log_info "Aligning eDP-1 to left 50% beneath DP-2 (DP-2 at 0,0 1280x720, eDP-1 at 0,720 640x360 @ scale 3)..."
-      
-      kscreen-doctor output.DP-2.position.0,0 output.eDP-1.position.0,720 output.eDP-1.scale.3 >/dev/null 2>&1 || true
-      knot_log_ok "Internal display geometry aligned: DP-2 (0,0 1280x720), eDP-1 (0,720 640x360)"
-    else
-      knot_log_info "Standard display configuration detected."
-    fi
+    knot_log_info "Standard display configuration detected."
   else
     knot_log_warn "kscreen-doctor not found; manual display configuration required."
   fi
@@ -416,7 +404,7 @@ topology_guide() {
 
 4. FRACTIONAL KVM SPAN CUSTOMIZATION:
    In topology.json, spans can be customized per edge:
-   - "left": { "node": "devbox", "span": [25, 100], "target_span": [0, 85] }
+   - "left": { "node": "laptop", "span": [25, 100], "target_span": [0, 85] }
    - "right": { "node": "PurrfectSoftwareLimited", "span": [0, 100] }
    - "down": { "node": "steamdeck-eos", "span": [50, 100], "target_span": [0, 100] }
 

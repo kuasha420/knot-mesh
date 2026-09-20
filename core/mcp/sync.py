@@ -13,28 +13,8 @@ import shutil
 import sys
 
 KNOT_TOOLS = [
-    "knot_task_post",
-    "knot_task_wait",
-    "knot_task_list",
     "knot_node_status",
     "knot_quota_matrix",
-    "knot_gpu_status",
-    "knot_memory_store",
-    "knot_memory_recall",
-    "knot_memory_palace_map",
-    "knot_memory_promote",
-    "knot_memory_relate",
-    "knot_closet_store",
-    "knot_closet_get",
-    "knot_task_fanout",
-    "knot_task_batch_status",
-    "knot_artifact_lock",
-    "knot_artifact_commit",
-    "knot_chat_post",
-    "knot_chat_read",
-    "knot_project_list",
-    "knot_chat_list_conversations",
-    "knot_chat_create_conversation",
     "knot_exec_command",
     "knot_swarm_topology",
 ]

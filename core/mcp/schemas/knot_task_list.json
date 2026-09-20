@@ -1,1 +1,0 @@
-{"name":"knot_task_list","description":"List tracked tasks on the Knot Swarm Blackboard, optionally filtering by status.","parameters":{"properties":{"status":{"description":"Optional status filter ('QUEUED', 'CLAIMED', 'RUNNING', 'COMPLETED', 'ERROR', or None for all).","type":"string"}},"type":"object"}}

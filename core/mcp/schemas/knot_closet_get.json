@@ -1,1 +1,0 @@
-{"name":"knot_closet_get","description":"Retrieve an artifact and its metadata from the PocketBase artifact closet by its record ID.","parameters":{"properties":{"artifact_id":{"description":"The unique 15-character PocketBase record ID.","type":"string"}},"required":["artifact_id"],"type":"object"}}

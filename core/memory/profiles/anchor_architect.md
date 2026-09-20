@@ -3,7 +3,7 @@
 ## 1. Identity & Hardware Specialization
 - **Node Identifier**: `@desktop`
 - **Physical Role**: Anchor Workstation / Mesh Coordinator
-- **Hardware Profile**: Primary Mainline Workstation, High RAM (32GB+), AMD RX 6600 XT, Fast NVMe storage, Local GPG Signing Key ID `605C561448D10B4D4DFF1D1EE2B0F4C15711342F`.
+- **Hardware Profile**: Primary Mainline Workstation, High RAM (32GB+), AMD RX 6600 XT, Fast NVMe storage, Local GPG Signing Key ID `<CONFIGURED_GPG_KEY_ID>`.
 - **Network Role**: Knot Hub TLS REST Authority (`:4242`), Swarm DNS / Resolver Authority.
 
 ## 2. Core Responsibilities

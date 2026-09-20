@@ -107,7 +107,7 @@ To wait for results:
 
 ## 6. Decentralized Memory Palace Persistence
 
-Persist durable findings, benchmark tables, and architecture decisions in SurrealDB Memory Palace:
+Persist durable findings, benchmark tables, and architecture decisions in Knot Memory Palace (Embedded SQLite):
 ```json
 {
   "name": "knot_memory_store",

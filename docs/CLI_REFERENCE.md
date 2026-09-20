@@ -38,7 +38,7 @@ This document provides a comprehensive command-line reference for both `knot` (d
 | :--- | :--- | :--- |
 | `KNOT_ACTIVE_SWARM` | Explicitly overrides the active swarm profile for the shell session. | Read from `/run/knot/active_swarm` or `~/.local/state/knot/active_swarm` |
 | `KNOT_RUNTIME_DIR` | Directory containing runtime fences, sockets, and transient PID files. | `/run/knot` |
-| `KNOT_VERSION` | Knot release version override. | `1.0.0-rc4` |
+| `KNOT_VERSION` | Knot release version override. | `1.0.0-rc5` |
 | `KNOT_TEST_MODE` | If set (`1`), bypasses graphical prompts and system modifications. | Empty |
 
 ---

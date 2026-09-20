@@ -8,7 +8,7 @@ description: Hardware node-role system prompt profiles for Knot Swarm strands (A
 Formal system prompt profiles defining hardware specializations, operational boundaries, and swarm coordination responsibilities across physical nodes.
 
 ## 1. Profiles Roster
-- **Anchor Architect** (`@desktop`): Primary mainline workstation, high RAM, GPG commit signer (`605C561448D10B4D4DFF1D1EE2B0F4C15711342F`), Knot Hub TLS authority (`:4242`), Swarm Governance.
+- **Anchor Architect** (`@desktop`): Primary mainline workstation, high RAM, GPG commit signer (`<CONFIGURED_GPG_KEY_ID>`), Knot Hub TLS authority (`:4242`), Swarm Governance.
 - **Compute Worker** (`@laptop`): Worker Alpha, NVIDIA RTX 3050 CUDA acceleration, Python daemons (`knot-agent`, `knot-hub`), stateless MCP Gateway, in-process vector indexing, concurrency stress tests.
 - **Handheld Controller** (`@rog-ally`, `@steamdeck`): Worker Beta/Gamma, AMD Van Gogh APU / Ryzen Z1 Extreme, 7"-8" touch & gamepad UX, SteamOS immutable rootfs, Wayland/Gamescope compositor, <50MB RAM container constraint.
 

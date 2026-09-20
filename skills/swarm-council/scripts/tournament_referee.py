@@ -146,7 +146,7 @@ def generate_leaderboard_md(state: TournamentState, project_root: str, opening_n
         f"- **Peak Swarm Streak Multiplier**: **{state.streak_multiplier:.1f}x**.",
         "\n---",
         "\n### Tournament Ledger & Publication Targets:\n",
-        "- Project Git Committed Record: [`docs/LEADERBOARD.md`](file:///home/kuasha/Dev/knot-mesh/docs/LEADERBOARD.md)",
+        f"- Project Git Committed Record: [`docs/LEADERBOARD.md`](file://{os.path.abspath(os.path.join(project_root, 'docs/LEADERBOARD.md'))})",
         "- Live Telemetry Plane: Knot Mesh DB (`~/.config/knot/hub.db`)\n"
     ])
 

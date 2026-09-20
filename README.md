@@ -3,7 +3,7 @@
 [![Platform: Arch Linux / EndeavourOS](https://img.shields.io/badge/Platform-Arch%20Linux%20%7C%20EndeavourOS-1793d1.svg?style=flat-square&logo=arch-linux)](https://archlinux.org)
 [![Desktop: KDE Plasma 6 Wayland](https://img.shields.io/badge/Desktop-KDE%20Plasma%206%20Wayland-1d99f3.svg?style=flat-square&logo=kde)](https://kde.org/plasma-desktop/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
-[![Release: v1.0.0--rc4](https://img.shields.io/badge/Release-v1.0.0--rc4-blue.svg?style=flat-square)](#)
+[![Release: v1.0.0--rc5](https://img.shields.io/badge/Release-v1.0.0--rc5-blue.svg?style=flat-square)](#)
 
 > **Distributed Workspace Mesh for Arch Linux & KDE Plasma 6 Wayland.**  
 > Seamlessly weave multiple Linux workstations, roaming laptops, and handheld gaming PCs into a unified, context-aware physical computing fabric with Wayland-native spatial KVM, zero-prompt AI agent orchestration, and hardware-fenced security.
@@ -49,7 +49,7 @@ Knot compiles declarative multi-screen layouts with bidirectional edge boundarie
 ┌───────────────┐           ┌───────────────┐              ┌───────────────┐
 │               │           │               │              │               │
 │    LAPTOP     │           │   ROG ALLY    │              │  STEAM DECK   │
-│   (devbox)    │           │  (psl-0000)   │              │(steamdeck-eos)│
+│   (@laptop)   │           │  (@rog-ally)  │              │ (@steamdeck)  │
 │  1920 x 1080  │           │  1920 x 1080  │              │  1280 x 800   │
 │   @ 60Hz      │           │   @ 120Hz     │              │   @ 60Hz      │
 │  Left Flank   │           │  Dock / Left  │              │  Dock / Right │

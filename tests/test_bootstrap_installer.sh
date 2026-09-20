@@ -19,7 +19,7 @@ echo "=== [Test 2] PKGBUILD Metadata Validation ==="
 cd "$KNOT_ROOT"
 SRCINFO="$(makepkg --printsrcinfo)"
 echo "$SRCINFO" | grep -q "pkgname = knot-mesh"
-echo "$SRCINFO" | grep -q "pkgver = 1.0.0.rc4"
+echo "$SRCINFO" | grep -q "pkgver = 1.0.0.rc5"
 echo "$SRCINFO" | grep -q "depends = python"
 echo "$SRCINFO" | grep -q "depends = deskflow"
 echo "$SRCINFO" | grep -q "optdepends = kscreen-doctor"
@@ -79,7 +79,7 @@ if [ ! -x "$TEST_BIN_DIR/knot" ] || [ ! -x "$TEST_BIN_DIR/knot-installer" ]; the
 fi
 
 # Verify execution through symlink
-"$TEST_BIN_DIR/knot-installer" --version | grep -q "knot-mesh version 1.0.0-rc4"
+"$TEST_BIN_DIR/knot-installer" --version | grep -q "knot-mesh version 1.0.0-rc5"
 echo "  -> Symlink execution through knot-installer --version: OK"
 
 echo "=== [✓] ALL BOOTSTRAP INSTALLER & PKGBUILD TESTS PASSED! ==="

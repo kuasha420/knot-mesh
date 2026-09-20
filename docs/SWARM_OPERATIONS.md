@@ -43,7 +43,7 @@ A swarm profile is defined in `swarm.conf`:
 SWARM_ID="office"
 SWARM_NAME="Office Studio Swarm"
 ANCHOR_ID="desktop"
-ANCHOR_HOST="kuasha-z490ud"
+ANCHOR_HOST="desktop"
 HUB_PORT=4242
 
 # Physical Network Fence

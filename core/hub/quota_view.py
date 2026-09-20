@@ -110,9 +110,6 @@ def main():
 
     # Canonicalize and deduplicate nodes
     canonical_map = {
-        "kuasha-z490ud": "desktop",
-        "devbox": "laptop",
-        "psl-0000": "rog-ally",
         "steamdeck-eos": "steamdeck",
     }
     # Resolve dynamic node palette

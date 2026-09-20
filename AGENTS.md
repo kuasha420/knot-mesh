@@ -85,5 +85,5 @@ Every git commit to `main` or release branches MUST be cryptographically signed 
 ```bash
 git commit -S -m "..."
 ```
-**Enforced Key ID**: `605C561448D10B4D4DFF1D1EE2B0F4C15711342F`
+**Enforced Key ID**: `<CONFIGURED_GPG_KEY_ID>`
 Unsigned commits or commits signed with unauthorized keys will be rejected by CI and council merge gates.

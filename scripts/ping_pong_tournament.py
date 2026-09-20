@@ -482,15 +482,17 @@ def run_tournament():
     report.append(f"- **Final Streak Multiplier Achieved**: **{current_streak_mult:.1f}x**.")
     report.append("\n---\n")
     report.append("### Official Wiki Leaderboard Target:\n")
+    repo_root = os.environ.get("KNOT_ROOT") or os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    docs_dir = os.path.join(repo_root, "docs")
+    leaderboard_file = os.path.join(docs_dir, "LEADERBOARD.md")
+    leaderboard_url = f"file://{leaderboard_file}"
     report.append("- Direct Wiki URL: `https://github.com/kuasha420/knot-mesh/wiki`\n")
-    report.append("- Local Mirror & Committed Proof: [`docs/LEADERBOARD.md`](file:///home/kuasha/Dev/knot-mesh/docs/LEADERBOARD.md)\n")
+    report.append(f"- Local Mirror & Committed Proof: [`docs/LEADERBOARD.md`]({leaderboard_url})\n")
     
     final_report_md = "\n".join(report)
     
     # Save to docs/LEADERBOARD.md
-    docs_dir = "/home/kuasha/Dev/knot-mesh/docs"
     os.makedirs(docs_dir, exist_ok=True)
-    leaderboard_file = os.path.join(docs_dir, "LEADERBOARD.md")
     with open(leaderboard_file, "w") as f:
         f.write(final_report_md)
     log_event(f"📄 Saved tournament leaderboard to {leaderboard_file}")
@@ -498,9 +500,9 @@ def run_tournament():
     # Git commit to main
     if not is_test_mode:
         try:
-            subprocess.run(["git", "add", "docs/LEADERBOARD.md"], cwd="/home/kuasha/Dev/knot-mesh", check=True)
-            subprocess.run(["git", "commit", "-m", "docs: update swarm ping-pong tournament leaderboard (5-min timed rally)"], cwd="/home/kuasha/Dev/knot-mesh", check=True)
-            subprocess.run(["git", "push", "origin", "main"], cwd="/home/kuasha/Dev/knot-mesh", check=True)
+            subprocess.run(["git", "add", "docs/LEADERBOARD.md"], cwd=repo_root, check=True)
+            subprocess.run(["git", "commit", "-m", "docs: update swarm ping-pong tournament leaderboard (5-min timed rally)"], cwd=repo_root, check=True)
+            subprocess.run(["git", "push", "origin", "main"], cwd=repo_root, check=True)
             log_event("🚀 Committed and pushed docs/LEADERBOARD.md to origin/main!")
         except Exception as e:
             log_event(f"⚠️ Git push error: {e}")
@@ -526,7 +528,7 @@ def run_tournament():
         log_event(f"ℹ️ Wiki sync notice: {e}")
         
     # Final Mesh DB Broadcast
-    summary_file = "/home/kuasha/Dev/knot-mesh/leaderboard_summary.md"
+    summary_file = os.path.join(repo_root, "leaderboard_summary.md")
     with open(summary_file, "w") as f:
         f.write(final_report_md)
     log_event(f"📄 Saved leaderboard summary to {summary_file}")

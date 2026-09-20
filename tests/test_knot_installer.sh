@@ -16,7 +16,7 @@ fi
 echo "  -> Zero error swallowing: OK"
 
 echo "=== [Test 2] Help and Version Subcommands ==="
-"$INSTALLER" --version | grep -q "knot-mesh version 1.0.0-rc4"
+"$INSTALLER" --version | grep -q "knot-mesh version 1.0.0-rc5"
 "$INSTALLER" --help | grep -q "USAGE:"
 "$INSTALLER" init --help | grep -q "Initialize this workstation as an Anchor"
 "$INSTALLER" invite --help | grep -q "Generate a secure pairing token"

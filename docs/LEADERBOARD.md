@@ -42,5 +42,5 @@ $$\text{Score} = \left( 100_{\text{base}} + \text{SpeedBonus} + \text{EleganceBo
 
 ### Tournament Ledger & Publication Targets:
 
-- Project Git Committed Record: [`docs/LEADERBOARD.md`](file:///home/kuasha/Dev/knot-mesh/docs/LEADERBOARD.md)
+- Project Git Committed Record: [`docs/LEADERBOARD.md`](LEADERBOARD.md)
 - Live Telemetry Plane: Knot Mesh DB (`~/.config/knot/hub.db`)

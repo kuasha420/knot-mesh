@@ -203,8 +203,6 @@ class MemoryPalaceClient:
     def __init__(
         self,
         db_path: Optional[str] = None,
-        surreal_url: Optional[str] = None,
-        pocketbase_url: Optional[str] = None,
         user: str = "root",
         password: str = "knotmemory",
         namespace: str = "knot",
@@ -216,8 +214,6 @@ class MemoryPalaceClient:
             or os.environ.get("KNOT_MEMORY_DB")
             or DEFAULT_DB_PATH
         )
-        self.surreal_url = surreal_url or os.environ.get("KNOT_SURREAL_URL") or "http://127.0.0.1:8000"
-        self.pocketbase_url = pocketbase_url or os.environ.get("KNOT_POCKETBASE_URL") or "http://127.0.0.1:8090"
         self.user = user
         self.password = password
         self.namespace = namespace

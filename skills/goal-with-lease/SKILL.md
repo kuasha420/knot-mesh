@@ -16,7 +16,7 @@ When operating under `/goal-with-lease`:
 2. **Lease Invariants**: Every code modification must satisfy:
    - **Zero Error Swallowing**: Strict adherence to PSL Rule 1 (`set -euo pipefail`, zero `2>/dev/null`, zero `|| true`).
    - **Zero Homework**: Product code must directly execute; tests must never fake green results.
-   - **GPG Signing**: Every mainline commit must be cryptographically signed (`git commit -S`) using key `605C561448D10B4D4DFF1D1EE2B0F4C15711342F`.
+   - **GPG Signing**: Every mainline commit must be cryptographically signed (`git commit -S`) using key `<CONFIGURED_GPG_KEY_ID>`.
 3. **Telemetry & Heartbeats**: The agent reports milestone progress (25%, 50%, 75%, FINAL) to the Knot Mesh DB (`knot council reply <run_id> --node <node_id> --status <status>`).
 
 ---

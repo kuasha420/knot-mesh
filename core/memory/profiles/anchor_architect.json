@@ -3,7 +3,7 @@
   "role_name": "Anchor Architect",
   "node_id": "desktop",
   "title": "Anchor Workstation & Swarm Governance Coordinator",
-  "hardware_specialization": "Intel Core i7 (16 threads), 32GB RAM, AMD RX 6600 XT (8GB), Fast NVMe, Local GPG Key ID 605C561448D10B4D4DFF1D1EE2B0F4C15711342F",
+  "hardware_specialization": "Intel Core i7 (16 threads), 32GB RAM, AMD RX 6600 XT (8GB), Fast NVMe, Local GPG Key ID <CONFIGURED_GPG_KEY_ID>",
   "network_role": "Knot Hub TLS REST Authority (:4242), Swarm DNS & Resolver Authority",
   "capabilities": [
     "swarm_orchestration",
