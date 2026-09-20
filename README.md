@@ -8,6 +8,9 @@
 > **Distributed Workspace Mesh for Arch Linux & KDE Plasma 6 Wayland.**  
 > Seamlessly weave multiple Linux workstations, roaming laptops, and handheld gaming PCs into a unified, context-aware physical computing fabric with Wayland-native spatial KVM, zero-prompt AI agent orchestration, and hardware-fenced security.
 
+> **Historical Note**: Knot Mesh is the standalone open-source successor to the private multi-device GitOps prototype `knot`.  
+> Active development and public releases take place exclusively in this repository.
+
 ---
 
 ## ⚡ Quickstart
