@@ -25,6 +25,8 @@ export interface UseGamepadNavigationOptions {
   onRefreshAction?: () => void;
   onPrevView?: () => void;
   onNextView?: () => void;
+  onToggleHandheld?: () => void;
+  handheldMode?: boolean;
   enabled?: boolean;
 }
 
@@ -45,6 +47,9 @@ export function useGamepadNavigation(options: UseGamepadNavigationOptions = {}) 
   
   // Handheld mode state (auto-detected for 1280x800 Steam Deck / ROG Ally or manual override)
   const [handheldMode, setHandheldMode] = useState<boolean>(() => {
+    if (options.handheldMode !== undefined) {
+      return options.handheldMode;
+    }
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('knot_cockpit_handheld_mode');
       if (saved !== null) {
@@ -59,16 +64,50 @@ export function useGamepadNavigation(options: UseGamepadNavigationOptions = {}) 
     return false;
   });
 
+  // Synchronize when options.handheldMode prop changes
+  useEffect(() => {
+    if (options.handheldMode !== undefined) {
+      setHandheldMode(options.handheldMode);
+    }
+  }, [options.handheldMode]);
+
   const toggleHandheldMode = useCallback(() => {
+    if (optionsRef.current.onToggleHandheld) {
+      optionsRef.current.onToggleHandheld();
+      return;
+    }
     setHandheldMode((prev) => {
       const next = !prev;
       try {
         localStorage.setItem('knot_cockpit_handheld_mode', String(next));
+        window.dispatchEvent(new CustomEvent('knot-handheld-toggle', { detail: next }));
       } catch (err) {
         console.warn('Unable to persist handheld mode preference:', err);
       }
       return next;
     });
+  }, []);
+
+  // Listen to cross-component toggle and storage events
+  useEffect(() => {
+    const handleCustomToggle = (e: Event) => {
+      const customEvent = e as CustomEvent<boolean>;
+      if (typeof customEvent.detail === 'boolean') {
+        setHandheldMode(customEvent.detail);
+      }
+    };
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'knot_cockpit_handheld_mode' && e.newValue !== null) {
+        setHandheldMode(e.newValue === 'true');
+      }
+    };
+
+    window.addEventListener('knot-handheld-toggle', handleCustomToggle);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('knot-handheld-toggle', handleCustomToggle);
+      window.removeEventListener('storage', handleStorage);
+    };
   }, []);
 
   // Navigation indices

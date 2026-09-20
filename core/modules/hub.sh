@@ -681,30 +681,53 @@ cmd_web() {
     open)
       knot_log_info "Opening Knot Kommand Kafe..."
       local target_url="${hub_url}/kafe"
-      if type xdg-open >/dev/null; then
-        xdg-open "$target_url"
+      if command -v xdg-open >/dev/null 2>&1; then
+        if ! xdg-open "$target_url"; then
+          knot_log_warn "Notice: Unable to launch default browser via xdg-open for $target_url"
+        fi
+      else
+        knot_log_warn "xdg-open not found; browser launch skipped"
       fi
       echo -e "${C_BOLD}☕ Knot Kommand Kafe:${C_RESET} ${C_CYAN}$target_url${C_RESET}"
       ;;
     desktop|tauri)
-      local tauri_bin="$KNOT_ROOT/src-tauri/target/release/knot-kafe"
-      if [ ! -f "$tauri_bin" ]; then
+      local cargo_target="${CARGO_TARGET_DIR:-$HOME/.cache/knot/cargo-target}"
+      local tauri_bin=""
+      if command -v knot-kafe >/dev/null 2>&1; then
+        tauri_bin="$(command -v knot-kafe)"
+      elif [ -x "$KNOT_ROOT/bin/knot-kafe" ]; then
+        tauri_bin="$KNOT_ROOT/bin/knot-kafe"
+      elif [ -x "$KNOT_ROOT/src-tauri/target/release/knot-kafe" ]; then
+        tauri_bin="$KNOT_ROOT/src-tauri/target/release/knot-kafe"
+      elif [ -x "$cargo_target/release/knot-kafe" ]; then
+        tauri_bin="$cargo_target/release/knot-kafe"
+      elif [ -x "$KNOT_ROOT/src-tauri/target/debug/knot-kafe" ]; then
         tauri_bin="$KNOT_ROOT/src-tauri/target/debug/knot-kafe"
+      elif [ -x "$cargo_target/debug/knot-kafe" ]; then
+        tauri_bin="$cargo_target/debug/knot-kafe"
       fi
-      if [ -f "$tauri_bin" ]; then
+
+      if [ -n "$tauri_bin" ] && [ -f "$tauri_bin" ]; then
         knot_log_info "Launching Knot Kommand Kafe (Tauri v2 Desktop Container)..."
         "$tauri_bin" "$@"
       else
-        knot_log_info "Compiling Knot Kommand Kafe Tauri v2 desktop container..."
-        cargo build --manifest-path "$KNOT_ROOT/src-tauri/Cargo.toml"
-        "$KNOT_ROOT/src-tauri/target/debug/knot-kafe" "$@"
+        knot_log_info "Compiling Knot Kommand Kafe Tauri v2 desktop container into $cargo_target..."
+        mkdir -p "$cargo_target"
+        CARGO_TARGET_DIR="$cargo_target" cargo build --manifest-path "$KNOT_ROOT/src-tauri/Cargo.toml"
+        "$cargo_target/debug/knot-kafe" "$@"
       fi
       ;;
     build-desktop)
       knot_log_info "Building release Tauri v2 desktop container..."
       pnpm --dir "$web_dir" build
-      cargo build --release --manifest-path "$KNOT_ROOT/src-tauri/Cargo.toml"
-      knot_log_ok "Desktop container compiled to src-tauri/target/release/knot-kafe (<50MB RAM footprint)."
+      local cargo_target="${CARGO_TARGET_DIR:-$HOME/.cache/knot/cargo-target}"
+      mkdir -p "$cargo_target"
+      CARGO_TARGET_DIR="$cargo_target" cargo build --release --manifest-path "$KNOT_ROOT/src-tauri/Cargo.toml"
+      if [ -w "$KNOT_ROOT/src-tauri" ] || [ -d "$KNOT_ROOT/src-tauri/target" -a -w "$KNOT_ROOT/src-tauri/target" ]; then
+        mkdir -p "$KNOT_ROOT/src-tauri/target/release"
+        cp "$cargo_target/release/knot-kafe" "$KNOT_ROOT/src-tauri/target/release/knot-kafe"
+      fi
+      knot_log_ok "Desktop container compiled to $cargo_target/release/knot-kafe (<50MB RAM footprint)."
       ;;
     dev)
       knot_log_info "Starting Knot Cockpit development server (Vite HMR)..."

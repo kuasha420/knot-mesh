@@ -26,6 +26,8 @@ export interface BlackboardKanbanProps {
   nodes?: MeshNode[];
   onRefresh?: () => void;
   embedded?: boolean;
+  handheldMode?: boolean;
+  onToggleHandheld?: () => void;
 }
 
 type KanbanColumnId = 'queued' | 'claimed' | 'running' | 'verifying' | 'completed';
@@ -142,6 +144,8 @@ export const BlackboardKanban: React.FC<BlackboardKanbanProps> = ({
   nodes = [],
   onRefresh,
   embedded = false,
+  handheldMode: propHandheldMode,
+  onToggleHandheld,
 }) => {
   const [searchFilter, setSearchFilter] = useState('');
   const [selectedBatch, setSelectedBatch] = useState<string>('all');
@@ -249,8 +253,8 @@ export const BlackboardKanban: React.FC<BlackboardKanbanProps> = ({
   const {
     gamepadConnected,
     gamepadName,
-    handheldMode,
-    toggleHandheldMode,
+    handheldMode: hookHandheldMode,
+    toggleHandheldMode: hookToggleHandheld,
     selectedCol,
     selectedCard,
     setSelectedCol,
@@ -268,7 +272,12 @@ export const BlackboardKanban: React.FC<BlackboardKanbanProps> = ({
       setExpandedTaskId(null);
     },
     onRefreshAction: onRefresh,
+    handheldMode: propHandheldMode,
+    onToggleHandheld,
   });
+
+  const handheldMode = propHandheldMode !== undefined ? propHandheldMode : hookHandheldMode;
+  const toggleHandheldMode = onToggleHandheld || hookToggleHandheld;
 
   // Smooth scroll selected card into viewport when navigated via Gamepad
   useEffect(() => {
