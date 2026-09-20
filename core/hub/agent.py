@@ -71,6 +71,25 @@ def is_on_ac_power() -> bool:
     return False
 
 
+def get_battery_capacity() -> int | None:
+    """
+    Returns current battery capacity percentage (0-100) if available.
+    """
+    ps_dir = "/sys/class/power_supply"
+    if not os.path.exists(ps_dir):
+        return None
+    for s in os.listdir(ps_dir):
+        if s.upper().startswith("BAT"):
+            cap_file = os.path.join(ps_dir, s, "capacity")
+            if os.path.exists(cap_file):
+                try:
+                    with open(cap_file, "r") as f:
+                        return int(f.read().strip())
+                except Exception:
+                    pass
+    return None
+
+
 def detect_node_id() -> str:
     # 1. Explicit environment variable override
     env_id = os.environ.get("KNOT_NODE_ID")
@@ -679,7 +698,9 @@ class AgentWorker:
         self.is_executing_task = False
         self.current_activity: dict = {}
         self.power_inhibitor_proc = None
+        self.dbus_inhibit_cookie: int | None = None
         self._power_lock = threading.Lock()
+        self.consecutive_hub_failures = 0
         self.selected_model = "gemini-3.8-flash-high"
 
     def _refresh_quota_bg(self):
@@ -742,7 +763,7 @@ class AgentWorker:
 
             power_status = {
                 "on_ac": is_on_ac_power(),
-                "sleep_inhibited": bool(self.power_inhibitor_proc and self.power_inhibitor_proc.poll() is None),
+                "sleep_inhibited": bool((self.power_inhibitor_proc and self.power_inhibitor_proc.poll() is None) or self.dbus_inhibit_cookie is not None),
                 "is_executing_task": self.is_executing_task,
                 "activity": self.current_activity
             }
@@ -755,32 +776,48 @@ class AgentWorker:
                 quota=self.quota_info,
                 power=power_status
             )
-            if hb_resp and hb_resp.get("selected_model"):
-                self.selected_model = hb_resp["selected_model"]
+            if hb_resp is None:
+                self.consecutive_hub_failures += 1
+                if self.consecutive_hub_failures >= 3:
+                    try:
+                        new_url = resolve_hub_url()
+                        if new_url and new_url != self.hub.hub_url:
+                            print(f"[*] Hub unreachable ({self.consecutive_hub_failures} attempts); re-resolved Hub URL: {self.hub.hub_url} -> {new_url}")
+                            self.hub = HubClient(new_url)
+                            self.consecutive_hub_failures = 0
+                    except Exception as e:
+                        print(f"[!] Error re-resolving Hub URL: {e}", file=sys.stderr)
+            else:
+                self.consecutive_hub_failures = 0
+                if hb_resp.get("selected_model"):
+                    self.selected_model = hb_resp["selected_model"]
 
             self.stop_event.wait(10.0)
 
     def power_inhibitor_worker(self):
         """
-        Monitors AC power and wholesale swarm activity.
-        Enforces sleep/idle inhibition when:
-          1. Node is plugged into AC power (or desktop without battery).
+        Monitors AC power, battery health, and wholesale swarm activity.
+        Enforces sleep/idle inhibition via dual systemd and D-Bus layers when:
+          1. Node is on AC power OR battery level > 15%.
           2. Swarm is active (local task executing OR Hub reports active tasks / recent chat / manual wake hold).
         Releases inhibition when:
-          - Running on battery (unplugged from wall, preserving battery).
+          - Battery is low (<= 15% and on battery) to prevent device drain.
           - Swarm has been idle across all nodes for > 30 minutes.
         """
         while not self.stop_event.is_set():
             try:
                 on_ac = is_on_ac_power()
-                if not on_ac:
+                batt_cap = get_battery_capacity()
+
+                # Critical battery safeguard: if discharging on battery and <= 15%, release inhibition
+                if not on_ac and batt_cap is not None and batt_cap <= 15:
                     with self._power_lock:
-                        if self.power_inhibitor_proc:
-                            self._release_power_inhibit("Disconnected from AC power (battery mode)")
+                        if self.power_inhibitor_proc or self.dbus_inhibit_cookie is not None:
+                            self._release_power_inhibit("Battery critical (<=15%), preserving hardware charge")
                     self.stop_event.wait(10.0)
                     continue
 
-                # Node is on AC power. Check if swarm is active.
+                # Check if swarm is active
                 is_active = self.is_executing_task
                 activity_reasons = ["local_task_executing"] if is_active else []
                 if not is_active:
@@ -791,10 +828,10 @@ class AgentWorker:
 
                 with self._power_lock:
                     if is_active:
-                        if not self.power_inhibitor_proc or self.power_inhibitor_proc.poll() is not None:
+                        if (not self.power_inhibitor_proc or self.power_inhibitor_proc.poll() is not None) and self.dbus_inhibit_cookie is None:
                             self._acquire_power_inhibit(activity_reasons)
                     else:
-                        if self.power_inhibitor_proc:
+                        if self.power_inhibitor_proc or self.dbus_inhibit_cookie is not None:
                             self._release_power_inhibit("Swarm is dormant / idle (>30m)")
 
             except Exception:
@@ -803,29 +840,64 @@ class AgentWorker:
             self.stop_event.wait(10.0)
 
     def _acquire_power_inhibit(self, reasons: list[str]):
-        reason_str = f"Knot Swarm Active on AC ({', '.join(reasons)})"
+        reason_str = f"Knot Swarm Active ({', '.join(reasons)})"
+
+        # 1. Freedesktop / KDE D-Bus PowerManagement Inhibit (unprivileged, works directly with PowerDevil)
+        if shutil.which("gdbus") and self.dbus_inhibit_cookie is None:
+            try:
+                res = subprocess.run([
+                    "gdbus", "call", "--session",
+                    "--dest", "org.freedesktop.PowerManagement.Inhibit",
+                    "--object-path", "/org/freedesktop/PowerManagement/Inhibit",
+                    "--method", "org.freedesktop.PowerManagement.Inhibit.Inhibit",
+                    "KnotSwarm", reason_str
+                ], capture_output=True, text=True, timeout=3)
+                if res.returncode == 0 and "uint32" in res.stdout:
+                    m = re.search(r"uint32\s+(\d+)", res.stdout)
+                    if m:
+                        self.dbus_inhibit_cookie = int(m.group(1))
+                        print(f"[Power] ⚡ D-Bus PowerManagement inhibited (Cookie {self.dbus_inhibit_cookie})")
+            except Exception:
+                pass
+
+        # 2. Systemd sleep:idle inhibitor (via sudo or unprivileged)
         proc = None
         try:
             cmd = ["sudo", "-n", "systemd-inhibit", "--what=sleep:idle", "--who=Knot Swarm", f"--why={reason_str}", "sleep", "infinity"]
             proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            time.sleep(0.3)
+            time.sleep(0.2)
             if proc.poll() is not None:
-                # Sudo failed or not permitted, fallback to unprivileged idle inhibitor
-                cmd = ["systemd-inhibit", "--what=idle", "--who=Knot Swarm", f"--why={reason_str}", "sleep", "infinity"]
+                # Sudo failed or not permitted, try unprivileged sleep:idle inhibitor
+                cmd = ["systemd-inhibit", "--what=sleep:idle", "--who=Knot Swarm", f"--why={reason_str}", "sleep", "infinity"]
                 proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(0.2)
+                if proc.poll() is not None:
+                    # Final fallback to idle inhibitor
+                    cmd = ["systemd-inhibit", "--what=idle", "--who=Knot Swarm", f"--why={reason_str}", "sleep", "infinity"]
+                    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
-            try:
-                cmd = ["systemd-inhibit", "--what=idle", "--who=Knot Swarm", f"--why={reason_str}", "sleep", "infinity"]
-                proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception as e:
-                print(f"[Power] Warning: Failed to spawn systemd-inhibit: {e}")
-                proc = None
+            pass
 
         self.power_inhibitor_proc = proc
         if proc and proc.poll() is None:
-            print(f"[Power] ⚡ Swarm active on AC -> Sleep & idle inhibited (PID {proc.pid})")
+            print(f"[Power] ⚡ Systemd sleep & idle inhibited (PID {proc.pid})")
 
     def _release_power_inhibit(self, reason: str):
+        # 1. Release D-Bus inhibitor
+        if self.dbus_inhibit_cookie is not None and shutil.which("gdbus"):
+            try:
+                subprocess.run([
+                    "gdbus", "call", "--session",
+                    "--dest", "org.freedesktop.PowerManagement.Inhibit",
+                    "--object-path", "/org/freedesktop/PowerManagement/Inhibit",
+                    "--method", "org.freedesktop.PowerManagement.Inhibit.UnInhibit",
+                    str(self.dbus_inhibit_cookie)
+                ], capture_output=True, text=True, timeout=3)
+            except Exception:
+                pass
+            self.dbus_inhibit_cookie = None
+
+        # 2. Terminate systemd-inhibit process
         if self.power_inhibitor_proc:
             try:
                 self.power_inhibitor_proc.terminate()
@@ -836,7 +908,7 @@ class AgentWorker:
                 except Exception:
                     pass
             self.power_inhibitor_proc = None
-            print(f"[Power] 💤 Sleep inhibitor released: {reason}")
+        print(f"[Power] 💤 Sleep inhibitor released: {reason}")
 
     def task_heartbeat_loop(self, task_id: str, done_event: threading.Event):
         while not done_event.is_set() and not self.stop_event.is_set():
