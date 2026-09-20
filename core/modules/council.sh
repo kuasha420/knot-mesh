@@ -811,3 +811,7 @@ council_kill() {
   "$KNOT_ROOT/bin/knot" exec --all "if pgrep -q -f $run_id; then pkill -f $run_id; fi"
   knot_log_ok "Council run $run_id halted across fleet."
 }
+
+council_board() {
+  exec python3 "$KNOT_ROOT/skills/swarm-council/scripts/board_viewer.py" "$@"
+}
