@@ -87,7 +87,9 @@ for sdir in "${SEARCH_DIRS[@]}"; do
   fi
   for f in "$sdir/"*.json; do
     [ -e "$f" ] || continue
-    if grep -q "\"hostname\":[[:space:]]*\"${TARGET_NODE}\"" "$f" || grep -q "\"id\":[[:space:]]*\"${TARGET_NODE}\"" "$f"; then
+    if grep -q "\"hostname\":[[:space:]]*\"${TARGET_NODE}\"" "$f" || \
+       grep -q "\"id\":[[:space:]]*\"${TARGET_NODE}\"" "$f" || \
+       grep -q "\"${TARGET_NODE}\"" "$f"; then
       MANIFEST="$f"
       break 2
     fi
@@ -172,14 +174,16 @@ fi
 
 # --- TIER 0.5: Local Host Check ---
 if [ -z "$RESOLVED_IP" ]; then
+  MY_NODE_ID="$(knot_detect_node_id)"
   MY_HOST="$(knot_detect_hostname)"
+  MY_HOST_SHORT="${MY_HOST%%.*}"
   IS_LOCAL=0
-  if [ "$TARGET_NODE" = "$MY_HOST" ] || [ "$TARGET_NODE" = "localhost" ]; then
+  if [ "$TARGET_NODE" = "$MY_NODE_ID" ] || [ "$TARGET_NODE" = "$MY_HOST" ] || [ "$TARGET_NODE" = "$MY_HOST_SHORT" ] || [ "$TARGET_NODE" = "localhost" ] || [ "$TARGET_NODE" = "127.0.0.1" ]; then
     IS_LOCAL=1
   elif [ -n "$MANIFEST" ] && [ -r "$MANIFEST" ]; then
     M_HOST="$(awk -F'"' '/"hostname":/ {print $4}' "$MANIFEST")"
     M_ID="$(awk -F'"' '/"id":/ {print $4}' "$MANIFEST")"
-    if [ "$M_HOST" = "$MY_HOST" ] || [ "$M_ID" = "$MY_HOST" ]; then
+    if [ "$M_ID" = "$MY_NODE_ID" ] || [ "$M_HOST" = "$MY_HOST" ] || [ "$M_HOST" = "$MY_HOST_SHORT" ] || [ "$M_ID" = "$MY_HOST" ] || [ "$M_ID" = "$MY_HOST_SHORT" ]; then
       IS_LOCAL=1
     fi
   fi
@@ -268,8 +272,10 @@ fi
 
 lease_tmp="${LEASE_FILE}.${BASHPID:-$$}.tmp"
 echo "$RESOLVED_IP" > "$lease_tmp"
-mv -f "$lease_tmp" "$LEASE_FILE" 2>/dev/null || cat "$lease_tmp" > "$LEASE_FILE"
-rm -f "$lease_tmp"
+if ! mv -f "$lease_tmp" "$LEASE_FILE"; then
+  cat "$lease_tmp" > "$LEASE_FILE"
+  rm -f "$lease_tmp"
+fi
 
 if [ "$MODE" = "proxy" ]; then
   if command -v nc >/dev/null; then

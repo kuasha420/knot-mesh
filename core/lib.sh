@@ -157,6 +157,11 @@ knot_detect_hostname() {
   local h=""
   if command -v uname >/dev/null; then
     h="$(uname -n)"
+  elif command -v python3 >/dev/null; then
+    local py_h=""
+    if py_h="$(python3 -c "import socket; print(socket.gethostname())" 2>&1)"; then
+      h="$py_h"
+    fi
   fi
   if [ -z "$h" ] && command -v hostnamectl >/dev/null; then
     local out=""
@@ -186,48 +191,160 @@ knot_detect_node_id() {
   user_home="$(knot_detect_user_home)"
   if [ -f "$user_home/.config/knot/node_id" ]; then
     local nid
-    nid="$(cat "$user_home/.config/knot/node_id" 2>/dev/null | tr -d '[:space:]')"
+    nid="$(tr -d '[:space:]' < "$user_home/.config/knot/node_id")"
     if [ -n "$nid" ]; then
       echo "$nid"
       return 0
     fi
   fi
+  if [ -f "/etc/knot/node_id" ]; then
+    local nid
+    nid="$(tr -d '[:space:]' < "/etc/knot/node_id")"
+    if [ -n "$nid" ]; then
+      echo "$nid"
+      return 0
+    fi
+  fi
+
   local h
   h="$(knot_detect_hostname)"
-  if command -v jq >/dev/null 2>&1; then
-    for m in "$user_home"/.config/knot/swarms/*/nodes/*.json; do
-      [ -f "$m" ] || continue
-      if jq -e --arg h "$h" '.hostname == $h or (.aliases // [] | index($h) != null) or .id == $h' "$m" >/dev/null 2>&1; then
-        jq -r '.id' "$m"
-        return 0
-      fi
+  local h_short="${h%%.*}"
+
+  local search_dirs=()
+  local active_nodes_dir=""
+  if active_nodes_dir="$(knot_get_nodes_dir 2>&1)"; then
+    if [ -d "$active_nodes_dir" ]; then
+      search_dirs+=("$active_nodes_dir")
+    fi
+  fi
+  if [ -d "$user_home/.config/knot/swarms" ]; then
+    for sd in "$user_home/.config/knot/swarms"/*/nodes; do
+      [ -d "$sd" ] || continue
+      search_dirs+=("$sd")
     done
   fi
-  echo "${h:-localhost}"
+  if [ -d "/etc/knot/swarms.d" ]; then
+    for sd in /etc/knot/swarms.d/*/nodes; do
+      [ -d "$sd" ] || continue
+      search_dirs+=("$sd")
+    done
+  fi
+
+  for sdir in "${search_dirs[@]}"; do
+    for m in "$sdir"/*.json; do
+      [ -f "$m" ] || continue
+      if command -v jq >/dev/null; then
+        local matched=0
+        if jq -e --arg h "$h" --arg hs "$h_short" \
+          '.hostname == $h or .hostname == $hs or (.aliases // [] | index($h) != null) or (.aliases // [] | index($hs) != null) or .id == $h or .id == $hs' "$m" >/dev/null; then
+          matched=1
+        fi
+        if [ "$matched" -eq 1 ]; then
+          jq -r '.id' "$m"
+          return 0
+        fi
+      else
+        local m_id m_host
+        m_id="$(awk -F'"' '/"id":/ {print $4}' "$m")"
+        m_host="$(awk -F'"' '/"hostname":/ {print $4}' "$m")"
+        if [ "$m_host" = "$h" ] || [ "$m_host" = "$h_short" ] || [ "$m_id" = "$h" ] || [ "$m_id" = "$h_short" ]; then
+          echo "$m_id"
+          return 0
+        fi
+      fi
+    done
+  done
+
+  echo "${h_short:-${h:-localhost}}"
+}
+
+# Cross-Node User Home Path Normalization (/home/kuasha <-> /home/psl <-> /home/jimha)
+knot_path_normalize() {
+  local raw_path="${1:-}"
+  local target_home="${2:-}"
+  if [ -z "$target_home" ]; then
+    target_home="$(knot_detect_user_home)"
+  fi
+  target_home="${target_home%/}"
+
+  if [ -z "$raw_path" ]; then
+    echo ""
+    return 0
+  fi
+
+  local prefix=""
+  local p="$raw_path"
+  if [[ "$p" =~ ^file://(.*)$ ]]; then
+    prefix="file://"
+    p="${BASH_REMATCH[1]}"
+  fi
+
+  if [[ "$p" =~ ^/home/[^/]+(/.*)?$ ]]; then
+    local rel="${BASH_REMATCH[1]:-}"
+    echo "${prefix}${target_home}${rel}"
+  elif [[ "$p" =~ ^~(/.*)?$ ]]; then
+    local rel="${BASH_REMATCH[1]:-}"
+    echo "${prefix}${target_home}${rel}"
+  else
+    echo "${prefix}${p}"
+  fi
+}
+
+knot_path_to_portable() {
+  local raw_path="${1:-}"
+  if [ -z "$raw_path" ]; then
+    echo ""
+    return 0
+  fi
+
+  local prefix=""
+  local p="$raw_path"
+  if [[ "$p" =~ ^file://(.*)$ ]]; then
+    prefix="file://"
+    p="${BASH_REMATCH[1]}"
+  fi
+
+  if [[ "$p" =~ ^/home/[^/]+(/.*)?$ ]]; then
+    local rel="${BASH_REMATCH[1]:-}"
+    echo "${prefix}~${rel}"
+  else
+    echo "${prefix}${p}"
+  fi
+}
+
+knot_path_from_portable() {
+  local raw_path="${1:-}"
+  local target_home="${2:-}"
+  knot_path_normalize "$raw_path" "$target_home"
 }
 
 knot_detect_firewalls() {
   local found=()
   if command -v ufw >/dev/null; then
-    local ufw_status
-    if ufw_status="$(sudo -n ufw status 2>/dev/null)"; then
+    local ufw_status=""
+    if ufw_status="$(sudo -n ufw status 2>&1)"; then
       if echo "$ufw_status" | grep -q "Status: active"; then
         found+=("ufw")
       fi
     fi
   fi
   if command -v firewall-cmd >/dev/null; then
-    if sudo -n firewall-cmd --state >/dev/null 2>&1; then
+    local fw_out=""
+    if fw_out="$(sudo -n firewall-cmd --state 2>&1)"; then
       found+=("firewalld")
     fi
   fi
   if [ ${#found[@]} -eq 0 ]; then
-    if command -v nft >/dev/null && sudo -n nft list ruleset 2>/dev/null | grep -q "table"; then
+    local nft_out=""
+    if command -v nft >/dev/null && nft_out="$(sudo -n nft list ruleset 2>&1)" && echo "$nft_out" | grep -q "table"; then
       found+=("nftables")
-    elif command -v iptables >/dev/null && sudo -n iptables -L -n 2>/dev/null | grep -q "Chain"; then
-      found+=("iptables")
     else
-      found+=("none")
+      local ipt_out=""
+      if command -v iptables >/dev/null && ipt_out="$(sudo -n iptables -L -n 2>&1)" && echo "$ipt_out" | grep -q "Chain"; then
+        found+=("iptables")
+      else
+        found+=("none")
+      fi
     fi
   fi
   echo "${found[*]}"
@@ -435,6 +552,8 @@ knot_get_manifest_path() {
 
 # Returns 0 if current node is the Anchor of the active swarm, 1 otherwise
 knot_is_anchor() {
+  local my_node_id
+  my_node_id="$(knot_detect_node_id)"
   local my_host
   my_host="$(knot_detect_hostname)"
   local active_swarm
@@ -447,7 +566,7 @@ knot_is_anchor() {
     anchor_host="${ANCHOR_HOST:-desktop}"
   fi
 
-  if [ "$my_host" = "$anchor_host" ] || [ "$my_host" = "$anchor_id" ]; then
+  if [ "$my_node_id" = "$anchor_id" ] || [ "$my_host" = "$anchor_host" ] || [ "$my_host" = "$anchor_id" ]; then
     return 0
   fi
 
@@ -455,7 +574,7 @@ knot_is_anchor() {
   if a_manifest="$(knot_get_manifest_path "$anchor_id" 2>&1)"; then
     local a_host=""
     a_host="$(awk -F'"' '/"hostname":/ {print $4}' "$a_manifest")"
-    if [ -n "$a_host" ] && [ "$my_host" = "$a_host" ]; then
+    if [ -n "$a_host" ] && { [ "$my_host" = "$a_host" ] || [ "${my_host%%.*}" = "$a_host" ]; }; then
       return 0
     fi
   fi
@@ -484,7 +603,11 @@ knot_detect_install_type() {
   fi
 
   # 2. Check if check_root is inside a git working tree
-  if [ -d "$check_root/.git" ] || git -C "$check_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  local is_wt=""
+  if [ -d "$check_root/.git" ]; then
+    echo "dev"
+    return 0
+  elif is_wt="$(git -C "$check_root" rev-parse --is-inside-work-tree 2>&1)" && [ "$is_wt" = "true" ]; then
     echo "dev"
     return 0
   fi
@@ -496,7 +619,11 @@ knot_detect_install_type() {
       if [ -n "$target" ]; then
         local tdir
         tdir="$(dirname "$(dirname "$target")")"
-        if [ -d "$tdir/.git" ] || git -C "$tdir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        local is_twt=""
+        if [ -d "$tdir/.git" ]; then
+          echo "dev"
+          return 0
+        elif is_twt="$(git -C "$tdir" rev-parse --is-inside-work-tree 2>&1)" && [ "$is_twt" = "true" ]; then
           echo "dev"
           return 0
         fi
