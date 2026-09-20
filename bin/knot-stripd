@@ -378,6 +378,20 @@ class KnotStripDaemon(QObject):
 
     def check_connections_via_ss(self):
         try:
+            # Refresh IPs dynamically from active leases cache to handle roaming / DHCP updates
+            cache_dir = os.path.expanduser("~/.cache/knot/leases")
+            if os.path.isdir(cache_dir):
+                for lfile in os.listdir(cache_dir):
+                    for ctrl in self.controllers:
+                        if lfile == ctrl.node_id or lfile.endswith(f"_{ctrl.node_id}"):
+                            try:
+                                with open(os.path.join(cache_dir, lfile), "r") as lf:
+                                    cached_ip = lf.read().strip()
+                                    if cached_ip:
+                                        ctrl.ips.add(cached_ip)
+                            except Exception:
+                                pass
+
             res = subprocess.run(
                 ["ss", "-t", "state", "established", "( sport = :24800 )"],
                 capture_output=True, text=True, check=True
