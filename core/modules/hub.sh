@@ -109,7 +109,9 @@ cmd_hub() {
       ;;
     status)
       echo -e "${C_BOLD}--- Knot Swarm Hub Status ---${C_RESET}"
-      systemctl --user status knot-hub.service --no-pager || true
+      if ! systemctl --user status knot-hub.service --no-pager; then
+        knot_log_warn "knot-hub.service is not currently active"
+      fi
       echo ""
       local hub_url
       hub_url="$(hub_resolve_url)"
@@ -117,7 +119,7 @@ cmd_hub() {
       local health_out="" rc=0
       health_out="$(curl -k -s --connect-timeout 2 "$hub_url/health" 2>&1)" || rc=$?
       if [ $rc -eq 0 ] && [ -n "$health_out" ]; then
-        if command -v jq >/dev/null 2>&1; then
+        if command -v jq >/dev/null; then
           echo "$health_out" | jq .
         else
           echo "$health_out"
@@ -160,7 +162,9 @@ cmd_agent() {
       ;;
     status)
       echo -e "${C_BOLD}--- Knot Swarm Worker Agent Status ---${C_RESET}"
-      systemctl --user status knot-agent.service --no-pager || true
+      if ! systemctl --user status knot-agent.service --no-pager; then
+        knot_log_warn "knot-agent.service is not currently active"
+      fi
       ;;
     logs)
       journalctl --user -u knot-agent.service -n 50 -f
@@ -257,7 +261,7 @@ cmd_task() {
       printf "%-10s %-24s %-12s %-12s %-10s %-8s\n" "TASK ID" "TITLE" "PLANE" "STATUS" "NODE" "DURATION"
       printf "%-10s %-24s %-12s %-12s %-10s %-8s\n" "-------" "-----" "-----" "------" "----" "--------"
 
-      if command -v jq >/dev/null 2>&1; then
+      if command -v jq >/dev/null; then
         echo "$resp" | jq -r '.[] | [.id[:8], .title[:24], .target_plane, .status, (.claimed_by // "-"), ((.duration_seconds // 0 | tostring) + "s")] | @tsv' | while IFS=$'\t' read -r tid ttitle tplane tstatus tnode tdur; do
           local color="$C_RESET"
           case "$tstatus" in
@@ -285,7 +289,7 @@ cmd_task() {
       local resp="" rc=0
       resp="$(curl -k -s "$hub_url/tasks/batch/$batch_id" 2>&1)" || rc=$?
       if [ $rc -eq 0 ] && [ -n "$resp" ]; then
-        if command -v jq >/dev/null 2>&1; then
+        if command -v jq >/dev/null; then
           echo "$resp" | jq .
         else
           echo "$resp"
@@ -305,7 +309,7 @@ cmd_task() {
       local resp="" rc=0
       resp="$(curl -k -s "$hub_url/tasks/$task_id" 2>&1)" || rc=$?
       if [ $rc -eq 0 ] && [ -n "$resp" ]; then
-        if command -v jq >/dev/null 2>&1; then
+        if command -v jq >/dev/null; then
           echo "$resp" | jq .
         else
           echo "$resp"
@@ -384,7 +388,7 @@ cmd_task() {
           echo -e "\n${C_BOLD}${C_BLUE}>>> $line${C_RESET}"
         elif [[ "$line" =~ ^data: ]]; then
           local data="${line#data: }"
-          if command -v jq >/dev/null 2>&1; then
+          if command -v jq >/dev/null; then
             echo "$data" | jq -C .
           else
             echo "$data"
@@ -419,7 +423,7 @@ cmd_project() {
       printf "%-24s %-28s %-10s %-12s\n" "PROJECT ID" "NAME" "FOLDERS" "DEFAULT CHAN"
       printf "%-24s %-28s %-10s %-12s\n" "----------" "----" "-------" "------------"
 
-      if command -v jq >/dev/null 2>&1; then
+      if command -v jq >/dev/null; then
         echo "$resp" | jq -r '.[] | [.id[:24], .name[:28], (.folders | length | tostring), (.default_channel // "main")] | @tsv' | while IFS=$'\t' read -r pid pname pfolders pchan; do
           printf "%-24s %-28s %-10s %-12s\n" "$pid" "$pname" "$pfolders" "#$pchan"
         done
@@ -435,7 +439,7 @@ cmd_project() {
       local pid="$1"
       local resp
       resp="$(curl -k -s "$hub_url/projects/$pid")"
-      if command -v jq >/dev/null 2>&1; then
+      if command -v jq >/dev/null; then
         echo "$resp" | jq .
       else
         echo "$resp"
@@ -489,7 +493,7 @@ cmd_chat() {
       printf "%-18s %-20s %-24s %-8s %-12s\n" "CHANNEL ID" "PROJECT" "TITLE" "MSGS" "CREATED BY"
       printf "%-18s %-20s %-24s %-8s %-12s\n" "----------" "-------" "-----" "----" "----------"
 
-      if command -v jq >/dev/null 2>&1; then
+      if command -v jq >/dev/null; then
         echo "$resp" | jq -r '.[] | [.id[:18], .project_id[:20], .title[:24], (.message_count // 0 | tostring), .created_by[:12]] | @tsv' | while IFS=$'\t' read -r cid cproj ctitle cmsgs cby; do
           printf "%-18s %-20s %-24s %-8s %-12s\n" "#$cid" "$cproj" "$ctitle" "$cmsgs" "@$cby"
         done
@@ -576,7 +580,7 @@ cmd_chat() {
       local resp
       resp="$(curl -k -s "$hub_url/chat/messages?conv_id=$conv_id&limit=$limit")"
       echo -e "${C_BOLD}--- Swarm Konversations: #$conv_id ---${C_RESET}"
-      if command -v jq >/dev/null 2>&1; then
+      if command -v jq >/dev/null; then
         echo "$resp" | jq -r '.[] | "[\(.created_at | todateiso8601 | .[11:19])] @\(.sender): \(.content)"'
       else
         echo "$resp"
@@ -600,7 +604,7 @@ cmd_artifact() {
       echo -e "${C_BOLD}--- Knot 3-State Artifact Leases ---${C_RESET}"
       local resp
       resp="$(curl -k -s "$hub_url/artifacts/leases")"
-      if command -v jq >/dev/null 2>&1; then
+      if command -v jq >/dev/null; then
         printf "%-28s %-20s %-12s %-10s\n" "ARTIFACT" "STATE" "HOLDER" "EXPIRES"
         printf "%-28s %-20s %-12s %-10s\n" "--------" "-----" "------" "-------"
         local now
@@ -684,8 +688,11 @@ cmd_web() {
     open)
       knot_log_info "Opening Knot Kommand Kafe..."
       local target_url="${hub_url}/kafe"
-      if command -v xdg-open >/dev/null 2>&1; then
-        xdg-open "$target_url" >/dev/null 2>&1 || true
+      if command -v xdg-open >/dev/null; then
+        local xdg_err=""
+        if ! xdg_err="$(xdg-open "$target_url" 2>&1)"; then
+          knot_log_warn "Notice: xdg-open failed: $xdg_err"
+        fi
       fi
       echo -e "${C_BOLD}☕ Knot Kommand Kafe:${C_RESET} ${C_CYAN}$target_url${C_RESET}"
       ;;
@@ -725,7 +732,7 @@ cmd_sleep() {
       echo -e "${C_BOLD}--- Knot Swarm Power & Sleep Prevention Status ---${C_RESET}"
       local resp
       if resp="$(curl -k -s --connect-timeout 2 "$hub_url/power/status")" && [ -n "$resp" ]; then
-        if command -v jq >/dev/null 2>&1; then
+        if command -v jq >/dev/null; then
           local swarm_active
           swarm_active="$(echo "$resp" | jq -r '.swarm_active')"
           local reasons

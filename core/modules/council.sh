@@ -29,11 +29,11 @@ council_copy() {
     return 1
   fi
 
-  if command -v wl-copy >/dev/null 2>&1; then
+  if command -v wl-copy >/dev/null; then
     wl-copy < "$staged_file"
     knot_log_ok "Tailored prompt copied to Wayland clipboard ($(wc -c < "$staged_file") bytes)."
     echo "You can now paste directly into Antigravity 2.0 (Ctrl+V)."
-  elif command -v xclip >/dev/null 2>&1; then
+  elif command -v xclip >/dev/null; then
     xclip -selection clipboard < "$staged_file"
     knot_log_ok "Tailored prompt copied to X11 clipboard."
   else
@@ -239,7 +239,7 @@ All node checkpoints and final audit deliverables will be posted here."
 
     local scaffold_res
     scaffold_res="$("${scaffold_cmd[@]}")"
-    if command -v jq >/dev/null 2>&1; then
+    if command -v jq >/dev/null; then
       local cov_msg
       cov_msg="$(echo "$scaffold_res" | jq -r '.actual_coverage | "  Coverage ratio achieved: \(.)x"')"
       echo "$cov_msg"
@@ -251,7 +251,7 @@ All node checkpoints and final audit deliverables will be posted here."
   # Save run metadata
   local missions_dir="$HOME/.config/knot/missions/$run_id"
   mkdir -p "$missions_dir"
-  if [ -f "$missions_dir/meta.json" ] && command -v jq >/dev/null 2>&1; then
+  if [ -f "$missions_dir/meta.json" ] && command -v jq >/dev/null; then
     local tmp_meta
     tmp_meta="$(mktemp)"
     jq --arg disc_id "$disc_id" --arg disc_url "$disc_url" --arg mode "$mode" --arg project "$proj_name" --arg db "$db" --arg tiling "$tiling" --argjson interactive "$interactive" \
@@ -327,7 +327,12 @@ council_status() {
   echo -e "Backend:    ${C_YELLOW}$db_type${C_RESET}"
   echo ""
 
-  export KNOT_HUB_URL="${KNOT_HUB_URL:-$(hub_resolve_url 2>/dev/null || echo "https://127.0.0.1:4242")}"
+  local resolved_hub=""
+  if resolved_hub="$(hub_resolve_url 2>&1)"; then
+    export KNOT_HUB_URL="${KNOT_HUB_URL:-$resolved_hub}"
+  else
+    export KNOT_HUB_URL="${KNOT_HUB_URL:-https://127.0.0.1:4242}"
+  fi
   python3 "$SCRIPTS_DIR/reconcile.py" --discussion-id "$disc_id" --run-id "$run_id" --db-backend "$db_type"
 }
 
@@ -376,7 +381,12 @@ council_reply() {
     if [ -z "$disc_id" ]; then disc_id="$run_id"; fi
   fi
 
-  export KNOT_HUB_URL="${KNOT_HUB_URL:-$(hub_resolve_url 2>/dev/null || echo "https://127.0.0.1:4242")}"
+  local resolved_hub=""
+  if resolved_hub="$(hub_resolve_url 2>&1)"; then
+    export KNOT_HUB_URL="${KNOT_HUB_URL:-$resolved_hub}"
+  else
+    export KNOT_HUB_URL="${KNOT_HUB_URL:-https://127.0.0.1:4242}"
+  fi
   if [ "$db_type" = "mesh" ]; then
     python3 "$SCRIPTS_DIR/mesh_db.py" reply --discussion-id "$disc_id" --run-id "$run_id" --node-id "$node" --status "$status" --body "$body"
   else
@@ -453,14 +463,17 @@ council_steer() {
       anchor="$(jq -r '.anchor // "desktop"' "$meta_file")"
     fi
     local my_h=""
-    my_h="$(knot_detect_hostname 2>/dev/null || uname -n | cut -d. -f1)"
-    if [ "$my_h" != "$anchor" ] && command -v knot >/dev/null 2>&1; then
-      if knot exec "$anchor" "test -S /tmp/kitty-council-$run_id.sock" >/dev/null 2>&1; then
-        if printf '%s\r' "$prompt_text" | knot exec "$anchor" "kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-text --match 'title:.*${node}.*' --stdin && sleep 0.2 && kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-key --match 'title:.*${node}.*' return" >/dev/null 2>&1; then
+    if ! my_h="$(knot_detect_hostname 2>&1)"; then
+      my_h="$(uname -n | cut -d. -f1)"
+    fi
+    if [ "$my_h" != "$anchor" ] && command -v knot >/dev/null; then
+      if knot exec "$anchor" "test -S /tmp/kitty-council-$run_id.sock"; then
+        local relay_err=""
+        if relay_err="$(printf '%s\r' "$prompt_text" | knot exec "$anchor" "kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-text --match 'title:.*${node}.*' --stdin && sleep 0.2 && kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-key --match 'title:.*${node}.*' return" 2>&1)"; then
           knot_log_ok "Steered node '@$node' via Cockpit Bridge Relay to @$anchor (Run: $run_id)"
           return 0
         else
-          knot_log_err "Remote steer relay to @$anchor failed for node '$node'"
+          knot_log_err "Remote steer relay to @$anchor failed for node '$node': $relay_err"
           return 1
         fi
       fi
@@ -472,9 +485,13 @@ council_steer() {
 
   # Send text to target node's pane via Kitty remote control socket using stdin
   # Matches window title containing the node name (e.g. title:.*laptop.*)
-  if printf '%s\r' "$prompt_text" | kitty @ --to "unix:$sock" send-text --match "title:.*${node}.*" --stdin >/dev/null 2>&1; then
+  local steer_err=""
+  if steer_err="$(printf '%s\r' "$prompt_text" | kitty @ --to "unix:$sock" send-text --match "title:.*${node}.*" --stdin 2>&1)"; then
     sleep 0.2
-    kitty @ --to "unix:$sock" send-key --match "title:.*${node}.*" return >/dev/null 2>&1
+    local key_err=""
+    if ! key_err="$(kitty @ --to "unix:$sock" send-key --match "title:.*${node}.*" return 2>&1)"; then
+      knot_log_warn "Notice: kitty send-key return failed: $key_err"
+    fi
     knot_log_ok "Steered node '@$node' via Cockpit Bridge (Run: $run_id)"
 
     if [ "$wait_ack" -eq 1 ]; then
@@ -559,13 +576,24 @@ council_db() {
   esac
 }
 
+_council_list_runs() {
+  local dir="${1:-$HOME/.config/knot/missions}"
+  [ -d "$dir" ] || return 0
+  shopt -s nullglob
+  local runs=("$dir"/run_*)
+  shopt -u nullglob
+  [ ${#runs[@]} -gt 0 ] || return 0
+  printf '%s\n' "${runs[@]}" | sort -r
+}
+
 council_list() {
   local filter="${1:-}"
   echo -e "${C_BOLD}--- Knot Swarm Council Missions ---${C_RESET}"
   local missions_dir="$HOME/.config/knot/missions"
   if [ -d "$missions_dir" ]; then
     local count=0
-    for m in $(ls -td "$missions_dir"/run_* 2>/dev/null); do
+    while IFS= read -r m; do
+      [ -n "$m" ] && [ -d "$m" ] || continue
       local rid
       rid="$(basename "$m")"
       local m_meta="$m/meta.json"
@@ -611,7 +639,7 @@ council_list() {
       echo -e "  • ${C_CYAN}$rid${C_RESET} $type_tag [backend: ${C_YELLOW}$m_db${C_RESET} | mode: $m_mode | tiling: $m_tiling | project: $m_proj$node_tag]"
       count=$((count + 1))
       if [ $count -ge 20 ]; then break; fi
-    done
+    done < <(_council_list_runs "$missions_dir")
     if [ $count -eq 0 ]; then
       echo "  (No matching council missions found)"
     fi
@@ -625,12 +653,13 @@ council_resume() {
   if [ -z "$run_id" ]; then
     local latest=""
     if [ -d "$missions_dir" ]; then
-      for m in $(ls -td "$missions_dir"/run_* 2>/dev/null); do
+      while IFS= read -r m; do
+        [ -n "$m" ] || continue
         if [ -f "$m/meta.json" ]; then
           latest="$(basename "$m")"
           break
         fi
-      done
+      done < <(_council_list_runs "$missions_dir")
     fi
     if [ -n "$latest" ]; then
       run_id="$latest"
@@ -678,14 +707,15 @@ council_attach() {
     m_db="$(jq -r '.db // "mesh"' "$missions_dir/$run_id/meta.json")"
     m_proj="$(jq -r '.project // "knot-mesh"' "$missions_dir/$run_id/meta.json")"
   elif [ -z "$run_id" ] && [ -d "$missions_dir" ]; then
-    for m in $(ls -td "$missions_dir"/run_* 2>/dev/null); do
+    while IFS= read -r m; do
+      [ -n "$m" ] || continue
       if [ -f "$m/meta.json" ]; then
         run_id="$(basename "$m")"
         m_db="$(jq -r '.db // "mesh"' "$m/meta.json")"
         m_proj="$(jq -r '.project // "knot-mesh"' "$m/meta.json")"
         break
       fi
-    done
+    done < <(_council_list_runs "$missions_dir")
   fi
 
   knot_log_info "Connecting to active agent session on node '$node_id' (Mission: ${run_id:-none})..."
@@ -697,8 +727,10 @@ council_attach() {
     export KNOT_HUB_URL="https://127.0.0.1:4242"
     export KNOT_COUNCIL_DB="$m_db"
     export KNOT_PROJECT="$m_proj"
-    local pdir
-    pdir="$("$SCRIPTS_DIR/resolve_project.py" "$m_proj" 2>/dev/null || echo "$KNOT_ROOT")"
+    local pdir=""
+    if ! pdir="$("$SCRIPTS_DIR/resolve_project.py" "$m_proj" 2>&1)"; then
+      pdir="$KNOT_ROOT"
+    fi
     if [ -d "$pdir" ]; then cd "$pdir"; fi
     agy --project "$m_proj" --dangerously-skip-permissions -c
   else
@@ -761,19 +793,19 @@ council_kill() {
   fi
 
   knot_log_info "Stopping council processes for $run_id..."
-  if pgrep -f "knot-council-$run_id" >/dev/null 2>&1; then
+  if pgrep -q -f "knot-council-$run_id"; then
     pkill -f "knot-council-$run_id"
   fi
-  if pgrep -f "$run_id.*kitty" >/dev/null 2>&1; then
+  if pgrep -q -f "$run_id.*kitty"; then
     pkill -f "$run_id.*kitty"
   fi
-  if pgrep -f "kitty.*$run_id" >/dev/null 2>&1; then
+  if pgrep -q -f "kitty.*$run_id"; then
     pkill -f "kitty.*$run_id"
   fi
-  if pgrep -f "$run_id" >/dev/null 2>&1; then
+  if pgrep -q -f "$run_id"; then
     pkill -f "$run_id"
   fi
   rm -f "/tmp/kitty-council-$run_id.sock"
-  "$KNOT_ROOT/bin/knot" exec --all "if pgrep -f $run_id >/dev/null 2>&1; then pkill -f $run_id; fi"
+  "$KNOT_ROOT/bin/knot" exec --all "if pgrep -q -f $run_id; then pkill -f $run_id; fi"
   knot_log_ok "Council run $run_id halted across fleet."
 }

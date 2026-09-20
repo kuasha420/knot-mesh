@@ -6,7 +6,7 @@ set -euo pipefail
 
 REPO="${1:-}"
 if [ -z "$REPO" ]; then
-  if git_remote="$(git config --get remote.origin.url 2>/dev/null)"; then
+  if git_remote="$(git config --get remote.origin.url 2>&1)"; then
     REPO="$(echo "$git_remote" | sed -E 's#.*github\.com[:/]([^/]+/[^/.]+)(\.git)?#\1#')"
   fi
   REPO="${REPO:-kuasha420/knot-mesh}"
@@ -18,7 +18,7 @@ KNOT_ROOT="$(cd -P "$SCRIPT_DIR/../../.." && pwd -P)"
 KNOT_BIN=""
 if [ -x "$KNOT_ROOT/bin/knot" ]; then
   KNOT_BIN="$KNOT_ROOT/bin/knot"
-elif command -v knot >/dev/null 2>&1; then
+elif command -v knot >/dev/null; then
   KNOT_BIN="$(command -v knot)"
 elif [ -x "$HOME/.local/bin/knot" ]; then
   KNOT_BIN="$HOME/.local/bin/knot"
@@ -64,8 +64,8 @@ for node in "${nodes[@]}"; do
   models_ok=true
 
   if [ $is_local -eq 1 ]; then
-    if command -v secret-tool >/dev/null 2>&1; then
-      if sec_out="$(secret-tool search service gemini 2>/dev/null)"; then
+    if command -v secret-tool >/dev/null; then
+      if sec_out="$(secret-tool search service gemini 2>&1)"; then
         sec_token="$(echo "$sec_out" | awk -F'secret = ' '/^secret = / {print $2}' | head -n1)"
         if [ -n "$sec_token" ]; then
           echo "$sec_token" > "$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
@@ -73,27 +73,39 @@ for node in "${nodes[@]}"; do
         fi
       fi
     fi
-    if ! eval "$sync_settings_cmd" >/dev/null 2>&1; then
+    sync_err=""
+    if ! sync_err="$(eval "$sync_settings_cmd" 2>&1)"; then
       status="DEGRADED"
     fi
 
-    command -v gh >/dev/null 2>&1 || { gh_ok=false; status="DEGRADED"; }
-    command -v git >/dev/null 2>&1 || { git_ok=false; status="DEGRADED"; }
-    command -v knot >/dev/null 2>&1 || [ -n "$KNOT_BIN" ] || { knot_ok=false; status="DEGRADED"; }
-    command -v agy >/dev/null 2>&1 || { agy_ok=false; status="DEGRADED"; }
-    gh auth status >/dev/null 2>&1 || { auth_ok=false; status="DEGRADED"; }
-    timeout 5 agy --version >/dev/null 2>&1 || { models_ok=false; status="DEGRADED"; }
+    command -v gh >/dev/null || { gh_ok=false; status="DEGRADED"; }
+    command -v git >/dev/null || { git_ok=false; status="DEGRADED"; }
+    command -v knot >/dev/null || [ -n "$KNOT_BIN" ] || { knot_ok=false; status="DEGRADED"; }
+    command -v agy >/dev/null || { agy_ok=false; status="DEGRADED"; }
+    auth_err=""
+    if ! auth_err="$(gh auth status 2>&1)"; then
+      auth_ok=false
+      status="DEGRADED"
+    fi
+    ver_err=""
+    if ! ver_err="$(timeout 5 agy --version 2>&1)"; then
+      models_ok=false
+      status="DEGRADED"
+    fi
   else
-    if ! "$KNOT_BIN" exec "$node" "$sync_settings_cmd" >/dev/null 2>&1; then
+    r_sync_err=""
+    if ! r_sync_err="$("$KNOT_BIN" exec "$node" "$sync_settings_cmd" 2>&1)"; then
       status="DEGRADED"
     fi
 
-    if ! timeout 5 "$KNOT_BIN" exec "$node" "which gh >/dev/null 2>&1"; then gh_ok=false; status="DEGRADED"; fi
-    if ! timeout 5 "$KNOT_BIN" exec "$node" "which git >/dev/null 2>&1"; then git_ok=false; status="DEGRADED"; fi
-    if ! timeout 5 "$KNOT_BIN" exec "$node" "which knot >/dev/null 2>&1 || [ -x ~/.local/bin/knot ]"; then knot_ok=false; status="DEGRADED"; fi
-    if ! timeout 5 "$KNOT_BIN" exec "$node" "which agy >/dev/null 2>&1 || [ -x ~/.local/bin/agy ]"; then agy_ok=false; status="DEGRADED"; fi
-    if ! timeout 5 "$KNOT_BIN" exec "$node" "gh auth status >/dev/null 2>&1"; then auth_ok=false; status="DEGRADED"; fi
-    if ! timeout 8 "$KNOT_BIN" exec "$node" "PATH=\"\$HOME/.local/bin:\$PATH\" agy --version >/dev/null 2>&1"; then models_ok=false; status="DEGRADED"; fi
+    if ! timeout 5 "$KNOT_BIN" exec "$node" "command -v gh >/dev/null"; then gh_ok=false; status="DEGRADED"; fi
+    if ! timeout 5 "$KNOT_BIN" exec "$node" "command -v git >/dev/null"; then git_ok=false; status="DEGRADED"; fi
+    if ! timeout 5 "$KNOT_BIN" exec "$node" "command -v knot >/dev/null || [ -x ~/.local/bin/knot ]"; then knot_ok=false; status="DEGRADED"; fi
+    if ! timeout 5 "$KNOT_BIN" exec "$node" "command -v agy >/dev/null || [ -x ~/.local/bin/agy ]"; then agy_ok=false; status="DEGRADED"; fi
+    r_auth_err=""
+    if ! r_auth_err="$(timeout 5 "$KNOT_BIN" exec "$node" "gh auth status" 2>&1)"; then auth_ok=false; status="DEGRADED"; fi
+    r_mod_err=""
+    if ! r_mod_err="$(timeout 8 "$KNOT_BIN" exec "$node" "PATH=\"\$HOME/.local/bin:\$PATH\" agy --version" 2>&1)"; then models_ok=false; status="DEGRADED"; fi
   fi
 
   audit_results+="\"$node\":{"

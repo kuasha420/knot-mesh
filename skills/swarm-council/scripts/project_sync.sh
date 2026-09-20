@@ -228,7 +228,7 @@ for node in nodes:
             node_res["folders"][folder_name] = {"path": folder, "exists": exists, "branch": branch, "commit": commit}
         else:
             # Probe remote node across candidate directory roots
-            pull_subcmd = "git pull --ff-only >/dev/null 2>&1 && " if do_pull else ""
+            pull_subcmd = "git pull -q --ff-only && " if do_pull else ""
             remote_cmd = f'TARGET=""; for c in ~/Dev/{folder_name} ~/{folder_name} ~/.local/share/{folder_name}; do if [ -d "$c" ]; then TARGET="$c"; break; fi; done; if [ -n "$TARGET" ]; then (cd "$TARGET" && {pull_subcmd}git rev-parse --abbrev-ref HEAD && git rev-parse --short HEAD && echo "$TARGET"); else echo "MISSING"; fi'
             try:
                 rout = subprocess.check_output([knot_bin, "exec", node, remote_cmd], text=True, stderr=subprocess.DEVNULL).strip().splitlines()

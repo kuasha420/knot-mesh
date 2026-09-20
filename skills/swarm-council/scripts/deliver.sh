@@ -23,7 +23,7 @@ KNOT_ROOT="$(cd -P "$SCRIPT_DIR/../../.." && pwd -P)"
 KNOT_BIN=""
 if [ -x "$KNOT_ROOT/bin/knot" ]; then
   KNOT_BIN="$KNOT_ROOT/bin/knot"
-elif command -v knot >/dev/null 2>&1; then
+elif command -v knot >/dev/null; then
   KNOT_BIN="$(command -v knot)"
 elif [ -x "$HOME/.local/bin/knot" ]; then
   KNOT_BIN="$HOME/.local/bin/knot"
@@ -39,7 +39,7 @@ fi
 
 # Handle suggested mode via classifier
 if [ "$MODE" = "suggested" ]; then
-  SUGGESTED_MODE="$(python3 "$SCRIPT_DIR/classifier.py" --prompt-file "$MISSIONS_DIR/desktop_prompt.md" 2>/dev/null | tail -n1)"
+  SUGGESTED_MODE="$(python3 "$SCRIPT_DIR/classifier.py" --prompt-file "$MISSIONS_DIR/desktop_prompt.md" | tail -n1)"
   MODE="${SUGGESTED_MODE:-confluence}"
   echo "--> Activating suggested mode: $MODE"
 fi
@@ -63,8 +63,8 @@ case "$MODE" in
       pack=""
       opening_node=""
       if [ -f "$MISSIONS_DIR/meta.json" ]; then
-        pack="$(jq -r '.pack // ""' "$MISSIONS_DIR/meta.json" 2>/dev/null)"
-        opening_node="$(jq -r '.opening_node // .ring[0] // ""' "$MISSIONS_DIR/meta.json" 2>/dev/null)"
+        pack="$(jq -r '.pack // ""' "$MISSIONS_DIR/meta.json")"
+        opening_node="$(jq -r '.opening_node // .ring[0] // ""' "$MISSIONS_DIR/meta.json")"
       fi
       if [ -z "$opening_node" ]; then
         opening_node="$LOCAL_NODE"
@@ -237,13 +237,14 @@ EOF_LAUNCH
 
       if [ "$node_id" = "$LOCAL_NODE" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$LOCAL_HOST" ]; then
         local_pdir="$(python3 "$SCRIPT_DIR/resolve_project.py" "$PROJECT")"
-        WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 nohup konsole --hold --workdir "$local_pdir" -e bash -c "export KNOT_NODE_ID='$node_id'; exec agy --project '$PROJECT' --dangerously-skip-permissions -i \"\$(cat '$pfile')\"" >/dev/null 2>&1 &
+        mkdir -p "$MISSIONS_DIR/logs"
+        WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 nohup konsole --hold --workdir "$local_pdir" -e bash -c "export KNOT_NODE_ID='$node_id'; exec agy --project '$PROJECT' --dangerously-skip-permissions -i \"\$(cat '$pfile')\"" > "$MISSIONS_DIR/logs/konsole_$node_id.log" 2>&1 &
       else
         # Push prompt and launch konsole on remote display
-        "$KNOT_BIN" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
+        "$KNOT_BIN" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID/logs"
         cat "$pfile" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
         
-        "$KNOT_BIN" exec "$node_id" "PDIR=\\\$\($resolve_cmd\); WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/\\\$\(id -u\) nohup konsole --hold --workdir \\\"\\\$PDIR\\\" -e bash -c \\\"export KNOT_NODE_ID='$node_id'; exec agy --project $PROJECT --dangerously-skip-permissions -i \\\$\(cat ~/.config/knot/missions/$RUN_ID/prompt.md\)\\\" >/dev/null 2>&1 &"
+        "$KNOT_BIN" exec "$node_id" "PDIR=\\\$\($resolve_cmd\); WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/\\\$\(id -u\) nohup konsole --hold --workdir \\\"\\\$PDIR\\\" -e bash -c \\\"export KNOT_NODE_ID='$node_id'; exec agy --project $PROJECT --dangerously-skip-permissions -i \\\$\(cat ~/.config/knot/missions/$RUN_ID/prompt.md\)\\\" > ~/.config/knot/missions/$RUN_ID/logs/konsole.log 2>&1 &"
       fi
     done
     echo "[✓] Interactive TUI windows open on fleet displays."
@@ -258,13 +259,13 @@ EOF_LAUNCH
       
       if [ "$node_id" = "$LOCAL_NODE" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$LOCAL_HOST" ]; then
         mkdir -p "$HOME/.config/knot/missions/staged"
-        if command -v notify-send >/dev/null 2>&1; then
+        if command -v notify-send >/dev/null; then
           notify-send -u normal "Knot Swarm Council" "Prompt staged for $node_id. Run 'knot council copy' to load clipboard."
         fi
       else
         "$KNOT_BIN" exec "$node_id" "mkdir -p ~/.config/knot/missions/staged"
         cat "$pfile" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/staged/active_prompt.md"
-        "$KNOT_BIN" exec "$node_id" "if command -v notify-send >/dev/null 2>&1; then notify-send -u normal 'Knot Swarm Council' 'Prompt staged for $node_id. Run knot council copy to load clipboard.'; fi"
+        "$KNOT_BIN" exec "$node_id" "if command -v notify-send >/dev/null; then notify-send -u normal 'Knot Swarm Council' 'Prompt staged for $node_id. Run knot council copy to load clipboard.'; fi"
       fi
     done
     echo ""
