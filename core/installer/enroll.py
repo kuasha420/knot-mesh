@@ -311,7 +311,7 @@ ALLOW_DESKFLOW_KVM="true"
 # Knot Mesh Anchor Entry
 Host {anchor_id} {enrollment_result.get("anchor_hostname", anchor_id)}
     HostName {anchor_host}
-    User {os.environ.get("USER", "psl")}
+    User {os.environ.get("USER", "knot")}
     Port 22
     IdentityFile ~/.ssh/id_ed25519
     StrictHostKeyChecking accept-new

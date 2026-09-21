@@ -58,13 +58,37 @@ Knot compiles declarative multi-screen layouts with bidirectional edge boundarie
 
 ---
 
+## 🏛️ Two-Tier Mesh Architecture
+
+Knot Mesh decouples physical hardware virtualization from autonomous multi-agent intelligence through a strict two-tier architecture:
+
+### Tier 1: Device-to-Device (D2D) Physical Workspace Fabric
+The foundational infrastructure plane managing physical machines, hardware network perimeters, displays, and KVM virtualization:
+- **Wayland-Native Spatial KVM**: Sub-pixel cursor routing and dynamic topology compilation powered by Deskflow.
+- **C InputCapture Shim**: Persistent `libinputcapture-persist.so` shim ensuring pointer barrier grabs survive Wayland portal re-initialization and DPMS cycles.
+- **Wayland LayerShell Strips**: Subtle PyQt6 edge indicators (`knot-stripd`) flashing visual transitions across physical monitor edges.
+- **DPMS Auto-Unlock & Non-Destructive Auto-Login**: Advisory, non-destructive session wake and unlock via DPMS and KDE Connect verification without destroying active sessions.
+- **KDE Connect Clipboard Integration**: Unified cross-node clipboard synchronization and device pairing.
+- **3-Tier Mesh Network Resolver**: Dynamic resolution hierarchy traversing WireGuard encrypted mesh $\to$ mDNS local resolution $\to$ LAN physical fallback.
+- **Hardware-Fenced PAM Sudo Gates**: Real-time CIDR subnet and Default Gateway MAC / BSSID validation (`knot-guard`, `knot-auth-check`).
+
+### Tier 2: Agent-to-Agent (A2A) Cognitive Swarm Layer
+The autonomous multi-agent intelligence layer orchestrating distributed AI agent instances across the mesh:
+- **Linda Tuplespace & Blackboard Hub**: Distributed state coordination, artifact leasing, and task fanout via `knot-hub` and `knot-agent`.
+- **Lean Stateless MCP Gateway**: Minimalist, zero-external-dependency Model Context Protocol server (`core/mcp/gateway.py`) exposing the 4 canonical mesh tools (`knot_node_status`, `knot_quota_matrix`, `knot_exec_command`, `knot_swarm_topology`).
+- **Decentralized CRDT Memory Palace**: In-process SQLite-backed vector search and shared knowledge vault across node clusters (`core/memory/`).
+- **Swarm Council Plane**: Out-of-band collaborative deliberation across autonomous CLI agents with zero startup token overhead and Kitty confluence multiplexing (`knot council`).
+- **Antigravity Subscription Integration**: Automated quota matrix monitoring, Google OAuth credential synchronization, and cross-node headless agent execution.
+
+---
+
 ## 🏛️ The Six Core Pillars
 
 1. **🌐 Zero-Friction Distributed Workspace**  
    Move your mouse cursor fluidly across physical machines. Leverages Deskflow with a custom C `libportal` InputCapture shim tailored specifically for KWin Wayland session semantics.
 
 2. **🤖 Zero-Prompt Antigravity Multi-Agent Orchestration**  
-   Built-in Model Context Protocol (MCP) server (`core/mcp/gateway.py`) and pre-approved operational skills (`knot-swarm`, `core-mesh`, `vision`, `remote-control`) grant agents headless mesh execution, shared memory palace recall, and distributed task fanout across nodes without human prompts.
+   Built-in Model Context Protocol (MCP) server (`core/mcp/gateway.py`) with 4 canonical tools and pre-approved operational skills in `runtime/skills/` (`knot-swarm`, `hardware-profiles`, `swarm-council`, `goal-with-lease`) grant agents headless mesh execution, shared memory palace recall, and distributed task fanout across nodes without human prompts.
 
 3. **💡 Ambient Spatial Awareness & Wayland LayerShell Strips**  
    Subtle, low-opacity PyQt6 Wayland LayerShell edge indicators (`knot-stripd`) glow softly along physical display boundaries, flashing dynamic visual cues when the cursor traverses between machines.
@@ -72,8 +96,8 @@ Knot compiles declarative multi-screen layouts with bidirectional edge boundarie
 4. **🔐 Cryptographic Pairing & Declarative Swarms**  
    Pair nodes in under 10 seconds via ephemeral 6-digit PIN tokens and pinned TLS certificate fingerprints. Swarms (`home`, `office`, `lab`) declare their topologies, members, and policies in human-readable JSON manifests.
 
-5. **⚡ Unified Power & Session Management**  
-   One command unlocks, locks, or shuts down the fleet. Unlocking the Anchor workstation dynamically triggers `plasma-login-manager` headless session resumption across all docked Strands.
+5. **⚡ Unified Power & Non-Destructive Advisory Autologin**  
+   One command unlocks, locks, or shuts down the fleet. Advisory, non-destructive autologin architecture wakes and unlocks Wayland sessions via DPMS autounlock and KDE Connect integration without terminating running applications or risking session state.
 
 6. **🛡️ NetworkManager Roaming Guard & PAM Sudo Gates**  
    `knot-guard` continuously verifies router BSSIDs and Gateway MACs. On trusted home/office Wi-Fi, passwordless `sudo` is dynamically authorized; on public Wi-Fi (cafes, airports), KVM is instantly isolated and sudo demotes to password authentication.
@@ -85,11 +109,12 @@ Knot compiles declarative multi-screen layouts with bidirectional edge boundarie
 For complete configuration, operational manuals, and architecture deep dives:
 
 - 🚀 **[Getting Started Guide](docs/GETTING_STARTED.md)**: Zero-to-mesh walkthrough, Anchor setup, and token invite pairing.
+- 🏛️ **[System Architecture](ARCHITECTURE.md)**: Comprehensive reference for two-tier layering, C InputCapture shim, 3-tier resolver, autounlock flows, and tuplespaces.
 - 📖 **[CLI Reference Manual](docs/CLI_REFERENCE.md)**: Complete command reference for `knot` and `knot-installer`.
 - 🌐 **[Swarm Operations & Roaming](docs/SWARM_OPERATIONS.md)**: Multi-tenant profiles, hardware fencing, and fleet orchestration.
 - 🛡️ **[Firewall & Ports](docs/FIREWALL.md)**: Subnet-scoped port requirements (4242, 24800, 5353, 1714–1764) and UFW/firewalld rules.
-- 🏛️ **[System Architecture](docs/SWARM_PRIOR_ARTS_AND_ARCHITECTURE.md)**: Tuplespace blackboard hub, Wayland LayerShell stack, and prior arts.
-- 🗺️ **[Vision & Roadmap](docs/SWARM_VISION_AND_ROADMAP.md)**: Design philosophy, autonomous agent pairing, and future milestones.
+- 🏛️ **[Prior Arts & Historical Architecture](docs/SWARM_PRIOR_ARTS_AND_ARCHITECTURE.md)**: Tuplespace blackboard hub, Wayland LayerShell stack, and historical inception.
+- 🗺️ **[Vision & Roadmap](docs/ROADMAP.md)**: Milestones, completed issues (#54, #43, #41, #55, PSL Rules 1 & 2), and future horizons.
 
 ---
 

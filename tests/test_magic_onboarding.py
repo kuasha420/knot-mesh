@@ -55,14 +55,14 @@ class TestMagicOnboarding(unittest.TestCase):
         """Verify generated bootstrap script is syntactically valid bash and contains parameters."""
         script = render_bootstrap_script(
             swarm_name="Office Swarm",
-            anchor_host="192.168.68.114",
+            anchor_host="192.168.1.100",
             anchor_port="4242",
             token="654321.abcdef123456",
             pin="654321",
             fp_short="abcdef123456"
         )
         self.assertIn("#!/usr/bin/env bash", script)
-        self.assertIn('ANCHOR_HOST="192.168.68.114"', script)
+        self.assertIn('ANCHOR_HOST="192.168.1.100"', script)
         self.assertIn('TOKEN="654321.abcdef123456"', script)
         self.assertIn('FP_SHORT="abcdef123456"', script)
         self.assertIn('"$BIN_DIR/knot-installer" join "${ANCHOR_HOST}:${ANCHOR_PORT}" "$TOKEN" --auto', script)
@@ -75,7 +75,7 @@ class TestMagicOnboarding(unittest.TestCase):
         """Verify generated HTML landing page contains dark-mode styles and copy button."""
         html = render_onboarding_html(
             swarm_name="Office Swarm",
-            anchor_host="192.168.68.114",
+            anchor_host="192.168.1.100",
             anchor_port="4242",
             token="654321.abcdef123456",
             pin="654321",
@@ -83,15 +83,15 @@ class TestMagicOnboarding(unittest.TestCase):
         )
         self.assertIn("<!DOCTYPE html>", html)
         self.assertIn("Office Swarm", html)
-        self.assertIn("192.168.68.114", html)
-        self.assertIn("curl -kfsSL https://192.168.68.114:4242/join/654321.abcdef123456 | bash", html)
+        self.assertIn("192.168.1.100", html)
+        self.assertIn("curl -kfsSL https://192.168.1.100:4242/join/654321.abcdef123456 | bash", html)
         self.assertIn("Copy One-Liner Command", html)
         self.assertIn("navigator.clipboard.writeText", html)
 
     def test_enrollment_coordinator_anchor_ip(self):
         """Verify invite creation propagates anchor_ip in session."""
-        session = enrollment_coordinator.create_invite(expires_in=300, anchor_ip="192.168.68.114")
-        self.assertEqual(session["anchor_ip"], "192.168.68.114")
+        session = enrollment_coordinator.create_invite(expires_in=300, anchor_ip="192.168.1.100")
+        self.assertEqual(session["anchor_ip"], "192.168.1.100")
         self.assertIn(".", session["token"])
         pin = session["pin"]
         self.assertEqual(session["token"].split(".")[0], pin)

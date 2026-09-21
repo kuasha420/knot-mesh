@@ -470,8 +470,19 @@ doctor_check_local() {
       dur="$(echo "$agy_test_out" | grep -o '"duration_seconds":[0-9.]*' | cut -d: -f2 | awk '{printf "%.2fs", $1}')"
       tok="$(echo "$agy_test_out" | grep -o '"total_tokens":[0-9]*' | cut -d: -f2)"
       doc_ok "Antigravity Swarm Agent: AUTHENTICATED & OPERATIONAL (${dur:-ok}, ${tok:-?} tokens)"
+    elif echo "$agy_test_out" | grep -qiE 'RESOURCE_EXHAUSTED|"error_code":[[:space:]]*429|code[[:space:]]*429|quota[[:space:]]*exhausted|rate[[:space:]]*limit'; then
+      local reset_msg="Subscription quota reached / 429"
+      if echo "$agy_test_out" | grep -qiE 'resets? in [^",]+|retry after [^",]+'; then
+        local r_val
+        r_val="$(echo "$agy_test_out" | grep -ioE 'resets? in [^",]+|retry after [^",]+' | head -n1)"
+        reset_msg="Subscription quota reached: $r_val / 429"
+      fi
+      doc_info "Antigravity Swarm Agent: AUTHENTICATED ($reset_msg)"
+    elif [ $agy_rc -eq 124 ]; then
+      doc_warn "Antigravity Swarm Agent: PROBE TIMED OUT (Backend latency or keyring unlock delay)"
+      warnings=$((warnings + 1))
     else
-      doc_fail "Antigravity Swarm Agent: NOT AUTHENTICATED (run 'knot swarm test local' or 'agy' to log in)"
+      doc_fail "Antigravity Swarm Agent: NOT LOGGED IN (run 'knot swarm test local' or 'agy' to log in)"
       failures=$((failures + 1))
     fi
   else

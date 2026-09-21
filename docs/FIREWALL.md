@@ -20,7 +20,7 @@ This guide outlines required ports, security considerations, and automated/manua
 
 ## Required Network Ports
 
-All Knot Mesh ports are designed to be **scoped strictly to your trusted local subnet** (e.g. `192.168.68.0/24`). Never expose these ports to the public internet.
+All Knot Mesh ports are designed to be **scoped strictly to your trusted local subnet** (e.g. `192.168.1.0/24`). Never expose these ports to the public internet.
 
 | Port | Protocol | Service | Description | Direction |
 | :--- | :--- | :--- | :--- | :--- |
@@ -38,7 +38,7 @@ All Knot Mesh ports are designed to be **scoped strictly to your trusted local s
 Knot Mesh enforces strict boundary protection:
 
 1. **Subnet-Scoped Ingress**:
-   - Ingress rules should only accept packets originating from within your local LAN CIDR block (e.g. `192.168.68.0/24`).
+   - Ingress rules should only accept packets originating from within your local LAN CIDR block (e.g. `192.168.1.0/24`).
    - Any packets from outside the subnet are dropped by default firewall policies.
 
 2. **Pinned TLS**:
@@ -77,8 +77,8 @@ firewall_configure
 If you manage your firewall using **UFW** (Uncomplicated Firewall):
 
 ```bash
-# Replace 192.168.68.0/24 with your actual local subnet CIDR
-SUBNET="192.168.68.0/24"
+# Replace 192.168.1.0/24 with your actual local subnet CIDR
+SUBNET="192.168.1.0/24"
 
 # 1. Allow OpenSSH (standard port 22 and optional custom port 42069)
 sudo ufw insert 1 allow from "$SUBNET" to any port 22 proto tcp comment 'knot-ssh'
@@ -108,8 +108,8 @@ sudo ufw reload
 If you manage your firewall using **firewalld**:
 
 ```bash
-# Replace 192.168.68.0/24 with your actual local subnet CIDR
-SUBNET="192.168.68.0/24"
+# Replace 192.168.1.0/24 with your actual local subnet CIDR
+SUBNET="192.168.1.0/24"
 
 # 1. Enable services
 sudo firewall-cmd --permanent --zone=public --add-service=ssh
@@ -145,10 +145,10 @@ table inet filter {
         ct state established,related accept
 
         # Knot Mesh Subnet-Scoped Ingress
-        ip saddr 192.168.68.0/24 tcp dport { 22, 4242, 24800, 42069 } accept comment "Knot TCP Services"
-        ip saddr 192.168.68.0/24 tcp dport 1714-1764 accept comment "KDE Connect TCP"
-        ip saddr 192.168.68.0/24 udp dport 1714-1764 accept comment "KDE Connect UDP"
-        ip saddr 192.168.68.0/24 udp dport 5353 accept comment "mDNS Multicast"
+        ip saddr 192.168.1.0/24 tcp dport { 22, 4242, 24800, 42069 } accept comment "Knot TCP Services"
+        ip saddr 192.168.1.0/24 tcp dport 1714-1764 accept comment "KDE Connect TCP"
+        ip saddr 192.168.1.0/24 udp dport 1714-1764 accept comment "KDE Connect UDP"
+        ip saddr 192.168.1.0/24 udp dport 5353 accept comment "mDNS Multicast"
     }
 }
 ```

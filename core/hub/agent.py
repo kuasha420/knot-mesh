@@ -137,14 +137,6 @@ def detect_node_id() -> str:
                             return nid
                 except Exception as _err:
                     sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
-
-    # 4. Known fallback mappings for physical Knot fleet machines
-    known_mappings = {
-        "steamdeck-eos": "steamdeck",
-    }
-    if hostname in known_mappings:
-        return known_mappings[hostname]
-
     return socket.gethostname()
 
 

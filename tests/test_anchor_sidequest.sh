@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory() as td:
     nodes_dir = os.path.join(td, "nodes")
     os.makedirs(nodes_dir)
     
-    for nid, hname in [("desktop", "desktop"), ("laptop", "devbox"), ("rog-ally", "psl-0000"), ("steamdeck", "steamdeck-eos")]:
+    for nid, hname in [("desktop", "desktop"), ("laptop", "devbox"), ("rog-ally", "rog-ally"), ("steamdeck", "steamdeck-jupiter")]:
         with open(os.path.join(nodes_dir, f"{nid}.json"), "w") as f:
             json.dump({"id": nid, "hostname": hname}, f)
             
@@ -40,8 +40,8 @@ with tempfile.TemporaryDirectory() as td:
         
     out = compile_deskflow(topo_file, nodes_dir, "unlocked")
     assert "down(0,25) = devbox(0,100)" in out
-    assert "down(25,75) = psl-0000(0,100)" in out
-    assert "down(75,100) = steamdeck-eos(0,100)" in out
+    assert "down(25,75) = rog-ally(0,100)" in out
+    assert "down(75,100) = steamdeck-jupiter(0,100)" in out
     assert "up(0,100) = desktop(0,25)" in out
     assert "up(0,100) = desktop(25,75)" in out
     assert "up(0,100) = desktop(75,100)" in out

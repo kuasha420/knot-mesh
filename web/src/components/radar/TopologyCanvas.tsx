@@ -461,7 +461,7 @@ export const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
                 </div>
               )}
 
-              {/* Right Screen (e.g. PurrfectSoftwareLimited) */}
+              {/* Right Screen (e.g. Handheld / Secondary) */}
               {rightNodeId ? (
                 renderScreenCard(rightNodeId, 'Right Flank')
               ) : (
@@ -471,7 +471,7 @@ export const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
               )}
             </div>
 
-            {/* Down Display (e.g. steamdeck-eos or handheld console) */}
+            {/* Down Display (e.g. secondary handheld console) */}
             {downNodeId && (
               <div className="flex flex-col items-center mt-3">
                 <div className="flex flex-col items-center my-1 text-night-cyan/80">

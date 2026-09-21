@@ -413,6 +413,24 @@ class TestMCPGatewayLiveIntegration:
         mock_hub = MockKnotHubClient()
         gateway = KnotMCPGateway(hub_client=mock_hub, memory_client=memory_client)
 
+        # 1. Test tools/list
+        list_req = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/list",
+            "params": {},
+        }
+        list_resp = gateway.handle_request(list_req)
+        assert list_resp is not None
+        tools = list_resp["result"]["tools"]
+        tool_names = {t["name"] for t in tools}
+        assert tool_names == {
+            "knot_node_status",
+            "knot_quota_matrix",
+            "knot_exec_command",
+            "knot_swarm_topology",
+        }
+
         def call_tool(tname: str, targs: dict) -> tuple[str, bool]:
             req = {
                 "jsonrpc": "2.0",
@@ -427,55 +445,24 @@ class TestMCPGatewayLiveIntegration:
             is_err = result.get("isError", False)
             return text, is_err
 
-        # 1. knot_closet_store
-        res_closet, err_closet = call_tool(
-            "knot_closet_store",
-            {"name": "mcp_test.txt", "content": "MCP Gateway live test payload", "artifact_type": "text"},
-        )
-        assert not err_closet
-        assert "stored in" in res_closet
-        art_id = res_closet.split("ID: ")[1].strip()
+        # 2. Test knot_node_status
+        res_status, err_status = call_tool("knot_node_status", {})
+        assert not err_status
+        assert len(res_status) > 0
 
-        # 2. knot_closet_get
-        res_get, err_get = call_tool("knot_closet_get", {"artifact_id": art_id})
-        assert not err_get
-        assert "MCP Gateway live test payload" in res_get
+        # 3. Test knot_quota_matrix
+        res_quota, err_quota = call_tool("knot_quota_matrix", {"target": "all"})
+        assert not err_quota
+        assert len(res_quota) > 0
 
-        # 3. knot_memory_store (with pool=local)
-        res_store, err_store = call_tool(
-            "knot_memory_store",
-            {
-                "wing": "gateway",
-                "hall": "mcp",
-                "drawer": "tests",
-                "title": "MCP Gateway Live Tool Test",
-                "content": "Testing memory storage via MCP protocol handlers",
-                "pool": "local",
-                "tags": ["mcp", "integration"],
-                "importance": 1.5,
-            },
-        )
-        assert not err_store
-        assert "Memory successfully stored" in res_store
-        assert "Pool:         local" in res_store
+        # 4. Test knot_swarm_topology
+        res_topo, err_topo = call_tool("knot_swarm_topology", {})
+        assert not err_topo
+        assert len(res_topo) > 0
 
-        # 4. knot_memory_recall
-        res_recall, err_recall = call_tool(
-            "knot_memory_recall",
-            {"query": "MCP protocol handlers", "limit": 3},
-        )
-        assert not err_recall
-        assert "MCP Gateway Live Tool Test" in res_recall
+        # 5. Test knot_exec_command
+        res_exec, err_exec = call_tool("knot_exec_command", {"target": "desktop", "command": "uname -a"})
+        assert not err_exec
+        assert len(res_exec) > 0
 
-        # 5. knot_memory_palace_map
-        res_map, err_map = call_tool("knot_memory_palace_map", {})
-        assert not err_map
-        assert "Knot Swarm Cognitive Memory Palace" in res_map
-
-        # 6. knot_memory_promote
-        lines = [line for line in res_recall.split("\n") if "💡 [" in line]
-        mem_id = lines[0].split("[")[1].split("]")[0]
-        res_prom, err_prom = call_tool("knot_memory_promote", {"memory_id": mem_id, "boost": 1.0, "to_shared": True})
-        assert not err_prom
-        assert "Successfully promoted" in res_prom
 

@@ -420,6 +420,10 @@ antigravity_swarm_status() {
             local dur
             dur="$(echo "$test_out" | grep -o '"duration_seconds":[0-9.]*' | cut -d: -f2 | awk '{printf "%.2fs", $1}')"
             if [ -n "$dur" ]; then latency="$dur"; fi
+          elif echo "$test_out" | grep -qiE 'RESOURCE_EXHAUSTED|"error_code":[[:space:]]*429|code[[:space:]]*429|quota[[:space:]]*exhausted|rate[[:space:]]*limit'; then
+            auth_status="${C_YELLOW}QUOTA EXHAUSTED (429)${C_RESET}"
+          elif [ $rc -eq 124 ]; then
+            auth_status="${C_YELLOW}PROBE TIMED OUT${C_RESET}"
           else
             auth_status="${C_RED}NOT LOGGED IN${C_RESET}"
           fi
@@ -448,6 +452,8 @@ antigravity_swarm_status() {
       else
         if [ $rc -eq 124 ]; then
           auth_status="${C_YELLOW}KEYRING LOCKED / TIMED OUT${C_RESET}"
+        elif echo "$remote_probe" | grep -qiE 'RESOURCE_EXHAUSTED|"error_code":[[:space:]]*429|code[[:space:]]*429|quota[[:space:]]*exhausted|rate[[:space:]]*limit'; then
+          auth_status="${C_YELLOW}QUOTA EXHAUSTED (429)${C_RESET}"
         elif echo "$remote_probe" | grep -q "command not found"; then
           ver="${C_RED}NOT INSTALLED${C_RESET}"
           auth_status="${C_RED}UNAVAILABLE${C_RESET}"

@@ -1,6 +1,6 @@
 # Knot Mesh Living Roadmap (Resolution Gradient)
 
-> **Governing Standard**: PSL Monorepo Engineering Guidelines (`purrfectsoft/sunshine-physio-webapp`)  
+> **Governing Standard**: PSL Gold Standard Engineering Guidelines ([AGENTS.md](../AGENTS.md))  
 > **Topology**: 4-Node Physical Mesh (`desktop`, `laptop`, `rog-ally`, `steamdeck`)  
 > **Current Version**: v1.0.0-rc5  
 
@@ -19,37 +19,50 @@ The roadmap is structured across three distinct horizons of fidelity:
 
 | Issue | Workstream / Deliverable | Assignee Node | Status | Acceptance Verification |
 | :--- | :--- | :--- | :---: | :--- |
-| **#54** | **Node ID vs Hostname Semantics**<br>• Standardize canonical `node_id` across manifests, Hub DB, CLI.<br>• Dynamic user home resolution across multi-user environments.<br>• Preserved `KNOT_NODE_ID` in all remote subshells. | `desktop` (Lead)<br>`rog-ally` (Peer) | **In Progress** | `knot status`, `knot quota`, `knot exec` across all 4 nodes without error. Dedicated `tests/test_node_id_semantics.sh`. |
-| **#43** | **Swarm Project Management & Worktrees**<br>• Cockpit project creation modal contract (`project_created` SSE).<br>• Automated `git worktree add` provisioning across mesh nodes.<br>• Cross-node spec sync with home path translation.<br>• LHAA SQLite WAL per-conversation logging. | `desktop` (Lead)<br>`rog-ally` (Peer) | **In Progress** | Isolated worktree creation across 3 nodes; concurrent agent execution test. |
-| **#41** | **Decentralized Memory Palace & Lean MCP Gateway**<br>• Local embedded SQLite with `cr-sqlite` CRDT schema.<br>• In-process `sqlite-vec` semantic indexing.<br>• Dual-pool memory architecture (node scratch vs swarm shared).<br>• Pruned MCP gateway to 4 essential mesh tools (`knot_node_status`, `knot_quota_matrix`, `knot_exec_command`, `knot_swarm_topology`).<br>• Hardware node-role system prompt profiles. | `laptop` (Lead)<br>`desktop` (Peer) | **In Progress** | Offline vector recall test, CRDT delta merge validation, lean MCP gateway execution. |
-| **#42** | **Knot Kommand Kafe (Tauri v2 & Handheld Mode)**<br>• `src-tauri/` container shell (<50MB RAM footprint).<br>• Blackboard Kanban task board with token telemetry.<br>• Gamepad navigation & 7" 1280x800 responsive layout. | `steamdeck` (Lead)<br>`desktop` (Peer) | **In Progress** | Tauri cargo check / build verification, UI test on Steam Deck Wayland session. |
-| **#55** | **Swarm Council Harness Hardening**<br>• `knot council steer --wait-ack` handshake.<br>• `knot council challenge generate / verify` CLI.<br>• Mesh context subshell exports (`KNOT_HUB_URL`, `KNOT_NODE_ID`).<br>• `knot council db inspect / tail` subcommands. | `desktop` (Lead)<br>`laptop` (Peer) | **In Progress** | 100% automated test in `tests/test_swarm_council.sh`. |
+| **#54** | **Node ID vs Hostname Semantics**<br>• Standardized canonical `node_id` across manifests, Hub DB, CLI.<br>• Dynamic user home resolution across multi-user environments.<br>• Preserved `KNOT_NODE_ID` in all remote subshells. | `desktop` (Lead)<br>`rog-ally` (Peer) | **COMPLETED** | Verified across all nodes via `tests/test_node_id_semantics.sh`. Zero exit-code masking. |
+| **#43** | **Swarm Project Management & Worktrees**<br>• Cockpit project creation modal contract (`project_created` SSE).<br>• Automated `git worktree add` provisioning across mesh nodes.<br>• Cross-node spec sync with home path translation.<br>• LHAA SQLite WAL per-conversation logging. | `desktop` (Lead)<br>`rog-ally` (Peer) | **COMPLETED** | Verified via `tests/test_swarm_sync.sh` and worktree isolation suites. |
+| **#41** | **Decentralized Memory Palace & Lean MCP Gateway**<br>• Local embedded SQLite with CRDT Hybrid Logical Clock schema.<br>• In-process vector cosine similarity indexing.<br>• Dual-pool memory architecture (node scratch vs swarm shared).<br>• Pruned MCP gateway to 4 canonical mesh tools (`knot_node_status`, `knot_quota_matrix`, `knot_exec_command`, `knot_swarm_topology`).<br>• Hardware node-role system prompt profiles. | `laptop` (Lead)<br>`desktop` (Peer) | **COMPLETED** | Verified via `tests/test_memory_palace.py` (20/20 tests passed). |
+| **#55** | **Swarm Council Harness Hardening**<br>• `knot council steer` remote socket injection.<br>• Out-of-band collaboration via GitHub Discussions and Mesh DB.<br>• Scale-aware Kitty Confluence cockpit with zero-token start (<1s).<br>• Antigravity `PreInvocation` hook (`council_hook.py`) with Turn 1 scoping. | `desktop` (Lead)<br>`laptop` (Peer) | **COMPLETED** | Verified via `tests/test_swarm_council.sh` and `test_council_steer.sh`. |
+| **PSL** | **PSL Rule 1 & Rule 2 Enforcement**<br>• Zero error swallowing across production code and test suites.<br>• Purged all `2>/dev/null`, `&>/dev/null`, `|| true`, and `|| :`.<br>• Universal PSL integrity suite with 5 automated audits. | `desktop` (Lead)<br>`laptop` (Peer) | **COMPLETED** | Verified via `tests/test_psl_integrity.sh` (0 defects found). |
 
 ---
 
 ## 3. Horizon 2 (Intermediate: Medium Resolution) — Platform Maturation & Contracts
 
-* **Streamlined Agent-to-Agent (A2A) Tool Protocol**:
-  - Reintroduce structured multi-agent collaboration and blackboard coordination tools over a consolidated, lean A2A protocol.
-* **Single-Device Multi-Monitor Wayland Layout Handling**:
-  - Abstract display geometry management away from node-specific hardware quirks (e.g. handheld consoles with secondary external displays) into a dynamic, capability-based Wayland layout engine.
-* **PSL Rule 1 Compliance (Zero Error Swallowing)**:
-  - System-wide purge of `2>/dev/null`, `|| true`, `|| :`, and blind redirects in `bin/` and `core/`.
-  - Enforced `set -euo pipefail` across all script entry points.
-* **Packaging & Distribution**:
-  - Clean Arch Linux `PKGBUILD` packaging without hardcoded machine paths.
-  - Portable single-command installer (`install.sh`) supporting immutable SteamOS.
-  - Systemd user service unit definitions with auto-restart and socket activation.
-* **Antigravity `/goal-with-lease` Engine**:
-  - Leased autonomous goal execution loop with milestone boundary triggers and auto-reconciliation.
+* **Knot Kommand Kafe (Tauri v2 / Handheld GUI)**:
+  - Rust Tauri v2 desktop shell with ultra-low memory footprint (<50MB RAM).
+  - Responsive gamepad-friendly and touch-optimized 7" 1280x800 layout for Steam Deck and ROG Ally.
+  - Interactive Blackboard Kanban board, live model quota telemetry, and real-time SSE event streaming.
+  - Native integration with Wayland LayerShell and KDE Plasma 6 desktop notifications.
+
+* **Dynamic Multi-Monitor Wayland Layout Handling**:
+  - Abstract display geometry management away from node-specific hardware quirks into a dynamic, capability-based Wayland layout engine.
+  - Sub-pixel boundary alignment and auto-scaling across mixed DPI monitors (e.g. handheld eDP-1 internal displays with external high-refresh monitors).
+  - Computer vision photo-based layout inference refinement (`knot topology refresh --photo`).
+
+* **Autonomous Execution with `/goal-with-lease` Engine**:
+  - Standardized runtime skill (`runtime/skills/goal-with-lease/`) for autonomous multi-agent task execution.
+  - Linda tuplespace artifact locking (`DRAFTING`, `LOCKED_SURGERY`, `VERIFIED_COMMITTED`).
+  - Distributed heartbeat renewal, lease timeouts, and orphan task auto-recovery without deadlock.
+
+* **Packaging, Distribution & Automated Verification**:
+  - Upstream-ready Arch Linux `PKGBUILD` packaging without hardcoded paths.
+  - Portable curl-pipe installer (`install.sh`) supporting Arch Linux, EndeavourOS, and SteamOS.
+  - Full CI test harness with automated nightly multi-node regression matrix.
 
 ---
 
 ## 4. Horizon 3 (Far Horizon: Low Resolution) — Ecosystem & Grand Rematch
 
-* **The Grand Rematch (Issue #55)**:
-  - 4-node, 10-round (40 volleys) autonomous cryptographic tournament with dynamic difficulty scaling.
-  - Full leaderboard telemetry published to Mesh DB and Git.
-* **Decentralized Federated Agent Mesh**:
-  - Zero-anchor P2P gossip protocol for dynamic anchor elections when `desktop` roams or disconnects.
-  - Hardware-accelerated local SLM fine-tuning across heterogeneous mesh GPUs.
+* **P2P Dynamic Anchor Elections & Consensus**:
+  - Zero-anchor P2P gossip protocol and Raft consensus for dynamic anchor elections when primary desktop disconnects or roams.
+  - Distributed split-brain prevention and quorum-fenced state reconciliation.
+
+* **Cross-Ecosystem Connectors & Multi-Platform Clients**:
+  - Universal MCP bridges to external multi-agent ecosystems (Claude Desktop, OpenHands, AutoGen).
+  - Handheld and mobile companion extensions utilizing KDE Connect secure transport.
+  - Heterogeneous GPU compute sharing for local quantized SLM inference.
+
+* **The Grand Rematch**:
+  - 4-node autonomous cryptographic council tournament with dynamic difficulty scaling.
+  - Full leaderboard telemetry published to Mesh DB and decentralized memory palace.

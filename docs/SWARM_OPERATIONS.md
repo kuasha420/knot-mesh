@@ -49,7 +49,7 @@ HUB_PORT=4242
 # Physical Network Fence
 GATEWAY_MACS="40:3f:8c:b3:6f:3c 00:11:22:33:44:55"
 SSID="Studio-Mesh-5G"
-SUBNET="192.168.68.0/24"
+SUBNET="192.168.1.0/24"
 
 # Policy Gates
 ALLOW_NOPASSWD_SUDO="true"
@@ -58,7 +58,7 @@ ALLOW_DESKFLOW_KVM="true"
 
 ### Key Parameters:
 - `GATEWAY_MACS`: Space-separated list of hardware MAC addresses for your network router/gateway. Knot matches ARP tables against this list to prevent spoofing.
-- `SUBNET`: Network CIDR block (e.g. `192.168.68.0/24`). Connections originating outside this block are denied by PAM gates and UFW rules.
+- `SUBNET`: Network CIDR block (e.g. `192.168.1.0/24`). Connections originating outside this block are denied by PAM gates and UFW rules.
 - `ALLOW_NOPASSWD_SUDO`: If `"true"`, passwordless `sudo` is dynamically enabled when the device is physically located inside this swarm fence.
 
 ---
@@ -138,19 +138,19 @@ If any condition fails, standard password authentication is enforced.
 Knot integrates natively with Google Antigravity (AGY) to enable distributed multi-agent pair programming and headless task dispatch across all swarm nodes.
 
 ### 1. Unified MCP Gateway
-- All nodes run `core/mcp/gateway.py` via `~/.gemini/config/mcp_config.json`.
-- Tools include:
-  - `knot_task_post`: Post background tasks to remote nodes.
-  - `knot_task_wait`: Await completion of distributed tasks.
-  - `knot_gpu_status`: Monitor remote NVIDIA / AMD VRAM and utilization.
-  - `knot_memory_store` / `knot_memory_recall`: Distributed Memory Palace.
+- All nodes expose `core/mcp/gateway.py` via `~/.gemini/config/mcp_config.json` or native Antigravity MCP integration.
+- The 4 canonical mesh tools include:
+  - `knot_node_status`: Check mesh health, active nodes, hardware architecture, and capabilities across the swarm.
+  - `knot_quota_matrix`: Render the real-time 5-hour and weekly Google AI Pro/Ultra model quota consumption matrix.
+  - `knot_exec_command`: Execute bash commands across nodes (`desktop`, `laptop`, `steamdeck`, or `--all`) via fast SSH transport with 0 prompt tokens consumed.
+  - `knot_swarm_topology`: Consolidated snapshot of online nodes, IPs, assigned LLM models, GPU backends, active tasks, and quota status.
 
-### 2. Pre-Approved Operational Skills
-All nodes share standardized skill bundles in `~/.gemini/antigravity/skills/`:
-- `knot-swarm`: Multi-node health, synchronization, and telemetry.
-- `core-mesh`: Spatial topology, KVM boundaries, and Deskflow configuration.
-- `remote-control`: Secure execution and power management.
-- `vision`: Automated camera-based desk topology detection.
+### 2. Maintained Operational Skills (`runtime/skills/`)
+Mesh nodes maintain standardized open-spec skill bundles in `runtime/skills/`:
+- `knot-swarm`: Fleet-wide agent discovery, quota tracking, and task dispatch.
+- `hardware-profiles`: Node-specific architecture, accelerator capabilities (CUDA, ROCm, UMA), and role definitions.
+- `swarm-council`: Confluence cockpit coordination, multi-agent steering, and discussion thread reconciliations.
+- `goal-with-lease`: Autonomous goal execution with Linda tuplespace artifact locking and distributed heartbeats.
 
 ### 3. Swarm Telemetry & Testing
 To verify Antigravity agent connectivity across the mesh:
@@ -190,18 +190,20 @@ Execute commands concurrently across all active nodes:
 # Check kernel versions across the entire fleet
 knot exec --all "uname -r"
 
-# Check GPU temperatures
-knot exec --all "nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader 2>/dev/null || sensors | grep -i edge"
+# Check GPU temperatures without error swallowing
+knot exec --all "if command -v nvidia-smi >/dev/null; then nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader; elif command -v sensors >/dev/null; then sensors | grep -i edge; fi"
 ```
 
 ---
 
 ## Power & Sleep Coordination
 
-### 1. Headless Autounlock & Session Resumption
-When you unlock the Anchor workstation (via password or fingerprint):
-- `knot-autounlock.service` broadcasts an unlock signal over mDNS/Hub.
-- Strands at the login screen automatically unlock their Wayland graphical sessions via `plasma-login-manager`.
+### 1. Advisory Autologin & DPMS Session Resumption
+Knot Mesh enforces an **advisory, non-destructive autologin architecture**:
+- When the Anchor workstation is unlocked, `knot-autounlock.service` notifies Strand nodes.
+- If a docked Strand is sitting at the login manager greeter with zero active user sessions, it advisory resumes the user desktop session via `plasma-login-manager` or configured display manager.
+- If a Strand session is already active but screens are asleep, DPMS autounlock sends user activity simulations via DBus (`qdbus6 org.freedesktop.ScreenSaver /ScreenSaver SimulateUserActivity`) and unlocks via `loginctl unlock-session`.
+- Running applications and processes are **never killed or forcefully restarted**.
 
 ### 2. Fleet Power Management
 Schedule coordinated reboots or power-offs:
@@ -213,3 +215,4 @@ knot shutdown --all poweroff --delay +15 --wall "System maintenance in 15m"
 # Cancel pending scheduled shutdown
 knot shutdown cancel
 ```
+

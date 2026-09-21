@@ -1,6 +1,7 @@
 # Knot Mesh — Architectural Specification & Design
 
-> **Production-grade distributed workspace mesh for Arch Linux / KDE Plasma 6 Wayland.**
+> **Production-grade distributed workspace mesh for Arch Linux / KDE Plasma 6 Wayland.**  
+> Version: `v1.0.0-rc5`
 
 ---
 
@@ -10,27 +11,13 @@
 2. **Mutually Exclusive Active Swarms**: A roaming node belongs to at most one active swarm at any moment (`home`, `office`, `campus`). On unrecognized or public networks, nodes seamlessly transition to **Graceful Standalone Mode**.
 3. **Defense-in-Depth Dynamic PAM Gating**: Sudo permissions and KVM cursor crossovers are dynamically verified in real time at execution time rather than permanently granted in `/etc/sudoers`.
 4. **Cryptographic Pinned Enrollment**: Node onboarding uses ephemeral cryptographic OTPs coupled with SHA-256 TLS certificate fingerprint pinning, completely eliminating MITM vulnerabilities without external CA infrastructure.
-5. **Zero Error Swallowing**: In accordance with system reliability standards, all scripts strictly forbid `2>/dev/null`, `|| true`, and `|| :`. Every exit code is checked, errors are logged, and fallbacks are explicit.
+5. **Zero Error Swallowing (PSL Gold Standard)**: In accordance with system reliability standards, all scripts strictly forbid `2>/dev/null`, `&>/dev/null`, `> /dev/null 2>&1`, `|| true`, and `|| :`. Every exit code is checked, errors are logged transparently to stderr, and fallbacks are explicit.
 
 ---
 
 ## 2. Two-Tier Mesh Hierarchy & Architecture
 
 Knot Mesh is partitioned into two cleanly decoupled architectural planes:
-
-### Tier 1: Device-to-Device (D2D) Physical Workspace Fabric
-The foundational infrastructure layer managing physical machines, hardware network boundaries, displays, and KVM virtualization:
-- **Hardware Network Fencing (`knot-guard`)**: Gateway MAC and BSSID discovery pinning active swarm profiles to physical locations.
-- **Wayland-Native Spatial KVM (`knot-deskflow`)**: Sub-pixel cursor crossovers, dynamic spatial topology compilation, and InputCapture persistence across Wayland compositors.
-- **Dynamic PAM Gating (`knot-auth-check`)**: Mathematical CIDR subnet validation for ephemeral passwordless sudo execution.
-- **Display Management & Auto-Unlock (`knot-autounlock`)**: Unlocking and waking Wayland/KDE display sessions on cursor entry.
-
-### Tier 2: Agent-to-Agent (A2A) Cognitive Swarm Layer
-The autonomous multi-agent intelligence layer orchestrating distributed AI agent instances across the mesh:
-- **Swarm Council Plane (`knot council`)**: Out-of-band collaborative deliberation across autonomous CLI agents with zero startup token overhead and topological Kitty confluence multiplexing.
-- **Linda Tuplespace & Blackboard Hub (`knot-hub`, `knot-agent`)**: Distributed state synchronization, leasing, and task coordination.
-- **Decentralized Memory Palace (`core/memory/`)**: Vault and working memory sharing across node agents.
-- **Antigravity CLI Orchestrator (`core/modules/antigravity.sh`)**: Headless agy CLI discovery, session execution slices, and Google OAuth credential syncing.
 
 ```
                                   ┌─────────────────────────────────────────┐
@@ -55,8 +42,41 @@ The autonomous multi-agent intelligence layer orchestrating distributed AI agent
 └─────────────────────────────────────────┘                     └─────────────────────────────────────────┘
 ```
 
-### Node Roles
+### Tier 1: Device-to-Device (D2D) Physical Workspace Fabric
+The foundational infrastructure layer managing physical machines, hardware network boundaries, displays, and KVM virtualization:
+- **Hardware Network Fencing (`knot-guard`)**: Gateway MAC and BSSID discovery pinning active swarm profiles to physical locations.
+- **Wayland-Native Spatial KVM (`knot-deskflow`)**: Sub-pixel cursor crossovers, dynamic spatial topology compilation, and InputCapture persistence across Wayland compositors.
+- **C InputCapture Shim (`libinputcapture-persist.so`)**: Persistent portal session re-binding preventing barrier grab loss across DPMS cycles.
+- **Dynamic PAM Gating (`knot-auth-check`)**: Mathematical CIDR subnet validation for ephemeral passwordless sudo execution.
+- **Display Management & Auto-Unlock (`knot-autounlock`)**: Unlocking and waking Wayland/KDE display sessions on cursor entry.
+- **3-Tier Mesh Network Resolver (`core/resolver.sh`)**: Dynamic resolution hierarchy traversing WireGuard $\to$ mDNS $\to$ LAN physical fallback.
 
+### Tier 2: Agent-to-Agent (A2A) Cognitive Swarm Layer
+The autonomous multi-agent intelligence layer orchestrating distributed AI agent instances across the mesh:
+- **Swarm Council Plane (`knot council`)**: Out-of-band collaborative deliberation across autonomous CLI agents with zero startup token overhead and topological Kitty confluence multiplexing.
+- **Linda Tuplespace & Blackboard Hub (`knot-hub`, `knot-agent`)**: Distributed state synchronization, atomic task leasing, and coordination.
+- **Decentralized Memory Palace (`core/memory/`)**: In-process SQLite WAL storage with vector cosine similarity and CRDT Hybrid Logical Clocks.
+- **Lean Stateless MCP Gateway (`core/mcp/gateway.py`)**: Zero-dependency stdio Model Context Protocol server exposing the 4 canonical mesh tools.
+- **Antigravity CLI Orchestrator (`core/modules/antigravity.sh`)**: Headless agy CLI discovery, session execution slices, and quota tracking.
+
+### 2.1 Strict Domain Separation Contract (Tier 1 vs Tier 2)
+
+To maintain system stability, security, and predictability, Tier 1 and Tier 2 adhere to a strict architectural firewall:
+
+| Dimensional Aspect | Tier 1 (D2D Physical Workspace Fabric) | Tier 2 (A2A Cognitive Swarm Layer) |
+| :--- | :--- | :--- |
+| **Primary Domain** | Display compositors, Wayland input, hardware networking, PAM sudo, system power. | Autonomous multi-agent coordination, memory recall, LLM task fanout. |
+| **Authority Level** | System root / user desktop session privileges (`systemd`, `loginctl`, `pam`). | Application-level non-root processes (`agy`, `python3`, `knot council`). |
+| **State Persistence** | `/etc/knot/`, `/run/knot/` runtime locks, NetworkManager dispatchers. | `~/.config/knot/council.db`, `~/.config/knot/memory/`, Blackboard Hub memory. |
+| **Failure Domain** | Physical network disruption, DPMS sleep, Wayland portal restarts. | LLM quota exhaustion, agent task crashes, reasoning loops. |
+| **Isolation Contract** | Completely oblivious to agent deliberation and cognitive states. | Accesses Tier 1 strictly via typed CLI commands (`bin/knot`) or TLS REST API (`:4242`). |
+
+**Failure Containment Guarantees**:
+1. **Cognitive Fault Isolation**: An A2A failure (e.g. LLM rate limiting, agent crash, out-of-quota exception) **never** degrades physical workspace functions (cursor routing, display auto-unlock, or network fencing continue uninterrupted).
+2. **Physical Lockdown Isolation**: When Tier 1 transitions to Standalone Lockdown on public Wi-Fi, Tier 2 agents are immediately constrained to local memory pools and prevented from making unauthorized cross-node RPC calls without corrupting tuplespace state.
+3. **Zero Privilege Escalation**: Tier 2 agents cannot directly mutate PAM configurations, bypass CIDR gates, or disable network guards.
+
+### Node Roles
 - **Anchor Workstation**: High-performance primary system (e.g. multi-monitor desktop). Runs `knot-hub.service`, manages swarm state, coordinates pairing rendezvous, and runs the Deskflow KVM server.
 - **Strand (Client)**: Portable or auxiliary interactive machine (laptop, Steam Deck / handheld PC). Runs dynamic client runner `knot-deskflow-client` and `knot-guard.service`.
 - **Headless Compute Node**: Server or headless workstation without physical monitors. Participates in SSH routing, task distribution, and sudo access without being included in the KVM screen layout.
@@ -117,12 +137,82 @@ Deskflow server configuration (`deskflow-server.conf`) is compiled dynamically f
 - **Headless Node Isolation**: Nodes with `role == "headless"` or missing display outputs are automatically excluded from the screen graph.
 - **Host Cursor Confinement (Locked Mode)**: When KVM lock is engaged (`ScrollLock` or Global Shortcut), outbound links from the Anchor are omitted, strictly locking mouse cursor to the physical workstation.
 
-### InputCapture Persistence Shim
-KDE Plasma 6 Wayland relies on the `org.freedesktop.portal.RemoteDesktop` and `InputCapture` interfaces. A custom C preload shim (`libinputcapture-persist.so`) ensures that Wayland pointer barrier grabs survive dynamic portal re-initialization and DPMS display power-cycles.
+### C InputCapture Persistence Shim (`core/shim/input_capture_shim.c`)
+KDE Plasma 6 Wayland enforces strict security around cursor capture using `org.freedesktop.portal.RemoteDesktop` and `org.freedesktop.portal.InputCapture`. In stock implementations, Wayland pointer barriers are dropped when monitors enter DPMS standby or when portal interfaces cycle.
+
+The Knot C preload shim (`libinputcapture-persist.so`) solves this at the library level:
+1. **Dynamic Interception**: Intercepts `xdp_portal_create_input_capture_session` and `xdp_portal_create_input_capture_session_finish` via `dlopen`/`dlsym`.
+2. **Persistent Session Restore Token**: Automatically extracts the session restore token and persists it to `~/.local/share/Deskflow/input_capture_restore_token`.
+3. **Barrier Persistence**: Intercepts barrier registration calls (`xdp_input_capture_session_set_pointer_barriers`), recording active screen geometry and edge bounds.
+4. **Transparent Reconnection**: On DPMS wake or portal reinitialization, the shim passes the saved restore token, immediately re-arming input capture barriers without user interaction or dialog prompts.
 
 ---
 
-## 6. Dynamic PAM Sudo Gate (`knot-auth-check`)
+## 6. 3-Tier Dynamic Network Resolution Hierarchy (`core/resolver.sh`)
+
+Mesh nodes must communicate reliably despite DHCP lease shifts, roaming between Wi-Fi and Ethernet, and mixed subnet topologies. `core/resolver.sh` implements an algorithmic 3-tier resolution sequence:
+
+```
+[Target: node_id] ──► [Tier 0: Lease Cache & Localhost] ──(Valid & Alive?)──► RESOLVED
+                                  │ No
+                                  ▼
+                      [Tier 1: mDNS / Zeroconf] ───────(Valid & Alive?)──► RESOLVED
+                                  │ No
+                                  ▼
+                      [Tier 2: Declarative IP Hint] ───(Valid & Alive?)──► RESOLVED
+                                  │ No
+                                  ▼
+                      [Tier 3: Hardware MAC ARP Scan] ─(Valid & Alive?)──► RESOLVED
+                                  │ No
+                                  ▼
+                      [WireGuard Mesh Overlay] ────────(Valid & Alive?)──► RESOLVED
+                                  │ No
+                                  ▼
+                             FAILED (Exit 1)
+```
+
+### Resolution Tiers
+1. **Tier 0: Lease Cache & Loopback**: Checks `~/.cache/knot/leases/${SWARM}_${NODE}`. If the cached IP responds to health checks, it returns instantly (< 5ms). If resolving the local node identity, returns `127.0.0.1`.
+2. **Tier 1: mDNS / Zeroconf**: Probes `<hostname>.local` via `getent ahostsv4` or `avahi-resolve -n`. Ideal for zero-configuration L2 local networks.
+3. **Tier 2: Declarative IP Hint**: Inspects the node manifest (`~/.config/knot/swarms/<swarm>/nodes/<node>.json`) for statically declared `ip_hint`.
+4. **Tier 3: Hardware MAC ARP Scan**: Extracts hardware MAC addresses from the node manifest, scans the kernel ARP neighbor table (`ip neigh`), and falls back to a parallel non-blocking subnet ICMP ping sweep (`nmap -sn` or parallel background ping probes).
+5. **WireGuard Mesh Overlay**: Traverses point-to-point encrypted tunnels (`wg0`, `10.42.0.0/24`), enabling seamless cross-subnet and roaming reachability.
+
+### Health and Port Probing
+Before returning an IP address, `resolver.sh` validates that the host is alive using `is_host_alive`:
+- Target port probe (`nc -z`, `socat`, or `/dev/tcp` socket probe).
+- Mesh service probes (Deskflow port `24800`, Knot Hub port `4242`).
+- ICMP echo fallback.
+- In `--proxy` mode (used by `knot exec` and SSH ProxyCommand), the target SSH port (`22`) is strictly enforced.
+
+---
+
+## 7. Ephemeral Advisory Autologin & DPMS Autounlock Flows
+
+Knot Mesh eliminates physical workstation friction through coordinated display power and session management while maintaining non-destructive safety guarantees:
+
+### Advisory vs Destructive Philosophy
+Legacy autologin approaches forcefully terminate display managers or kill active sessions, causing lost work and broken applications. Knot Mesh employs an **advisory, non-destructive architecture**:
+- Active graphical sessions are **never killed or forcefully restarted**.
+- Autologin applies strictly when a machine has booted to a login manager greeter with zero active user sessions.
+- Authentication state is verified against Anchor lock status and KDE Connect pairing before advisory login triggers.
+
+### DPMS Auto-Unlock Flow (`core/modules/autounlock.sh`)
+When cursor movement crosses into a Strand monitor or when `knot screen unlock` is executed:
+1. **Session Identification**: Queries `loginctl list-sessions` to locate the active `seat0` Wayland/X11 session.
+2. **Unlock Signal**: Issues `loginctl unlock-session <session_id>` to dismiss the KDE screenlocker.
+3. **Display Wake (DPMS)**: Dispatches `org.freedesktop.ScreenSaver.SimulateUserActivity` via DBus (`qdbus6` or `qdbus`), waking displays from DPMS power-saving standby and resetting desktop idle timers.
+
+### Ephemeral Strand Autologin Flow (`core/modules/autologin.sh`)
+When a docked Strand boots up:
+1. **Anchor Lock Probe**: Strand queries the Anchor workstation over authenticated SSH (`knot screen status-raw`).
+2. **Precondition Validation**: Autologin activates **only** if the Anchor is online and its desktop session is currently `UNLOCKED`.
+3. **Session Resumption**: Initiates user session startup via `plasma-login-manager` or configured display manager.
+4. **Keyring & Wallet Integration**: Guides PAM unlock for KWallet without hardcoding plaintext passwords into scripts.
+
+---
+
+## 8. Dynamic PAM Sudo Gate (`knot-auth-check`)
 
 Passwordless sudo execution is guarded dynamically via PAM execution check:
 1. Verifies that the host is operating within an authorized active swarm profile (`ALLOW_NOPASSWD_SUDO="true"`).
@@ -133,7 +223,7 @@ Passwordless sudo execution is guarded dynamically via PAM execution check:
 
 ---
 
-## 7. Web Cockpit & Reactive EventBus
+## 9. Web Cockpit & Reactive EventBus
 
 - **Single-Page Application**: Built with React 19, TypeScript, and Tailwind CSS.
 - **SSE Event Streaming**: Consumes continuous server-sent events from Knot Hub (`/events`) for node status, task DAG orchestrations, GPU telemetry, and artifact leases.
@@ -141,7 +231,7 @@ Passwordless sudo execution is guarded dynamically via PAM execution check:
 
 ---
 
-## 8. Out-of-Band Multi-Agent Swarm Council Architecture
+## 10. Out-of-Band Multi-Agent Swarm Council Architecture
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────────────┐
@@ -203,27 +293,47 @@ Swarm Council operates independently of Knot's Blackboard Hub and Linda Tuplespa
   - Gated by `invocationNum == 1`. Injects the full node persona, peer roster, and coordination CLI commands strictly on Turn 1 of each steered node.
   - On subsequent turns (`invocationNum > 1`), returns `{"injectSteps": []}`, eliminating repetitive prompt token waste.
 
-### Cockpit Tiling Engine & Display Scaling
-- **Topological Tiling Layouts**: Confluence mode configures Kitty with scale-aware layouts (`grid`, `sidebyside`, `splits`, `tall`, `fat`, `stacked`).
-- **Dynamic Scale Detection**: Queries Wayland / KDE Plasma display scaling (`kscreen-doctor -o`, `QT_SCALE_FACTOR`, `GDK_SCALE`) and dynamically calculates optimal cockpit typography (8.0pt to 12.0pt).
-- **Session Resumption**: `knot council resume [run_id]` re-opens the cockpit and re-attaches all panes using `agy -c` with zero prompt overhead.
+---
+
+## 11. Linda Tuplespace Blackboard Lifecycle & Decentralized CRDT Memory Palace
+
+### Linda Tuplespace Blackboard Hub (`core/hub/hub.py`, `core/hub/agent.py`)
+Coordination across headless nodes is mediated by an in-memory Linda tuplespace blackboard hosted by Knot Hub:
+- **Tuple Primitives**:
+  - `out(tuple)`: Posts a task, state fact, or artifact metadata to the space.
+  - `in(pattern, lease_timeout)`: Atomically claims a task matching pattern, locking it with a heartbeated lease.
+  - `rd(pattern)`: Non-destructive pattern matching inspection of active tuples.
+  - `eval(task)`: Asynchronously schedules background execution on a selected worker node.
+- **Lease Heartbeats & Orphan Recovery**: When an agent claims a task, it acquires a renewable lease (default: 60s). The agent emits periodic heartbeats via `knot-agent`. If a node crashes, loses power, or disconnects, the lease expires and Knot Hub automatically transitions the task back to `PENDING`, allowing another peer to resume work without deadlocks.
+
+### Decentralized CRDT Memory Palace (`core/memory/palace.py`)
+Agent memory and workspace context are stored across nodes without reliance on centralized cloud vector databases:
+- **Dual-Pool Architecture**:
+  - `local`: Private scratch memory specific to the node (temporary compile caches, local hardware metrics).
+  - `shared`: Swarm-wide knowledge pool synchronized across all nodes.
+- **Hybrid Logical Clocks (HLC)**: Every memory mutation is stamped with an HLC combining physical epoch time with a monotonically increasing logical counter, resolving conflicts deterministically across disconnected nodes.
+- **In-Process Vector Search**: Generates embedding vectors directly in Python standard library (`struct`, `math`), executing fast cosine similarity searches without needing external heavyweight vector daemon processes.
+- **Hierarchical Taxonomy**: Knowledge is indexed into a spatial memory model:
+  $$\text{Wing} \longrightarrow \text{Hall} \longrightarrow \text{Drawer} \longrightarrow \text{Memory Title}$$
 
 ---
 
-## 9. Runtime Skills Architecture (`runtime/skills/`)
+## 12. Runtime Skills Architecture (`runtime/skills/`)
 
 Autonomous agent capabilities are fully decoupled from core bash orchestrators and relocated to the standardized `runtime/skills/` directory adhering to the open Agent Skills specification:
 
 - **Directory Structure**:
-  - `runtime/skills/goal-with-lease/`: Autonomous goal execution with Linda tuplespace artifact locking and distributed heartbeats.
+  - `runtime/skills/knot-swarm/`: Fleet-wide agent discovery, quota tracking, and task dispatch.
+  - `runtime/skills/hardware-profiles/`: Node-specific architecture, accelerator capabilities (CUDA, ROCm, UMA), and role definitions.
   - `runtime/skills/swarm-council/`: Confluence cockpit coordination, multi-agent steering, and discussion thread reconciliations.
+  - `runtime/skills/goal-with-lease/`: Autonomous goal execution with Linda tuplespace artifact locking and distributed heartbeats.
 - **Skill Specification Format**:
   - Each skill directory is anchored by `SKILL.md`, documenting instructions, input schemas, environmental prerequisites, and operational contracts.
   - Skills interact with the underlying mesh strictly via clean CLI entrypoints (`knot`, `knot council`) or REST APIs, preserving strict tier decoupling between A2A cognitive processes and D2D system plumbing.
 
 ---
 
-## 10. PSL Gold Standard Error Transparency Contracts
+## 13. PSL Gold Standard Error Transparency Contracts & CI Verification
 
 System reliability and observability across Knot Mesh are governed by the Product Systems Language (PSL) Gold Standard:
 
@@ -234,6 +344,11 @@ System reliability and observability across Knot Mesh are governed by the Produc
 - **POSIX-Standard Command Probing**: Command and utility detection uses standard `command -v <cmd> >/dev/null` without stderr redirection.
 - **Systemd Service Inspection**: Service states are probed using native systemd quiet flags (`systemctl --user is-active --quiet <unit>`, `systemctl is-enabled --quiet <unit>`).
 - **DBus & Subprocess Diagnostics**: Status codes and stderr outputs from DBus calls (`busctl`, `qdbus`) and subprocesses are explicitly inspected, with non-zero exits logged transparently to stderr via `knot_log_warn` or `knot_log_err`.
-- **Automated Continuous Enforcement**: `tests/test_psl_integrity.sh` provides automated CI validation across all 5 PSL audits (Pattern Scanning, Shell Hygiene, Syntax, Python Integrity, and Executable Permissions).
 
-
+### Universal Integrity Suite (`tests/test_psl_integrity.sh`)
+Automated CI validation executes across 5 exhaustive audits:
+1. **Audit 1: Forbidden Pattern Scan**: Recursively inspects all `.sh`, `.py`, and binary scripts for error-swallowing regex patterns.
+2. **Audit 2: Shell Hygiene**: Verifies that every shell script declares `set -euo pipefail`.
+3. **Audit 3: Shell Syntax Validation**: Executes `bash -n` across 100% of shell scripts to detect syntax anomalies.
+4. **Audit 4: Python Syntax & Exception Hygiene**: Compiles AST trees for all Python modules, ensuring zero bare `except:` or swallowed exception patterns.
+5. **Audit 5: Executable Permissions**: Enforces `+x` executable bits across all `bin/*` binaries and `tests/*.sh` test runners.

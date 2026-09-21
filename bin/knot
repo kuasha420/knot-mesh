@@ -425,7 +425,7 @@ cmd_exec() {
 
       local target_hub_url
       if [ "$id" = "$my_node_id" ] || [ "$host" = "$my_host" ]; then
-        target_hub_url="${KNOT_HUB_URL:-$(hub_resolve_url 2>&1 || echo "https://127.0.0.1:${hub_port}")}"
+        target_hub_url="${KNOT_HUB_URL:-$(hub_resolve_url || echo "https://127.0.0.1:${hub_port}")}"
       else
         target_hub_url="${KNOT_HUB_URL:-https://${anchor_host}:${hub_port}}"
       fi
@@ -472,7 +472,7 @@ cmd_exec() {
 
     local target_hub_url
     if [ "$is_local" -eq 1 ]; then
-      target_hub_url="${KNOT_HUB_URL:-$(hub_resolve_url 2>&1 || echo "https://127.0.0.1:${hub_port}")}"
+      target_hub_url="${KNOT_HUB_URL:-$(hub_resolve_url || echo "https://127.0.0.1:${hub_port}")}"
     else
       target_hub_url="${KNOT_HUB_URL:-https://${anchor_host}:${hub_port}}"
     fi

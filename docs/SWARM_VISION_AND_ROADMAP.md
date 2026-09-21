@@ -146,22 +146,22 @@ By splitting the system into a core daemon (**`knot-hub`**) and client applicati
 
 ## 🗺 Phased Evolutionary Roadmap
 
-### Phase 0: Ground-Truth Investigation & Artifact Lock-in (Current)
+### Phase 0: Ground-Truth Investigation & Artifact Lock-in (Completed)
 - [x] Lock in architecture vision in `docs/SWARM_VISION_AND_ROADMAP.md` and commit across mesh.
-- [ ] Audit `agy` CLI installation, versioning, pathing, and headless capabilities across nodes.
-- [ ] Audit authentication mechanisms, token storage, and subscription session verification.
-- [ ] Design onboarding workflow and health check probes for Antigravity on all nodes.
+- [x] Audit `agy` CLI installation, versioning, pathing, and headless capabilities across nodes.
+- [x] Audit authentication mechanisms, token storage, and subscription session verification.
+- [x] Design onboarding workflow and health check probes for Antigravity on all nodes.
 
-### Phase 1: `knot-hub` Core & Antigravity Blackboard
-- [ ] Build `core/hub/knot_hub.py` (or Rust):
+### Phase 1: `knot-hub` Core & Antigravity Blackboard (Completed)
+- [x] Build `core/hub/hub.py` and `core/hub/agent.py`:
   - Lightweight async server running on Anchor.
   - In-memory shared blackboard for task queues, node states, and heartbeat signals.
-  - Pub/sub event bus with Unix domain socket support for local tools.
-- [ ] Implement `mcp-knot`:
-  - Model Context Protocol server connecting any `agy` session to `knot-hub`.
-  - Tools for reading blackboard, claiming tasks, posting findings, and triggering mesh commands.
-- [ ] Standardize Antigravity Skills (`runtime/skills/*`):
-  - Ensure all 3 nodes have Knot workspace skills mounted and verified.
+  - Pub/sub event bus with SSE streaming support for live cockpits.
+- [x] Implement Lean MCP Gateway (`core/mcp/gateway.py`):
+  - Model Context Protocol server over stdio connecting any `agy` session to `knot-hub`.
+  - 4 canonical tools: `knot_node_status`, `knot_quota_matrix`, `knot_exec_command`, `knot_swarm_topology`.
+- [x] Standardize Antigravity Skills in `runtime/skills/`:
+  - Active maintained skills: `knot-swarm`, `hardware-profiles`, `swarm-council`, `goal-with-lease`.
 
 ### Phase 2: Knot Kommand Kafe (Tauri Desktop & Web UI)
 - [ ] Scaffold `kafe/` with Tauri 2.0 (Rust backend + Vue 3 / Tailwind):

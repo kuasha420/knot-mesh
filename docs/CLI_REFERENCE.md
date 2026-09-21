@@ -7,24 +7,42 @@ This document provides a comprehensive command-line reference for both `knot` (d
 ## Table of Contents
 
 - [Global Environment Variables](#global-environment-variables)
-- [1. `knot` — Mesh Orchestrator](#1-knot--mesh-orchestrator)
+- [Error Handling & Diagnostic Observability (PSL Gold Standard)](#error-handling--diagnostic-observability-psl-gold-standard)
+- [1. Core Mesh Administration Commands](#1-core-mesh-administration-commands)
   - [knot status](#knot-status)
   - [knot doctor](#knot-doctor)
   - [knot repair](#knot-repair)
   - [knot sync](#knot-sync)
   - [knot update](#knot-update)
+  - [knot resolve](#knot-resolve)
+  - [knot exec](#knot-exec)
+  - [knot shutdown](#knot-shutdown)
+  - [knot reboot](#knot-reboot)
+  - [knot onboard](#knot-onboard)
+- [2. Tier 1: D2D Physical Workspace Fabric Commands](#2-tier-1-d2d-physical-workspace-fabric-commands)
+  - [knot kvm](#knot-kvm)
   - [knot screen](#knot-screen)
   - [knot autologin](#knot-autologin)
-  - [knot kvm](#knot-kvm)
   - [knot kdeconnect](#knot-kdeconnect)
-  - [knot swarm](#knot-swarm)
-  - [knot exec](#knot-exec)
-  - [knot resolve](#knot-resolve)
-  - [knot shutdown](#knot-shutdown)
-  - [knot council](#knot-council)
   - [knot topology](#knot-topology)
+  - [knot sleep](#knot-sleep)
+- [3. Tier 2: A2A Cognitive Swarm Layer Commands](#3-tier-2-a2a-cognitive-swarm-layer-commands)
+  - [knot council](#knot-council)
+  - [knot swarm](#knot-swarm)
+  - [knot quota](#knot-quota)
+  - [knot auth](#knot-auth)
   - [knot memory](#knot-memory)
-- [2. `knot-installer` — Onboarding & Lifecycle CLI](#2-knot-installer--onboarding--lifecycle-cli)
+  - [knot hub](#knot-hub)
+  - [knot agent](#knot-agent)
+  - [knot task](#knot-task)
+  - [knot project](#knot-project)
+  - [knot worktree](#knot-worktree)
+  - [knot chat](#knot-chat)
+  - [knot artifact](#knot-artifact)
+- [4. Handheld & Graphical Cockpit Commands](#4-handheld--graphical-cockpit-commands)
+  - [knot kafe](#knot-kafe)
+  - [knot web](#knot-web)
+- [5. `knot-installer` — Onboarding & Lifecycle CLI](#5-knot-installer--onboarding--lifecycle-cli)
   - [knot-installer init](#knot-installer-init)
   - [knot-installer invite](#knot-installer-invite)
   - [knot-installer join](#knot-installer-join)
@@ -42,6 +60,8 @@ This document provides a comprehensive command-line reference for both `knot` (d
 | `KNOT_RUNTIME_DIR` | Directory containing runtime fences, sockets, and transient PID files. | `/run/knot` |
 | `KNOT_VERSION` | Knot release version override. | `1.0.0-rc5` |
 | `KNOT_TEST_MODE` | If set (`1`), bypasses graphical prompts and system modifications. | Empty |
+| `KNOT_HUB_URL` | Explicit Knot Hub endpoint URL override. | `https://127.0.0.1:4242` |
+| `KNOT_DEBUG` | Enables verbose diagnostic traces on stderr if set (`1`). | Empty |
 
 ---
 
@@ -62,13 +82,7 @@ All Knot Mesh CLI utilities, daemon processes, and test suites strictly enforce 
 
 ---
 
-## 1. `knot` — Mesh Orchestrator
-
-The primary binary used across all swarm nodes to monitor health, synchronize manifests, orchestrate sessions, and control KVM boundaries.
-
-```bash
-knot [command] [options] [arguments...]
-```
+## 1. Core Mesh Administration Commands
 
 ### `knot status`
 Displays real-time mesh telemetry, active swarm profile, local node identity, and reachability across all registered peers.
@@ -172,6 +186,89 @@ knot update --dev <node_id>        # Dev mode: update a specific Strand via git 
 
 ---
 
+### `knot resolve`
+Resolves a canonical node ID to its active reachable IP address and SSH port using the 3-tier resolution sequence: lease cache $\to$ mDNS $\to$ manifest IP hint $\to$ hardware MAC ARP scan.
+
+```bash
+knot resolve <node_id> [port] [--proxy] [--swarm <id>]
+```
+
+- **Options**:
+  - `--proxy`: Formats output for OpenSSH `ProxyCommand` and verifies TCP connectivity to SSH port.
+  - `--swarm <id>`: Explicit swarm profile to search for target node manifests.
+- **Exit Codes**:
+  - `0`: Node resolved and verified reachable. IP emitted to `stdout`.
+  - `1`: Node unresolvable or dead. Diagnostics emitted to `stderr`.
+
+---
+
+### `knot exec`
+Executes arbitrary shell commands across one or all nodes in the swarm via hardened SSH batch sessions.
+
+```bash
+knot exec <node_id> <command...>   # Execute command on a specific node
+knot exec --all <command...>       # Execute command concurrently across all active nodes
+```
+
+- **Example**:
+  ```bash
+  knot exec --all "uname -r; uptime"
+  ```
+
+---
+
+### `knot shutdown`
+Coordinates graceful service teardown, task release, and poweroff/reboot operations across the mesh.
+
+```bash
+knot shutdown status               # Show pending shutdown/reboot timers across the fleet
+knot shutdown cancel               # Cancel pending scheduled shutdown timers
+knot shutdown [node] poweroff      # Power off a specific node immediately
+knot shutdown [node] reboot        # Reboot a specific node immediately
+knot shutdown --all poweroff       # Gracefully power off all Strands, then the Anchor
+knot shutdown --all reboot         # Reboot all Strands, then the Anchor
+```
+
+- **Options**:
+  - `-d, --delay <minutes|now>`: Delay before shutdown (e.g. `+10`, `23:00`, or `now`).
+  - `-m, --msg "<message>"`: Custom broadcast message sent to all logged-in users.
+  - `-f, --force, -y`: Bypass operator confirmation prompt.
+
+---
+
+### `knot reboot`
+Convenience alias for `knot shutdown --reboot`. Coordinates fleet-wide reboot sequencing.
+
+```bash
+knot reboot [target] [options...]
+```
+
+---
+
+### `knot onboard`
+Enrolls the current machine into the local mesh, provisioning SSH host keys, configuring firewall rules, and deploying system services.
+
+```bash
+knot onboard [node_id]
+```
+
+---
+
+## 2. Tier 1: D2D Physical Workspace Fabric Commands
+
+### `knot kvm`
+Controls the Wayland Deskflow KVM server and client daemons.
+
+```bash
+knot kvm status                    # Display Deskflow daemon and connection status
+knot kvm restart                   # Coordinated KVM restart across the entire swarm
+knot kvm lock                      # Confine cursor to the local screen (KVM lock)
+knot kvm unlock                    # Release cursor confinement across physical boundaries
+knot kvm lock-toggle               # Toggle cursor confinement
+```
+
+---
+
 ### `knot screen`
 Controls Wayland screen lock states across the mesh.
 
@@ -205,19 +302,6 @@ knot autologin <node_id>           # Trigger remote auto-login on a specific str
 
 ---
 
-### `knot kvm`
-Controls the Wayland Deskflow KVM server and client daemons.
-
-```bash
-knot kvm status                    # Display Deskflow daemon and connection status
-knot kvm restart                   # Coordinated KVM restart across the entire swarm
-knot kvm lock                      # Confine cursor to the local screen (KVM lock)
-knot kvm unlock                    # Release cursor confinement across physical boundaries
-knot kvm lock-toggle               # Toggle cursor confinement
-```
-
----
-
 ### `knot kdeconnect`
 Manages KDE Connect mesh synchronization, custom device discovery, device pairing, and cross-device clipboard sharing.
 
@@ -229,21 +313,105 @@ knot kdeconnect sync --all         # Propagate customDevices and enforce clipboa
 knot kdeconnect pair <node_id>     # Initiate bidirectional pairing request with a specific mesh peer
 ```
 
-- **Features**:
-  - **Idempotent Python INI Parsing**: Parses `kdeglobals` and KDE Connect configuration without clobbering case sensitivity, preserving existing paired devices (e.g. smartphones).
-  - **Clipboard Daemon Enforcement**: Automatically verifies and activates `kdeconnect.clipboard` and `kdeconnect.clipboard.daemon` plugins across all paired workstations.
-  - **Dynamic Mesh Discovery**: Discovers swarm node IPs from active swarm manifests and appends them to `customDevices` for immediate local subnet discovery.
+---
+
+### `knot topology`
+Multi-screen spatial topology reasoning and visual layout management module. Renders 2D spatial ASCII representations of active swarm displays, triggers camera-based computer vision layout analysis, aligns multi-display outputs, and flashes high-contrast display overlays.
+
+```bash
+knot topology [show|refresh|align-internal|identify|guide] [options]
+```
+
+- **Subcommands**:
+  - `knot topology show`: Displays current 2D ASCII screen layout, Anchor screen identity, and active screen boundaries.
+  - `knot topology refresh --photo <path> [--mode auto|swarm|offline] [--apply]`: Analyzes a photo of physical monitors using computer vision, inferring relative physical screen positions, spans, and boundaries.
+  - `knot topology align-internal`: Automatically aligns internal handheld displays (eDP-1) with connected external monitors via KDE KScreen.
+  - `knot topology identify [--all]`: Spawns fullscreen high-contrast colored overlays displaying node identity and display numbers across screens.
+  - `knot topology guide`: Outputs photography, lighting, and camera positioning best practices for spatial detection.
+
+---
+
+### `knot sleep`
+Enforces whole-swarm prevent-sleep power policies on AC power while permitting natural power-saving sleep on battery.
+
+```bash
+knot sleep status                  # Display swarm sleep inhibition state and active workload drivers
+knot sleep prevent [reason]        # Prevent sleep across active nodes
+knot sleep allow                   # Re-enable natural sleep policies
+```
+
+---
+
+## 3. Tier 2: A2A Cognitive Swarm Layer Commands
+
+### `knot council`
+Out-of-band multi-agent coordination protocol using GitHub Discussions, Mesh DB, and scale-aware Kitty Confluence multiplexing.
+
+```bash
+knot council <start|resume|status|reply|steer|list|attach|reconcile|copy|clean|kill> [options]
+```
+
+#### `knot council start`
+Launches an autonomous council mission or zero-token interactive multi-node cockpit.
+
+```bash
+# Autonomous Mission
+knot council start [--mode <mode>] [--db <ghd|mesh>] [--tiling <layout>] [--pack <pack>] [--prompt <text>]
+
+# Zero-Token Interactive Cockpit (<1s startup, 0 prompt tokens consumed)
+knot council start --interactive [--tiling <layout>] [--project <name>] [--nodes <list>]
+```
+
+#### `knot council resume`
+Re-opens the Kitty Confluence cockpit and re-attaches all swarm nodes to active conversations using `agy -c`.
+
+```bash
+knot council resume [run_id]
+```
+
+#### `knot council steer`
+Injects steering prompts live into a target node's active Kitty Confluence pane via Kitty remote socket (`/tmp/kitty-council-<run_id>.sock`).
+
+```bash
+knot council steer <node> "<prompt>" [run_id]
+```
+
+#### `knot council status`
+Inspects real-time milestone progress, node check-ins, and peer updates for a mission.
+
+```bash
+knot council status [run_id]
+```
+
+#### `knot council reply`
+Posts status checkpoints, alerts, or final reports to the mission registry.
+
+```bash
+knot council reply <run_id> [--node <id>] [--status <25%|50%|75%|ALERT|FINAL|PROGRESS>] [--body "<text>"]
+```
 
 ---
 
 ### `knot swarm`
-Manages multi-tenant swarm profiles and Antigravity multi-agent cluster authentication.
+Manages multi-tenant swarm profiles and Antigravity multi-agent cluster operations.
 
 ```bash
 knot swarm status                  # List configured swarm profiles and active fence
 knot swarm switch <swarm_id>       # Switch active swarm profile (e.g. home, office)
 knot swarm test [node_id]          # Test Antigravity CLI telemetry and ping latency
 knot swarm auth [node_id]          # Verify Google OAuth token validity for headless agy
+knot swarm quota [node|--all]      # Inspect real-time 5h and weekly model quotas
+knot swarm exec <node> <cmd...>    # Run commands across swarm nodes
+```
+
+---
+
+### `knot quota`
+Direct alias for `knot swarm quota`. Displays real-time 5-hour and weekly Google AI Pro/Ultra model quota consumption, active reset countdowns, and graphical progress bars across the mesh.
+
+```bash
+knot quota                         # Display quota matrix for all online nodes
+knot quota <node_id>               # Display quota for a specific node
 ```
 
 ---
@@ -259,252 +427,10 @@ knot auth sync --all               # Fleet-wide token synchronization across all
 knot auth <node_id> --gui          # Launch graphical Konsole directly on target node's display
 ```
 
-- **Diagnostic Behavior**:
-  - Automatically queries KWallet DBus interface and Secret Service collection `Locked` status.
-  - Transparently logs warnings to `stderr` if KWallet is locked or secret retrieval fails.
-  - Automatically restarts `knot-agent.service` upon token synchronization.
-
----
-
-### `knot exec`
-Executes arbitrary shell commands across one or all nodes in the swarm via hardened SSH batch sessions.
-
-```bash
-knot exec <node_id> <command...>   # Execute command on a specific node
-knot exec --all <command...>       # Execute command concurrently across all active nodes
-```
-
-- **Example**:
-  ```bash
-  knot exec --all "uname -r; uptime"
-  ```
-
----
-
-### `knot resolve`
-Resolves a canonical node ID to its active reachable IP address and SSH port using cached leases, mDNS, and live ARP table lookups.
-
-```bash
-knot resolve <node_id> [port]
-```
-
-- **Diagnostic Behavior**:
-  - Exits with code `0` and outputs resolved IP address on success.
-  - Exits immediately with code `1` and emits error diagnostics to `stderr` if the node is nonexistent, offline, or unresolvable.
-  - Transparently validates and invalidates stale lease caches automatically.
-
-- **Example**:
-  ```bash
-  knot resolve laptop
-  # Output: 192.168.68.142
-  ```
-
----
-
-### `knot shutdown`
-Coordinates graceful service teardown, task release, and poweroff/reboot operations across the mesh.
-
-```bash
-knot shutdown status               # Show pending shutdown/reboot timers across the fleet
-knot shutdown cancel               # Cancel pending scheduled shutdown timers
-knot shutdown [node] poweroff      # Power off a specific node immediately
-knot shutdown [node] reboot        # Reboot a specific node immediately
-knot shutdown --all poweroff       # Gracefully power off all Strands, then the Anchor
-knot shutdown --all reboot         # Reboot all Strands, then the Anchor
-```
-
-- **Diagnostic Behavior**:
-  - **Graceful Service Teardown**: Automatically stops `knot-agent.service` (releasing active tasks) and `knot-deskflow.service`, followed by `knot-hub.service` on Anchor, and executes `sync` before halting.
-  - **Cancellation Recovery**: Running `knot shutdown cancel` automatically unfreezes and restarts local mesh services (`knot-hub`, `knot-agent`, `knot-deskflow`).
-  - **Remote Error Transparency**: In `knot shutdown status`, distinguishes cleanly between unreachable nodes (`Exit 255`) and absent timer schedules without masking error states.
-
-- **Options**:
-  - `--delay <minutes|now>`: Delay before shutdown (e.g. `+10` for 10 minutes, `23:00`, or `now`).
-  - `--wall "<message>"`: Custom broadcast message sent to all logged-in users.
-
----
-
-### `knot council`
-Out-of-band multi-agent coordination protocol using GitHub Discussions, Mesh DB, and scale-aware Kitty Confluence multiplexing. Allows autonomous Antigravity agents across physical nodes to coordinate on distributed audits, verification sweeps, or interactive pair steering.
-
-```bash
-knot council <start|resume|status|reply|steer|list|attach|reconcile|copy|clean|kill> [options]
-```
-
-#### `knot council start`
-Launches an autonomous council mission or zero-token interactive multi-node cockpit.
-
-```bash
-# Autonomous Mission (with prompt scaffolding)
-knot council start [--mode <mode>] [--db <ghd|mesh>] [--tiling <layout>] [--pack <pack>] [--prompt <text>]
-
-# Zero-Token Interactive Cockpit (direct drop into agy TUI with on-demand steering)
-knot council start --interactive [--tiling <layout>] [--project <name>] [--nodes <list>]
-
-# Dry-run validation
-knot council start --interactive --dry-run
-```
-
-- **Options**:
-  - `--mode <confluence|headless|tui|gui|suggested>`: Execution surface. Default: `confluence`.
-  - `--db <ghd|mesh>`: Coordination message board backend: `ghd` (GitHub Discussions, default for autonomous missions) or `mesh` (Knot Hub REST API `:4242` and SQLite fallback, default for interactive cockpit).
-  - `--interactive`: Spawns fullscreen Kitty Confluence cockpit with all swarm nodes connected in `agy` standby. **Consumes 0 tokens at startup**; context is injected on-demand via Antigravity `PreInvocation` lifecycle hook when the operator prompts a node.
-  - `--resume [run_id]`: Resumes previous conversations across all cockpit panes using `agy -c`.
-  - `--tiling <grid|sidebyside|splits|tall|fat|stacked>`: Scale-aware Kitty window layout. Default: `grid`.
-  - `--pack <audit-parity|fast-triage|tournament>`: Prompt scaffold template pack. Default: `audit-parity`.
-  - `--prompt <text>`: Base mission prompt text.
-  - `--prompt-file <path>`: Path to file containing base mission prompt.
-  - `--nodes <list>`: Comma-separated list of target nodes (default: all online fleet nodes).
-  - `--project <name>`: Target Antigravity project name (default: auto-detected from CWD).
-  - `--dry-run`: Generates prompts and Kitty session configurations without launching runners.
-
----
-
-#### `knot council resume`
-Re-opens the Kitty Confluence cockpit and re-attaches all swarm nodes to their active conversations using `agy -c`.
-
-```bash
-knot council resume [run_id]
-```
-
-- If `[run_id]` is omitted, automatically finds and resumes the latest active council session.
-- Restores active tiling layout, project directory, and exports council environment variables across all panes.
-
----
-
-#### `knot council status`
-Inspects real-time milestone progress, node check-ins, and peer updates for a mission.
-
-```bash
-knot council status [run_id]
-```
-
-- Displays the fleet status matrix, verified alerts, milestone progress (25%, 50%, 75%), and deliverables.
-- If `[run_id]` is omitted, inspects the latest mission.
-
----
-
-#### `knot council reply`
-Posts status checkpoints, alerts, or final reports to the mission registry (GitHub Discussions or Mesh DB).
-
-```bash
-knot council reply <run_id> [--node <id>] [--status <25%|50%|75%|ALERT|FINAL|PROGRESS>] [--body "<text>"]
-
-# Or pipe markdown deliverable from stdin:
-knot council reply <run_id> --node desktop --status FINAL < deliverable.md
-```
-
-- **Options**:
-  - `--node <id>`: Node identifier (defaults to `$KNOT_NODE_ID` or local hostname).
-  - `--status <status>`: Milestone indicator (`25%`, `50%`, `75%`, `ALERT`, `FINAL`, `PROGRESS`).
-  - `--body <text>`: Message text (strictly under 15-20 lines for interim checkpoints).
-
----
-
-#### `knot council steer`
-Injects guidance, prompts, or cognitive challenges directly into a target node's active Kitty Confluence cockpit pane using Kitty's remote control bridge socket (`/tmp/kitty-council-<run_id>.sock`).
-
-```bash
-knot council steer <node> "<prompt>" [run_id]
-
-# Or pipe guidance from stdin:
-echo "Focus on edge case validation" | knot council steer laptop
-```
-
-- **Observability**: Prompts are visibly typed into the target agent's terminal in real time, waking up that node's interactive `agy` session so the human operator can watch reasoning and tool calls live.
-- **Inter-Agent Delegation**: Used by the Coordinator and peer agents to pass cryptographic rally volleys or assign audit chunks across co-located panes without bypassing the terminal with headless SSH.
-
----
-
-#### `knot council list`
-Lists recent Swarm Council missions from local storage with execution metadata, backend, and status.
-
-```bash
-knot council list [interactive|active|mesh|ghd]
-```
-
-- **Filters**:
-  - `interactive`: Display only interactive cockpit sessions.
-  - `active`: Display only active, running missions.
-  - `mesh` / `ghd`: Filter by registry backend.
-- Displays `[INTERACTIVE | ACTIVE]` and `[AUTONOMOUS | ACTIVE]` badges with tiling mode and node rosters.
-
----
-
-#### `knot council attach`
-Connects directly to an active agent session on a specific node from the current terminal.
-
-```bash
-knot council attach <node_id> [run_id]
-```
-
-- Inherits council environment variables (`KNOT_NODE_ID`, `KNOT_COUNCIL_RUN_ID`, `KNOT_PROJECT`) and attaches via `agy -c`.
-
----
-
-#### `knot council reconcile`
-Synthesizes all discussion comments and node deliverables into a consolidated Markdown audit report.
-
-```bash
-knot council reconcile [run_id]
-```
-
-- Saves report to `~/.config/knot/missions/<run_id>/reconciled_report.md` and marks mission `status: COMPLETED`.
-
----
-
-#### `knot council copy`
-Copies the staged prompt for the local node to the Wayland or X11 clipboard for GUI delivery (`--mode gui`).
-
-```bash
-knot council copy
-```
-
----
-
-#### `knot council kill`
-Halts all running council runner processes and Kitty cockpit instances across the fleet.
-
-```bash
-knot council kill <run_id>
-```
-
-- Marks mission `status: TERMINATED` in `meta.json`.
-
----
-
-#### `knot council clean`
-Prunes mission directories older than the specified retention window.
-
-```bash
-knot council clean [days]        # Default: 7 days
-```
-
----
-
-### `knot topology`
-Multi-screen spatial topology reasoning and visual layout management module. Renders 2D spatial ASCII representations of active swarm displays, triggers camera-based computer vision layout analysis, aligns multi-display outputs (such as ROG Ally eDP-1 with external monitors), and flashes high-contrast display identification overlays.
-
-```bash
-knot topology [show|refresh|align-internal|identify|guide] [options]
-```
-
-- **Subcommands**:
-  - `knot topology show` (or `knot topology`): Displays current 2D ASCII screen layout, Anchor screen identity, active screen list, and lock status.
-  - `knot topology refresh --photo <path> [--mode auto|swarm|offline] [--apply]`: Analyzes a camera photo of physical monitors using computer vision (`swarm_detector` / `offline_detector`), automatically inferring relative physical screen positions, spans, and boundaries. If `--apply` is specified, updates `topology.json` and dynamically restarts `knot-deskflow` and `knot-stripd`.
-  - `knot topology align-internal`: Automatically aligns internal handheld displays (eDP-1) with connected external monitors via KDE KScreen (`kscreen-doctor`), preventing display overlapping.
-  - `knot topology identify [--all]`: Spawns fullscreen high-contrast colored overlays displaying node identity and display numbers across screens to facilitate visual physical layout mapping.
-  - `knot topology guide`: Outputs photography, lighting, and camera positioning best practices for optimal computer vision spatial detection.
-
-- **Options**:
-  - `--photo <image.jpg>`: Path to input photo of physical workspace displays.
-  - `--mode <auto|swarm|offline>`: Visual engine mode (`swarm` uses Linda tuplespace / Swarm detector; `offline` uses local heuristics; `auto` selects automatically).
-  - `--apply`: Automatically writes generated topology to `~/.config/knot/swarms/<swarm>/topology.json` and updates KVM configurations.
-
 ---
 
 ### `knot memory`
-Decentralized Memory Palace and Vault module backed by embedded SQLite with CRDT synchronization and in-process vector cosine similarity. Manages dual-pool cognitive storage (local scratchpad vs. swarm-shared), artifact storage, and hardware node-role system prompt profiles.
+Decentralized Memory Palace and Vault module backed by embedded SQLite with CRDT synchronization and in-process vector cosine similarity.
 
 ```bash
 knot memory <store|recall|map|promote|relate|artifact-put|artifact-get|profile|export-crdt|test> [options]
@@ -519,36 +445,123 @@ knot memory <store|recall|map|promote|relate|artifact-put|artifact-get|profile|e
     ```bash
     knot memory recall --query "<search text>" [--wing <wing>] [--hall <hall>] [--pool shared|local|all] [--limit 5] [--min-score 0.1]
     ```
-  - `knot memory map`: Displays the complete spatial hierarchy tree (wings, halls, drawers) of memories stored in the local SQLite palace.
+  - `knot memory map`: Displays the complete spatial hierarchy tree of memories stored in the local SQLite palace.
   - `knot memory promote`: Promotes a local scratchpad observation to the swarm-shared memory pool with an importance boost.
-    ```bash
-    knot memory promote --id <memory_id> [--boost 2.0]
-    ```
   - `knot memory relate`: Creates an associative typed edge between two memories.
-    ```bash
-    knot memory relate --source <id1> --target <id2> --type <depends_on|relates_to|supercedes> [--weight 1.0]
-    ```
-  - `knot memory artifact-put`: Uploads a text or binary artifact to the local artifact closet.
-    ```bash
-    knot memory artifact-put --name <filename> [--file <path>] [--content "<text>"] [--type text|code|image]
-    ```
-  - `knot memory artifact-get`: Retrieves an artifact by its unique ID.
-    ```bash
-    knot memory artifact-get --id <artifact_id>
-    ```
-  - `knot memory profile`: Displays the hardware node-role profile, capabilities, constraints, and system prompt for a node role (e.g. `anchor_architect`, `compute_worker`, `handheld_controller`).
-    ```bash
-    knot memory profile <role_or_node>
-    ```
-  - `knot memory export-crdt`: Exports local memory changesets since a given database version for swarm-wide CRDT synchronization.
-    ```bash
-    knot memory export-crdt [--since <version>]
-    ```
-  - `knot memory test`: Runs the comprehensive embedded SQLite memory palace self-test suite (validates artifacts, dual pools, promotion, vector recall, hierarchy map, and profiles).
+  - `knot memory profile <role_or_node>`: Displays hardware node-role profile, constraints, and system prompt.
+  - `knot memory test`: Runs the comprehensive embedded SQLite memory palace self-test suite.
 
 ---
 
-## 2. `knot-installer` — Onboarding & Lifecycle CLI
+### `knot hub`
+Controls the Knot Swarm Blackboard Hub daemon (`knot-hub.service`), providing Linda tuplespaces, task leasing, and SSE event streaming.
+
+```bash
+knot hub start                     # Start knot-hub.service
+knot hub stop                      # Stop knot-hub.service
+knot hub restart                   # Restart knot-hub.service
+knot hub status                    # Query service status and verify /health endpoint
+knot hub logs                      # Follow journalctl logs for knot-hub.service
+```
+
+---
+
+### `knot agent`
+Controls the local Knot Swarm Worker Agent daemon (`knot-agent.service`), executing background tasks claimed from the Blackboard.
+
+```bash
+knot agent start                   # Start knot-agent.service
+knot agent stop                    # Stop knot-agent.service
+knot agent restart                 # Restart knot-agent.service
+knot agent status                  # Inspect worker agent status
+knot agent logs                    # Follow journalctl logs for knot-agent.service
+```
+
+---
+
+### `knot task`
+Manages Linda Tuplespace tasks, batch schedules, and execution monitoring.
+
+```bash
+knot task post "<prompt>" [--plane <plane>] [--title <title>]  # Post new task to Blackboard
+knot task list [status]            # List tasks (QUEUED, CLAIMED, RUNNING, COMPLETED, FAILED)
+knot task batch <batch_id>         # Inspect batch progress
+knot task wait <task_id>           # Follow task execution until completion
+```
+
+---
+
+### `knot project`
+Manages native Antigravity multi-folder project registrations and cross-node worktrees.
+
+```bash
+knot project list                  # List registered projects
+knot project get <project_id>      # Inspect project metadata
+knot project sync [project_id]     # Synchronize project workspaces across nodes
+```
+
+---
+
+### `knot worktree`
+Manages cross-node Git worktrees without duplicate clones, preserving storage and eliminating fetch contention.
+
+```bash
+knot worktree list                 # List active git worktrees across the mesh
+knot worktree add <repo> <name> [--branch <b>] [--nodes <n1,n2>]  # Provision worktree mesh
+knot worktree remove <repo> <name> # Cleanly delete worktree across target nodes
+```
+
+---
+
+### `knot chat`
+Manages Swarm Konversations channels, inter-agent chat messaging, and persistent channel logs.
+
+```bash
+knot chat channels                 # List active chat channels
+knot chat create <channel_id> [title] [-p project_id]  # Create a new channel
+knot chat post [-c channel] [-s sender] <message>      # Post message to channel
+knot chat read [-c channel] [-n limit]                 # Read channel history
+```
+
+---
+
+### `knot artifact`
+Manages 3-state artifact leases (`DRAFTING`, `LOCKED_SURGERY`, `VERIFIED_COMMITTED`) preventing concurrent file mutation collisions across agents.
+
+```bash
+knot artifact list                 # List active artifact leases and expiry countdowns
+knot artifact lock <name> [--ttl <sec>]  # Acquire LOCKED_SURGERY lease on an artifact
+knot artifact release <name> [--state <state>] # Commit and release artifact lease
+```
+
+---
+
+## 4. Handheld & Graphical Cockpit Commands
+
+### `knot kafe`
+Boots and manages the Knot Kommand Kafe cockpit (Tauri v2 lightweight desktop container and React Web UI).
+
+```bash
+knot kafe open                     # Open web cockpit in default browser
+knot kafe desktop                  # Launch native Tauri v2 desktop container (<50MB RAM footprint)
+knot kafe build-desktop            # Compile release Tauri v2 container binary
+knot kafe dev                      # Launch Vite HMR development server (:5173)
+knot kafe build                    # Build production static bundle to web/dist
+knot kafe install                  # Install web cockpit npm dependencies
+```
+
+---
+
+### `knot web`
+Direct alias dispatch for `knot kafe`.
+
+```bash
+knot web [open|dev|build|install]
+```
+
+---
+
+## 5. `knot-installer` — Onboarding & Lifecycle CLI
 
 The deployment binary responsible for Anchor bootstrapping, invitation token generation, Strand enrollment rendezvous, and clean uninstallation.
 
@@ -607,7 +620,7 @@ knot-installer join <anchor_endpoint> <token> [OPTIONS]
 ```
 
 - **Arguments**:
-  - `<anchor_endpoint>`: Anchor IP or hostname and port (e.g. `192.168.68.153:4242`).
+  - `<anchor_endpoint>`: Anchor IP or hostname and port (e.g. `192.168.1.50:4242`).
   - `<token>`: Pairing token in `<PIN>.<FINGERPRINT>` format.
 - **Options**:
   - `--id <id>`: Custom node ID (defaults to local hostname).

@@ -318,10 +318,7 @@ def get_canonical_node_id(node_id: str) -> str:
                             return can_id
                 except Exception as e:
                     sys.stderr.write(f"Notice: [hub] Failed to parse node manifest {fp}: {e}\n")
-    known_mappings = {
-        "steamdeck-eos": "steamdeck",
-    }
-    return known_mappings.get(nid_lower, node_id)
+    return node_id
 
 
 def _get_screen_lock(node_id: str) -> threading.Lock:
@@ -3197,7 +3194,7 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                         "id": node_id,
                         "hostname": sreq.get("hostname", node_id),
                         "role": sreq.get("role", "strand"),
-                        "user": sreq.get("user", "psl"),
+                        "user": sreq.get("user", os.environ.get("USER", "knot")),
                         "ip_hint": sreq.get("ip_hint", ""),
                         "port": sreq.get("port", 22),
                         "pubkey": sreq.get("pubkey", ""),

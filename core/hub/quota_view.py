@@ -109,9 +109,7 @@ def main():
         sys.exit(1)
 
     # Canonicalize and deduplicate nodes
-    canonical_map = {
-        "steamdeck-eos": "steamdeck",
-    }
+    canonical_map = {}
     # Resolve dynamic node palette
     dynamic_palette = {}
     if resolve_swarm_palette:

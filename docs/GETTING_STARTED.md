@@ -105,7 +105,7 @@ knot-installer init --name "Home Studio" --id "home"
 2. **Wayland Display Probing**: Queries `kscreen-doctor` to capture screen resolutions, refresh rates, scale factors, and display geometry.
 3. **Swarm Profile Creation**: Writes `/etc/knot/swarms.d/home.conf` and `~/.config/knot/swarms/home/swarm.conf` with active Wi-Fi SSID, Gateway MAC fence, and subnet CIDR.
 4. **Automated Firewall Configuration**: Opens required mesh ports (4242, 24800, 5353, 1714–1764) in UFW or firewalld scoped strictly to your local subnet.
-5. **Antigravity Synchronization**: Syncs MCP tool schemas to `~/.gemini/config/mcp_config.json` and deploys operational skills to `~/.gemini/antigravity/skills/`.
+5. **Antigravity Synchronization**: Syncs MCP tool schemas to `~/.gemini/config/mcp_config.json` and configures maintained operational skills from `runtime/skills/` (`knot-swarm`, `hardware-profiles`, `swarm-council`, `goal-with-lease`).
 6. **Service Launch**: Starts `knot-hub.service`, `knot-deskflow.service`, and `knot-guard.service`.
 
 ---
@@ -129,13 +129,13 @@ The terminal prints an enrollment banner:
   Expires In:     300 seconds
 
   🪄 Magic Zero-Setup Onboarding (copy & paste in terminal on Strand):
-    curl -kfsSL https://192.168.68.153:4242/join/839201.cf2e3f93b4fbc23a | bash
+    curl -kfsSL https://192.168.1.50:4242/join/839201.cf2e3f93b4fbc23a | bash
 
   🌐 Web Onboarding Page:
-    https://192.168.68.153:4242/join/839201.cf2e3f93b4fbc23a
+    https://192.168.1.50:4242/join/839201.cf2e3f93b4fbc23a
 
   Or if Knot is already installed:
-    knot-installer join 192.168.68.153:4242 839201.cf2e3f93b4fbc23a
+    knot-installer join 192.168.1.50:4242 839201.cf2e3f93b4fbc23a
 ======================================================================
 Waiting for Strand rendezvous connection (timeout: 300s)...
 ```
@@ -148,12 +148,12 @@ On your laptop or handheld device (e.g. Steam Deck or ROG Ally):
 
 ### Option A: Magic One-Liner (Zero-Setup)
 ```bash
-curl -kfsSL https://192.168.68.153:4242/join/839201.cf2e3f93b4fbc23a | bash
+curl -kfsSL https://192.168.1.50:4242/join/839201.cf2e3f93b4fbc23a | bash
 ```
 
 ### Option B: Using Installed CLI
 ```bash
-knot-installer join 192.168.68.153:4242 839201.cf2e3f93b4fbc23a
+knot-installer join 192.168.1.50:4242 839201.cf2e3f93b4fbc23a
 ```
 
 ### What the Strand Does:

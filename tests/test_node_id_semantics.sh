@@ -129,7 +129,7 @@ cat << JSON_EOF > "$SWARM_NODES/desktop.json"
   "user": "user_a",
   "role": "anchor",
   "port": 42069,
-  "ip_hint": "192.168.68.153"
+  "ip_hint": "192.168.1.10"
 }
 JSON_EOF
 
@@ -141,7 +141,7 @@ cat << JSON_EOF > "$SWARM_NODES/steamdeck.json"
   "user": "user_c",
   "role": "strand",
   "port": 22,
-  "ip_hint": "192.168.68.188"
+  "ip_hint": "192.168.1.20"
 }
 JSON_EOF
 
@@ -177,40 +177,40 @@ echo "  -> knot exec remote subshell export contract: OK"
 
 echo "=== [Test 7] Cross-Node User Home Path Normalization ==="
 # 7a. Bash knot_path_normalize tests
-p1="$(knot_path_normalize "/home/user_a/Dev/knot-mesh" "/home/user_b")"
-[ "$p1" = "/home/user_b/Dev/knot-mesh" ] || { echo "Expected /home/user_b/Dev/knot-mesh, got $p1" >&2; exit 1; }
+p1="$(knot_path_normalize "/home/user_a/Dev/sample-project" "/home/user_b")"
+[ "$p1" = "/home/user_b/Dev/sample-project" ] || { echo "Expected /home/user_b/Dev/sample-project, got $p1" >&2; exit 1; }
 
-p2="$(knot_path_normalize "/home/user_b/Dev/knot-mesh" "/home/user_c")"
-[ "$p2" = "/home/user_c/Dev/knot-mesh" ] || { echo "Expected /home/user_c/Dev/knot-mesh, got $p2" >&2; exit 1; }
+p2="$(knot_path_normalize "/home/user_b/Dev/sample-project" "/home/user_c")"
+[ "$p2" = "/home/user_c/Dev/sample-project" ] || { echo "Expected /home/user_c/Dev/sample-project, got $p2" >&2; exit 1; }
 
-p3="$(knot_path_normalize "file:///home/user_a/Dev/knot-mesh" "/home/user_b")"
-[ "$p3" = "file:///home/user_b/Dev/knot-mesh" ] || { echo "Expected file:///home/user_b/Dev/knot-mesh, got $p3" >&2; exit 1; }
+p3="$(knot_path_normalize "file:///home/user_a/Dev/sample-project" "/home/user_b")"
+[ "$p3" = "file:///home/user_b/Dev/sample-project" ] || { echo "Expected file:///home/user_b/Dev/sample-project, got $p3" >&2; exit 1; }
 
-p4="$(knot_path_normalize "~/Dev/knot-mesh" "/home/user_c")"
-[ "$p4" = "/home/user_c/Dev/knot-mesh" ] || { echo "Expected /home/user_c/Dev/knot-mesh, got $p4" >&2; exit 1; }
+p4="$(knot_path_normalize "~/Dev/sample-project" "/home/user_c")"
+[ "$p4" = "/home/user_c/Dev/sample-project" ] || { echo "Expected /home/user_c/Dev/sample-project, got $p4" >&2; exit 1; }
 
 # 7b. Portable format conversions
-port_out="$(knot_path_to_portable "/home/user_a/Dev/knot-mesh")"
-[ "$port_out" = "~/Dev/knot-mesh" ] || { echo "Expected ~/Dev/knot-mesh, got $port_out" >&2; exit 1; }
+port_out="$(knot_path_to_portable "/home/user_a/Dev/sample-project")"
+[ "$port_out" = "~/Dev/sample-project" ] || { echo "Expected ~/Dev/sample-project, got $port_out" >&2; exit 1; }
 
-port_uri="$(knot_path_to_portable "file:///home/user_a/Dev/knot-mesh")"
-[ "$port_uri" = "file://~/Dev/knot-mesh" ] || { echo "Expected file://~/Dev/knot-mesh, got $port_uri" >&2; exit 1; }
+port_uri="$(knot_path_to_portable "file:///home/user_a/Dev/sample-project")"
+[ "$port_uri" = "file://~/Dev/sample-project" ] || { echo "Expected file://~/Dev/sample-project, got $port_uri" >&2; exit 1; }
 
 from_port="$(knot_path_from_portable "$port_uri" "/home/user_c")"
-[ "$from_port" = "file:///home/user_c/Dev/knot-mesh" ] || { echo "Expected file:///home/user_c/Dev/knot-mesh, got $from_port" >&2; exit 1; }
+[ "$from_port" = "file:///home/user_c/Dev/sample-project" ] || { echo "Expected file:///home/user_c/Dev/sample-project, got $from_port" >&2; exit 1; }
 
 # 7c. CLI worktree normalize command
-cli_norm="$("$KNOT_ROOT/bin/knot" worktree normalize "/home/user_a/Dev/knot-mesh" "/home/user_b")"
-[ "$cli_norm" = "/home/user_b/Dev/knot-mesh" ] || { echo "Expected /home/user_b/Dev/knot-mesh from CLI, got $cli_norm" >&2; exit 1; }
+cli_norm="$("$KNOT_ROOT/bin/knot" worktree normalize "/home/user_a/Dev/sample-project" "/home/user_b")"
+[ "$cli_norm" = "/home/user_b/Dev/sample-project" ] || { echo "Expected /home/user_b/Dev/sample-project from CLI, got $cli_norm" >&2; exit 1; }
 
 # 7d. Python Database.normalize_home_path test
 python3 -c "
 import sys
 sys.path.insert(0, '$KNOT_ROOT')
 from core.hub.hub import Database
-assert Database.normalize_home_path('/home/user_a/Dev/knot-mesh', '/home/user_b') == '/home/user_b/Dev/knot-mesh'
-assert Database.normalize_home_path('file:///home/user_a/Dev/knot-mesh', '/home/user_c') == 'file:///home/user_c/Dev/knot-mesh'
-assert Database.normalize_home_path('~/Dev/knot-mesh', '/home/user_b') == '/home/user_b/Dev/knot-mesh'
+assert Database.normalize_home_path('/home/user_a/Dev/sample-project', '/home/user_b') == '/home/user_b/Dev/sample-project'
+assert Database.normalize_home_path('file:///home/user_a/Dev/sample-project', '/home/user_c') == 'file:///home/user_c/Dev/sample-project'
+assert Database.normalize_home_path('~/Dev/sample-project', '/home/user_b') == '/home/user_b/Dev/sample-project'
 "
 echo "  -> Cross-node path normalization (/home/user_a <-> /home/user_b <-> /home/user_c): OK"
 
