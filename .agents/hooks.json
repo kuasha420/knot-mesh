@@ -3,7 +3,7 @@
     "PreInvocation": [
       {
         "type": "command",
-        "command": "python3 ../skills/swarm-council/scripts/council_hook.py",
+        "command": "python3 ../runtime/skills/swarm-council/scripts/council_hook.py",
         "timeout": 5
       }
     ]

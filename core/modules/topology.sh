@@ -405,8 +405,8 @@ topology_guide() {
 4. FRACTIONAL KVM SPAN CUSTOMIZATION:
    In topology.json, spans can be customized per edge:
    - "left": { "node": "laptop", "span": [25, 100], "target_span": [0, 85] }
-   - "right": { "node": "PurrfectSoftwareLimited", "span": [0, 100] }
-   - "down": { "node": "steamdeck-eos", "span": [50, 100], "target_span": [0, 100] }
+   - "right": { "node": "workstation_monitor", "span": [0, 100] }
+   - "down": { "node": "handheld_console", "span": [50, 100], "target_span": [0, 100] }
 
 ================================================================================
 GUIDE_EOF
@@ -414,7 +414,7 @@ GUIDE_EOF
 
 cmd_topology() {
   local sub="${1:-show}"
-  shift || true
+  [ $# -gt 0 ] && shift
   case "$sub" in
     show|status|map)
       topology_show "$@"

@@ -58,10 +58,10 @@ class TestVisionEngine(unittest.TestCase):
         res = offline_detector.analyze(
             self.img,
             swarm_nodes=[
-                {"id": "rog-ally", "role": "anchor"},
-                {"id": "devbox", "role": "laptop"},
-                {"id": "PurrfectSoftwareLimited", "role": "desktop_monitor"},
-                {"id": "steamdeck-eos", "role": "handheld_pc"}
+                {"id": "rog-ally", "role": "anchor", "capabilities": ["handheld", "dual_display"]},
+                {"id": "devbox", "role": "laptop", "capabilities": ["laptop"]},
+                {"id": "workstation_monitor", "role": "strand", "device_type": "desktop_monitor", "capabilities": ["desktop_monitor"]},
+                {"id": "handheld_deck", "role": "strand", "device_type": "handheld_pc", "capabilities": ["handheld_pc"], "aliases": ["deck"]}
             ],
             anchor_id="rog-ally"
         )
@@ -84,12 +84,12 @@ class TestVisionEngine(unittest.TestCase):
             self.assertEqual(layout[target_node][opp_direction]["node"], anchor)
 
         # Verify specific fractional spans for rog-ally physical desk setup:
-        # Downward link to steamdeck-eos must be right half [50, 100] -> [0, 100]
-        self.assertEqual(layout["rog-ally"]["down"]["node"], "steamdeck-eos")
+        # Downward link to handheld_deck must be right half [50, 100] -> [0, 100]
+        self.assertEqual(layout["rog-ally"]["down"]["node"], "handheld_deck")
         self.assertEqual(layout["rog-ally"]["down"]["span"], [50, 100])
         self.assertEqual(layout["rog-ally"]["down"]["target_span"], [0, 100])
-        self.assertEqual(layout["steamdeck-eos"]["up"]["span"], [0, 100])
-        self.assertEqual(layout["steamdeck-eos"]["up"]["target_span"], [50, 100])
+        self.assertEqual(layout["handheld_deck"]["up"]["span"], [0, 100])
+        self.assertEqual(layout["handheld_deck"]["up"]["target_span"], [50, 100])
 
         # Left link to devbox laptop must be offset [25, 100] -> [0, 85]
         self.assertEqual(layout["rog-ally"]["left"]["node"], "devbox")
@@ -98,8 +98,8 @@ class TestVisionEngine(unittest.TestCase):
         self.assertEqual(layout["devbox"]["right"]["span"], [0, 85])
         self.assertEqual(layout["devbox"]["right"]["target_span"], [25, 100])
 
-        # Right link to PurrfectSoftwareLimited must be 1:1 [0, 100] -> [0, 100]
-        self.assertEqual(layout["rog-ally"]["right"]["node"], "PurrfectSoftwareLimited")
+        # Right link to workstation_monitor must be 1:1 [0, 100] -> [0, 100]
+        self.assertEqual(layout["rog-ally"]["right"]["node"], "workstation_monitor")
         self.assertEqual(layout["rog-ally"]["right"]["span"], [0, 100])
         self.assertEqual(layout["rog-ally"]["right"]["target_span"], [0, 100])
 

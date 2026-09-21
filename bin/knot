@@ -637,8 +637,8 @@ cmd_council() {
     db) council_db "$@" ;;
     board|live|viewer) council_board "$@" ;;
     heal) council_heal "$@" ;;
-    audit) bash "$KNOT_ROOT/skills/swarm-council/scripts/audit_tools.sh" "$@" ;;
-    sync) bash "$KNOT_ROOT/skills/swarm-council/scripts/project_sync.sh" "$@" ;;
+    audit) bash "$KNOT_ROOT/runtime/skills/swarm-council/scripts/audit_tools.sh" "$@" ;;
+    sync) bash "$KNOT_ROOT/runtime/skills/swarm-council/scripts/project_sync.sh" "$@" ;;
     *)
       echo "Usage: knot council <start|resume|status|reply|list|attach|reconcile|steer|challenge|db|board|heal|copy|clean|kill|audit|sync> [options]"
       ;;
@@ -787,48 +787,50 @@ cmd_kdeconnect() {
       fi
       ;;
     status)
-      knot_log_info "KDE Connect status across the mesh:"
-      cmd_exec --all "kdeconnect-cli -a"
+      if [ "${1:-}" = "--all" ]; then
+        knot_log_info "KDE Connect status across the mesh:"
+        cmd_exec --all "knot kdeconnect status"
+      else
+        kdeconnect_status
+      fi
+      ;;
+    pair)
+      kdeconnect_pair "$@"
       ;;
     *)
-      echo "Usage: knot kdeconnect <status|sync [--all]>"
+      echo "Usage: knot kdeconnect <status [--all]|sync [--all]|pair <node_id>>"
       ;;
   esac
 }
 
 cmd_autologin() {
-  local action="${1:-check}"
+  local action="${1:-status}"
   [ $# -gt 0 ] && shift
 
   case "$action" in
-    check)
-      autologin_execute_local
-      ;;
-    local)
-      autologin_execute_local
-      ;;
     status)
-      local state
-      state="$(autologin_anchor_status)"
-      if [ "$state" = "UNLOCKED" ]; then
-        knot_log_ok "Anchor desktop state: UNLOCKED (ready for Strand login)"
-      elif [ "$state" = "LOCKED" ]; then
-        knot_log_warn "Anchor desktop state: LOCKED (Strand login gated)"
-      else
-        knot_log_err "Anchor desktop state: OFFLINE"
-      fi
+      autologin_status "$@"
       ;;
-    reconcile)
-      autologin_reconcile_all
+    check)
+      autologin_check "$@"
+      ;;
+    doctor)
+      autologin_doctor "$@"
       ;;
     migrate-dm|ensure-dm)
-      autologin_ensure_dm
+      autologin_migrate_dm "$@"
+      ;;
+    local|login|run)
+      autologin_execute_local "$@"
+      ;;
+    reconcile)
+      autologin_reconcile_all "$@"
       ;;
     fix-kwallet|kwallet)
       autologin_fix_kwallet "$@"
       ;;
     *)
-      autologin_trigger_remote "$action"
+      autologin_trigger_remote "$action" "$@"
       ;;
   esac
 }
@@ -1829,8 +1831,8 @@ case "${1:-}" in
     echo "  knot exec <target|--all> <cmd> Run commands across mesh nodes"
     echo "  knot kvm <restart|status>     Manage software KVM across the mesh"
     echo "  knot screen <status|unlock|lock|login> Manage screen lock/login states"
-    echo "  knot autologin [check|status|reconcile|migrate-dm] Manage auto-login"
-    echo "  knot kdeconnect <status|sync [--all]> Manage KDE Connect status, sync & clipboard"
+    echo "  knot autologin [status|check|doctor|migrate-dm|local|reconcile|fix-kwallet] Manage auto-login"
+    echo "  knot kdeconnect <status|sync|pair> Manage KDE Connect status, sync, pair & clipboard"
     exit 0
     ;;
 esac

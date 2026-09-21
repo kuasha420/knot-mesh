@@ -12,6 +12,9 @@ Features:
 
 import os
 import io
+import sys
+import glob
+import json
 import time
 import math
 import logging
@@ -162,15 +165,47 @@ class OfflineVisionDetector:
         proc_img = img.resize((proc_w, proc_h), Image.Resampling.BILINEAR)
         gray_arr = np.array(proc_img.convert("L"))
 
-        # Default swarm node candidates if not provided
-        known_nodes = swarm_nodes or []
-        known_node_ids = [n.get("id") for n in known_nodes if n.get("id")]
-        if not known_node_ids:
-            known_node_ids = ["rog-ally", "laptop", "PurrfectSoftwareLimited", "steamdeck-eos"]
+        # Dynamically infer device types and anchor ID from live swarm manifest if not provided
+        known_nodes = list(swarm_nodes) if swarm_nodes else []
+        if not known_nodes:
+            user_home = os.path.expanduser("~")
+            manifest_dirs = glob.glob(os.path.join(user_home, ".config/knot/swarms/*/nodes")) + \
+                            glob.glob("/etc/knot/swarms.d/*/nodes")
+            seen_ids = set()
+            for mdir in manifest_dirs:
+                if os.path.isdir(mdir):
+                    for mfile in glob.glob(os.path.join(mdir, "*.json")):
+                        try:
+                            with open(mfile, "r") as mf:
+                                mdata = json.load(mf)
+                                nid = mdata.get("id") or os.path.splitext(os.path.basename(mfile))[0]
+                                if nid not in seen_ids:
+                                    seen_ids.add(nid)
+                                    mdata["id"] = nid
+                                    known_nodes.append(mdata)
+                        except Exception as me:
+                            sys.stderr.write(f"[offline_detector] Error reading manifest {mfile}: {me}\n")
 
-        anchor_node_id = anchor_id or "rog-ally"
-        if anchor_node_id not in known_node_ids and known_node_ids:
+        if not known_nodes:
+            known_nodes = [
+                {"id": "node_anchor", "role": "anchor", "device_type": "desktop_monitor", "capabilities": ["desktop_monitor"]},
+                {"id": "node_laptop", "role": "strand", "device_type": "laptop", "capabilities": ["laptop"]},
+                {"id": "node_monitor", "role": "strand", "device_type": "desktop_monitor", "capabilities": ["desktop_monitor"]},
+                {"id": "node_handheld", "role": "strand", "device_type": "handheld_pc", "capabilities": ["handheld_pc"]}
+            ]
+
+        known_node_ids = [n.get("id") for n in known_nodes if n.get("id")]
+
+        anchor_node_id = anchor_id
+        if not anchor_node_id:
+            for n in known_nodes:
+                if n.get("role") == "anchor":
+                    anchor_node_id = n.get("id")
+                    break
+        if not anchor_node_id and known_node_ids:
             anchor_node_id = known_node_ids[0]
+        if not anchor_node_id:
+            anchor_node_id = "node_anchor"
 
         # Load live thumbnails for histogram matching
         node_histograms = self._load_live_thumbnails(known_node_ids)
@@ -274,17 +309,42 @@ class OfflineVisionDetector:
                 c_manifest = next((n for n in known_nodes if n.get("id") == nid), {})
                 c_caps = [str(c).lower() for c in c_manifest.get("capabilities", [])]
                 c_aliases = [str(a).lower() for a in c_manifest.get("aliases", [])]
+                c_role = str(c_manifest.get("role", "")).lower()
+                c_dtype = str(c_manifest.get("device_type", "")).lower()
+                c_disp = c_manifest.get("display", {})
+                c_w = 0
+                if isinstance(c_disp, dict):
+                    w_val = c_disp.get("width", 0)
+                    if str(w_val).isdigit():
+                        c_w = int(w_val)
 
                 hist_sim = 0.0
                 if nid in node_histograms:
                     hist_sim = self._histogram_similarity(zf["hist"], node_histograms[nid])
 
-                # Heuristic bonus
+                # Heuristic bonus based on capabilities, roles, and resolutions
+                is_laptop = (
+                    "laptop" in c_caps or c_role == "laptop" or c_dtype == "laptop" or "laptop" in nid_lower
+                )
+                is_handheld = (
+                    any(h in c_caps for h in ["handheld", "handheld_pc", "deck", "console"]) or
+                    c_role in ["handheld", "handheld_pc"] or
+                    c_dtype in ["handheld", "handheld_pc"] or
+                    "deck" in nid_lower or "steam" in nid_lower or "ally" in nid_lower or "rog" in nid_lower or
+                    (0 < c_w <= 1280)
+                )
+                is_monitor = (
+                    any(m in c_caps for m in ["desktop_monitor", "monitor", "workstation", "desktop"]) or
+                    c_role in ["desktop_monitor", "workstation", "desktop"] or
+                    c_dtype in ["desktop_monitor", "monitor"] or
+                    "desktop" in nid_lower or "monitor" in nid_lower or
+                    (c_w >= 2560)
+                )
+
                 h_bonus = 0.0
-                if dtype == "laptop" and ("laptop" in nid_lower or "laptop" in c_caps or c_manifest.get("role") == "laptop"):
+                if dtype == "laptop" and is_laptop:
                     h_bonus += 0.50
-                elif dtype == "handheld_pc":
-                    # Disambiguate Steam Deck vs ROG Ally handhelds
+                elif dtype == "handheld_pc" and is_handheld:
                     if "deck" in nid_lower or "steam" in nid_lower or any("deck" in a for a in c_aliases):
                         if zname == "front_right_handheld":
                             h_bonus += 0.60
@@ -296,16 +356,16 @@ class OfflineVisionDetector:
                         else:
                             h_bonus += 0.30
                     else:
-                        h_bonus += 0.40
-                elif dtype == "desktop_monitor" and ("purrfect" in nid_lower or "desktop" in nid_lower or "psl" in nid_lower):
-                    h_bonus += 0.45
+                        h_bonus += 0.45
+                elif dtype == "desktop_monitor" and is_monitor:
+                    h_bonus += 0.50
 
                 # Spatial position bonus
-                if z["expected_position"] == "left" and ("laptop" in nid_lower or c_manifest.get("role") == "laptop"):
+                if z["expected_position"] == "left" and is_laptop:
                     h_bonus += 0.25
-                if z["expected_position"] == "right" and ("purrfect" in nid_lower or "psl" in nid_lower):
+                if z["expected_position"] == "right" and is_monitor:
                     h_bonus += 0.25
-                if z["expected_position"] == "down" and ("deck" in nid_lower or "steam" in nid_lower):
+                if z["expected_position"] == "down" and is_handheld:
                     h_bonus += 0.25
 
                 total_score = (hist_sim * 1.5) + h_bonus
@@ -373,7 +433,7 @@ class OfflineVisionDetector:
             # Determine fractional spans based on physical arrangement
             if pos == "down":
                 if anchor_has_secondary:
-                    # Bottom-left 0..50% is occupied by internal eDP-1; bottom-right 50..100% routes straight to external handheld (e.g. steamdeck-eos)
+                    # Bottom-left 0..50% is occupied by internal eDP-1; bottom-right 50..100% routes straight to external handheld
                     span = [50, 100]
                     target_span = [0, 100]
                     opp_span = [0, 100]

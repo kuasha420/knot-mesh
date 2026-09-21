@@ -9,7 +9,7 @@ if [ -z "${KNOT_ROOT:-}" ]; then
 fi
 source "$KNOT_ROOT/core/lib.sh"
 
-SKILL_DIR="$KNOT_ROOT/skills/swarm-council"
+SKILL_DIR="$KNOT_ROOT/runtime/skills/swarm-council"
 SCRIPTS_DIR="$SKILL_DIR/scripts"
 
 council_clean() {
@@ -527,7 +527,7 @@ council_steer() {
 council_challenge() {
   local script="$SCRIPTS_DIR/challenge_tool.py"
   if [ ! -f "$script" ]; then
-    script="$KNOT_ROOT/skills/swarm-council/scripts/challenge_tool.py"
+    script="$KNOT_ROOT/runtime/skills/swarm-council/scripts/challenge_tool.py"
   fi
   if [ ! -f "$script" ]; then
     knot_log_err "challenge_tool.py not found at $script"
@@ -558,7 +558,7 @@ council_db() {
 
   local script="$SCRIPTS_DIR/mesh_db.py"
   if [ ! -f "$script" ]; then
-    script="$KNOT_ROOT/skills/swarm-council/scripts/mesh_db.py"
+    script="$KNOT_ROOT/runtime/skills/swarm-council/scripts/mesh_db.py"
   fi
 
   case "$action" in
@@ -942,5 +942,5 @@ council_heal() {
 }
 
 council_board() {
-  exec python3 "$KNOT_ROOT/skills/swarm-council/scripts/board_viewer.py" "$@"
+  exec python3 "$KNOT_ROOT/runtime/skills/swarm-council/scripts/board_viewer.py" "$@"
 }

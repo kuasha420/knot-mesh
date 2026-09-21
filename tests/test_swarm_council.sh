@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KNOT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-COUNCIL_SCRIPTS="$KNOT_ROOT/skills/swarm-council/scripts"
+COUNCIL_SCRIPTS="$KNOT_ROOT/runtime/skills/swarm-council/scripts"
 
 echo "=== Running Swarm Council Test Suite ==="
 
@@ -336,7 +336,7 @@ if [ -z "$resolved_nid" ]; then
 fi
 
 ring_test="$(python3 -c '
-import sys; sys.path.insert(0, "skills/swarm-council/scripts")
+import sys; sys.path.insert(0, "runtime/skills/swarm-council/scripts")
 from scaffolder import build_tournament_ring
 nodes = ["laptop", "rog-ally", "steamdeck", "desktop"]
 ring = build_tournament_ring(nodes)

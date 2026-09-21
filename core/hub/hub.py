@@ -188,8 +188,8 @@ def get_available_models() -> list[dict]:
                     _cached_live_models = parsed
                     _cached_live_models_ts = now
                     return parsed
-        except Exception:
-            pass
+        except Exception as e:
+            sys.stderr.write(f"[knot-hub] Error querying agy models: {e}\n")
 
     _cached_live_models = OFFICIAL_MODELS
     _cached_live_models_ts = now
@@ -414,7 +414,7 @@ def capture_node_screen(node_id: str, force: bool = False, quality: str = "low")
                     if isinstance(iface, dict) and iface.get("ip"):
                         ip = iface["ip"]
                         break
-            user = manifest.get("user") or "psl"
+            user = manifest.get("user") or os.environ.get("USER") or "user"
             port = str(manifest.get("port") or 22)
 
             if ip:
@@ -472,8 +472,8 @@ def install_authorized_key(pubkey: str):
         try:
             with open(auth_file, "r") as f:
                 existing = f.read()
-        except Exception:
-            pass
+        except Exception as ex:
+            sys.stderr.write(f"[knot-hub] Error reading authorized_keys: {ex}\n")
     if pubkey.strip() not in existing:
         try:
             with open(auth_file, "a") as f:
@@ -483,6 +483,103 @@ def install_authorized_key(pubkey: str):
             os.chmod(auth_file, 0o600)
         except Exception as e:
             sys.stderr.write(f"Failed to append to authorized_keys: {e}\n")
+
+
+# =====================================================================
+# Device-to-Device (D2D) Workspace Fabric Helpers & Subprocess Adapters
+# =====================================================================
+
+def sync_ssh_config(repo_root: str = REPO_ROOT) -> bool:
+    """Synchronize Anchor ~/.ssh/config so enrolled nodes are immediately reachable.
+    Enforces PSL Rule 1: zero silent error swallowing with structured stderr logging.
+    """
+    ssh_script = os.path.join(repo_root, "core/modules/ssh.sh")
+    if not os.path.isfile(ssh_script):
+        sys.stderr.write(f"[knot-hub] SSH sync script not found: {ssh_script}\n")
+        return False
+    try:
+        proc = subprocess.run(
+            ["bash", ssh_script, "sync-config"],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        if proc.returncode != 0:
+            sys.stderr.write(
+                f"[knot-hub] SSH config sync exited with code {proc.returncode}: {proc.stderr.strip()}\n"
+            )
+            return False
+        return True
+    except Exception as exc:
+        sys.stderr.write(f"[knot-hub] Error executing SSH config sync: {exc}\n")
+        return False
+
+
+def recompile_and_restart_deskflow(
+    topo_path: str,
+    nodes_dir: str,
+    mode: str = "unlocked",
+    restart_stripd: bool = False,
+    repo_root: str = REPO_ROOT
+) -> bool:
+    """Compile deskflow configuration from topology & node manifests, then restart deskflow service.
+    Enforces PSL Rule 1: zero silent error swallowing with structured stderr logging.
+    """
+    compile_script = os.path.join(repo_root, "core/modules/compile_deskflow.py")
+    if not os.path.isfile(compile_script):
+        sys.stderr.write(f"[knot-hub] Deskflow compile script not found: {compile_script}\n")
+        return False
+
+    user_home = os.path.expanduser("~")
+    cfg_dir = os.path.join(user_home, ".config/Deskflow")
+    os.makedirs(cfg_dir, exist_ok=True)
+    conf_out = os.path.join(cfg_dir, "deskflow-server.conf")
+
+    try:
+        cmd = [
+            sys.executable,
+            compile_script,
+            "--topology", topo_path,
+            "--nodes-dir", nodes_dir,
+            "--mode", mode,
+            "--output", conf_out
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if proc.returncode != 0:
+            sys.stderr.write(
+                f"[knot-hub] Deskflow compilation failed (code {proc.returncode}): {proc.stderr.strip()}\n"
+            )
+            logger.error("Deskflow compilation failed: %s", proc.stderr.strip())
+            return False
+
+        # Restart knot-deskflow service
+        restart_proc = subprocess.run(
+            ["systemctl", "--user", "restart", "knot-deskflow.service"],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        if restart_proc.returncode != 0:
+            sys.stderr.write(
+                f"[knot-hub] Restarting knot-deskflow.service failed (code {restart_proc.returncode}): {restart_proc.stderr.strip()}\n"
+            )
+
+        if restart_stripd:
+            stripd_proc = subprocess.run(
+                ["systemctl", "--user", "restart", "knot-stripd.service"],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            if stripd_proc.returncode != 0:
+                sys.stderr.write(
+                    f"[knot-hub] Restarting knot-stripd.service failed (code {stripd_proc.returncode}): {stripd_proc.stderr.strip()}\n"
+                )
+
+        return True
+    except Exception as exc:
+        sys.stderr.write(f"[knot-hub] Error updating Deskflow configuration: {exc}\n")
+        return False
 
 
 class EnrollmentCoordinator:
@@ -3077,8 +3174,8 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 try:
                     with open(pub_path, "r") as pf:
                         anchor_pubkey = pf.read().strip()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    sys.stderr.write(f"[Knot Hub] Failed to read SSH public key at {pub_path}: {exc}\n")
 
             anchor_meta = {
                 "swarm_id": active_swarm,
@@ -3143,29 +3240,12 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                             with open(topo_path, "w") as tf:
                                 json.dump(topo_data, tf, indent=2)
 
-                            compile_script = os.path.join(REPO_ROOT, "core/modules/compile_deskflow.py")
-                            cfg_dir = os.path.join(user_home, ".config/Deskflow")
-                            os.makedirs(cfg_dir, exist_ok=True)
-                            conf_out = os.path.join(cfg_dir, "deskflow-server.conf")
-                            if os.path.isfile(compile_script):
-                                subprocess.run([
-                                    sys.executable, compile_script,
-                                    "--topology", topo_path,
-                                    "--nodes-dir", nodes_dir,
-                                    "--mode", "unlocked",
-                                    "--output", conf_out
-                                ], check=False)
-                                subprocess.run(["systemctl", "--user", "restart", "knot-deskflow.service"], check=False)
+                            recompile_and_restart_deskflow(topo_path, nodes_dir, mode="unlocked")
                         except Exception as te:
                             sys.stderr.write(f"[knot-hub] Error auto-updating topology/deskflow: {te}\n")
 
                     # Synchronize Anchor ~/.ssh/config so newly enrolled node is immediately reachable
-                    ssh_script = os.path.join(REPO_ROOT, "core/modules/ssh.sh")
-                    if os.path.isfile(ssh_script):
-                        try:
-                            subprocess.run(["bash", ssh_script, "sync-config"], check=False)
-                        except Exception as se:
-                            sys.stderr.write(f"[knot-hub] Error syncing ssh config: {se}\n")
+                    sync_ssh_config()
 
             ok, msg = enrollment_coordinator.approve_enrollment(pin, placement, anchor_meta)
             if ok:
@@ -3173,6 +3253,9 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             else:
                 self._send_error(msg, 400)
 
+        # -----------------------------------------------------------------
+        # Tuplespace Task Dispatch & Management (A2A Cognitive Swarm Layer)
+        # -----------------------------------------------------------------
         elif path == "/tasks/post":
             title = body.get("title", "").strip() or "Autonomous Swarm Task"
             prompt = body.get("prompt", "").strip()
@@ -3572,21 +3655,13 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 json.dump(topo_data, tf, indent=2)
 
             nodes_dir = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/nodes")
-            compile_script = os.path.join(REPO_ROOT, "core/modules/compile_deskflow.py")
-            cfg_dir = os.path.join(user_home, ".config/Deskflow")
-            os.makedirs(cfg_dir, exist_ok=True)
-            conf_out = os.path.join(cfg_dir, "deskflow-server.conf")
-
-            recompiled = False
-            if os.path.exists(compile_script):
-                cmd = ["python3", compile_script, "--topology", topo_path, "--nodes-dir", nodes_dir, "--output", conf_out]
-                res = subprocess.run(cmd, capture_output=True, text=True)
-                if res.returncode == 0:
-                    recompiled = True
-                    subprocess.run(["systemctl", "--user", "restart", "knot-deskflow.service"], capture_output=True)
-                    subprocess.run(["systemctl", "--user", "restart", "knot-stripd.service"], capture_output=True)
-                else:
-                    logger.error("Deskflow compilation failed: %s", res.stderr)
+            mode = "locked" if locked else "unlocked"
+            recompiled = recompile_and_restart_deskflow(
+                topo_path=topo_path,
+                nodes_dir=nodes_dir,
+                mode=mode,
+                restart_stripd=True
+            )
 
             broadcast_event("topology_updated", topo_data)
             self._send_json({"ok": True, "recompiled": recompiled, "topology": topo_data})
@@ -3634,17 +3709,22 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                         try:
                             with open(os.path.join(nodes_dir, fname), "r") as mf:
                                 node_list.append(json.load(mf))
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            sys.stderr.write(f"[Knot Hub] Failed to read node manifest {fname}: {exc}\n")
 
             topo_path = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/topology.json")
-            anchor_id = "rog-ally"
+            anchor_id = "desktop"
             if os.path.exists(topo_path):
                 try:
                     with open(topo_path, "r") as tf:
-                        anchor_id = json.load(tf).get("anchor", "rog-ally")
-                except Exception:
-                    pass
+                        anchor_id = json.load(tf).get("anchor") or "desktop"
+                except Exception as exc:
+                    sys.stderr.write(f"[Knot Hub] Failed to read topology at {topo_path}: {exc}\n")
+            if anchor_id == "desktop":
+                for node in node_list:
+                    if node.get("role") == "anchor":
+                        anchor_id = node.get("id") or node.get("node_id", anchor_id)
+                        break
 
             try:
                 from core.vision.engine import analyze_desk_photo
@@ -3671,8 +3751,8 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 try:
                     with open(topo_path, "r") as tf:
                         anchor_id = json.load(tf).get("anchor", "desktop")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    sys.stderr.write(f"[Knot Hub] Failed to read topology at {topo_path}: {exc}\n")
 
             # 1. Broadcast display_identify SSE event to all connected Kafe web clients
             broadcast_event("display_identify", {
@@ -3710,14 +3790,23 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                     "ssh", "-o", "ConnectTimeout=3", "-o", "StrictHostKeyChecking=accept-new",
                     nid, remote_cmd
                 ]
-                res = subprocess.run(ssh_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=duration + 5)
-                if res.returncode != 0 and ip:
-                    # Fallback to direct user@ip
-                    fallback_cmd = [
-                        "ssh", "-o", "ConnectTimeout=3", "-o", "StrictHostKeyChecking=accept-new",
-                        "-p", port, f"{user}@{ip}", remote_cmd
-                    ]
-                    subprocess.run(fallback_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=duration + 5)
+                try:
+                    res = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=duration + 5)
+                    if res.returncode != 0:
+                        sys.stderr.write(f"[knot-hub] Remote overlay trigger via alias '{nid}' returned {res.returncode}: {res.stderr.strip()}\n")
+                        if ip:
+                            # Fallback to direct user@ip
+                            fallback_cmd = [
+                                "ssh", "-o", "ConnectTimeout=3", "-o", "StrictHostKeyChecking=accept-new",
+                                "-p", port, f"{user}@{ip}", remote_cmd
+                            ]
+                            res_fb = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=duration + 5)
+                            if res_fb.returncode != 0:
+                                sys.stderr.write(f"[knot-hub] Remote overlay fallback to {user}@{ip} returned {res_fb.returncode}: {res_fb.stderr.strip()}\n")
+                except subprocess.TimeoutExpired:
+                    sys.stderr.write(f"[knot-hub] Timeout triggering remote overlay on '{nid}'\n")
+                except Exception as exc:
+                    sys.stderr.write(f"[knot-hub] Error triggering remote overlay on '{nid}': {exc}\n")
 
             def _trigger_remote_nodes():
                 if not os.path.isdir(nodes_dir):
@@ -3730,16 +3819,16 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                                 mdata = json.load(mf)
                             nid = mdata.get("id") or fname[:-5]
                             role = mdata.get("role", "strand")
-                            if role == "anchor" or nid == "desktop" or nid == anchor_id:
+                            if role == "anchor" or nid == anchor_id:
                                 continue
                             ip = mdata.get("ip_hint") or ""
-                            user = mdata.get("user") or "psl"
+                            user = mdata.get("user") or os.environ.get("USER") or "user"
                             port = str(mdata.get("port") or 22)
                             t = threading.Thread(target=_trigger_single_node, args=(nid, user, ip, port), daemon=True)
                             threads.append(t)
                             t.start()
                         except Exception as re:
-                            logger.debug("Remote identify trigger error for %s: %s", fname, re)
+                            sys.stderr.write(f"[knot-hub] Remote identify trigger error for {fname}: {re}\n")
                 for t in threads:
                     t.join(timeout=duration + 5)
 

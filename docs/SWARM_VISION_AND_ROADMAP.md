@@ -160,7 +160,7 @@ By splitting the system into a core daemon (**`knot-hub`**) and client applicati
 - [ ] Implement `mcp-knot`:
   - Model Context Protocol server connecting any `agy` session to `knot-hub`.
   - Tools for reading blackboard, claiming tasks, posting findings, and triggering mesh commands.
-- [ ] Standardize Antigravity Skills (`skills/*`):
+- [ ] Standardize Antigravity Skills (`runtime/skills/*`):
   - Ensure all 3 nodes have Knot workspace skills mounted and verified.
 
 ### Phase 2: Knot Kommand Kafe (Tauri Desktop & Web UI)

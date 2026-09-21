@@ -328,8 +328,8 @@ TOPO_EOF
     fi
     local gemini_skills="${home}/.gemini/antigravity/skills"
     mkdir -p "$gemini_skills"
-    if [ -d "$KNOT_ROOT/skills" ]; then
-      for s in "$KNOT_ROOT/skills"/*; do
+    if [ -d "$KNOT_ROOT/runtime/skills" ]; then
+      for s in "$KNOT_ROOT/runtime/skills"/*; do
         [ -d "$s" ] || continue
         local s_name
         s_name="$(basename "$s")"
@@ -761,8 +761,8 @@ JOIN_HELP
     fi
     local gemini_skills="${HOME}/.gemini/antigravity/skills"
     mkdir -p "$gemini_skills"
-    if [ -d "$KNOT_ROOT/skills" ]; then
-      for s in "$KNOT_ROOT/skills"/*; do
+    if [ -d "$KNOT_ROOT/runtime/skills" ]; then
+      for s in "$KNOT_ROOT/runtime/skills"/*; do
         [ -d "$s" ] || continue
         local s_name
         s_name="$(basename "$s")"

@@ -26,12 +26,14 @@ autologin_is_anchor() {
     fi
   fi
 
-  local a_manifest=""
-  if a_manifest="$(knot_get_manifest_path "desktop" 2>/dev/null)"; then
-    local h
-    h="$(awk -F'"' '/"hostname":/ {print $4}' "$a_manifest")"
-    if [ -n "$h" ] && [ "$my_host" = "$h" ]; then
-      return 0
+  if command -v knot_get_manifest_path >/dev/null; then
+    local a_manifest=""
+    if a_manifest="$(knot_get_manifest_path "desktop")" && [ -f "$a_manifest" ]; then
+      local h
+      h="$(awk -F'"' '/"hostname":/ {print $4}' "$a_manifest")"
+      if [ -n "$h" ] && [ "$my_host" = "$h" ]; then
+        return 0
+      fi
     fi
   fi
   return 1
@@ -80,40 +82,212 @@ autologin_detect_user() {
   echo "root"
 }
 
-autologin_ensure_dm() {
-  knot_log_info "Verifying display manager on $(hostname)..."
+autologin_detect_dm() {
+  local dm_name="unknown"
+  if [ -L /etc/systemd/system/display-manager.service ]; then
+    dm_name="$(basename "$(readlink -f /etc/systemd/system/display-manager.service)" .service)"
+  elif systemctl is-enabled plasmalogin.service >/dev/null; then
+    dm_name="plasmalogin"
+  elif systemctl is-enabled sddm.service >/dev/null; then
+    dm_name="sddm"
+  fi
+  echo "$dm_name"
+}
+
+autologin_status() {
+  local my_host
+  my_host="$(knot_detect_hostname)"
+  echo -e "\033[1;36m=== Knot Auto-Login Status on $my_host ===\033[0m"
+
+  local dm_name="unknown"
+  if [ -L /etc/systemd/system/display-manager.service ]; then
+    dm_name="$(basename "$(readlink -f /etc/systemd/system/display-manager.service)" .service)"
+  fi
+  echo "  Display Manager: $dm_name"
+
+  local user
+  user="$(autologin_detect_user)"
+  local sess=""
+  sess="$(screen_get_local_session "$user")"
+  if [ -n "$sess" ]; then
+    local locked
+    locked="$(loginctl show-session "$sess" -p LockedHint --value)"
+    local stype
+    stype="$(loginctl show-session "$sess" -p Type --value)"
+    echo "  Session on seat0: Session $sess (user: $user, type: $stype, locked: $locked)"
+  else
+    echo "  Session on seat0: None (awaiting login for user: $user)"
+  fi
+
+  local a_state
+  a_state="$(autologin_anchor_status)"
+  echo "  Anchor Lock State: $a_state"
+}
+
+autologin_check() {
+  local my_host
+  my_host="$(knot_detect_hostname)"
+
+  if autologin_is_anchor; then
+    echo "IS_ANCHOR"
+    return 0
+  fi
+
+  local user
+  user="$(autologin_detect_user)"
+  local sess=""
+  sess="$(screen_get_local_session "$user")"
+  if [ -n "$sess" ]; then
+    local locked
+    locked="$(loginctl show-session "$sess" -p LockedHint --value)"
+    if [ "$locked" = "yes" ]; then
+      echo "SESSION_LOCKED"
+      return 0
+    else
+      echo "ALREADY_LOGGED_IN"
+      return 0
+    fi
+  fi
+
+  local active_swarm
+  active_swarm="$(knot_get_active_swarm)"
+  if [ -z "$active_swarm" ] || [ "$active_swarm" = "none" ]; then
+    echo "OUTSIDE_FENCE"
+    return 1
+  fi
+
+  local a_state
+  a_state="$(autologin_anchor_status)"
+  if [ "$a_state" = "LOCKED" ]; then
+    echo "ANCHOR_LOCKED"
+    return 1
+  elif [ "$a_state" != "UNLOCKED" ]; then
+    echo "ANCHOR_OFFLINE"
+    return 2
+  fi
+
+  local dm_name="unknown"
+  if [ -L /etc/systemd/system/display-manager.service ]; then
+    dm_name="$(basename "$(readlink -f /etc/systemd/system/display-manager.service)" .service)"
+  fi
+  if [ "$dm_name" != "plasmalogin" ]; then
+    echo "DM_MIGRATION_RECOMMENDED"
+    return 0
+  fi
+
+  echo "READY_FOR_AUTOLOGIN"
+  return 0
+}
+
+autologin_doctor() {
+  local my_host
+  my_host="$(knot_detect_hostname)"
+  echo -e "\033[1;36m=== Knot Ephemeral Auto-Login Diagnostics ($my_host) ===\033[0m"
+
+  # 1. Host Role Check
+  if autologin_is_anchor; then
+    echo -e "  [i] Host Role: \033[36mAnchor Desktop\033[0m (Ephemeral Strand autologin applies to Strand nodes)"
+  else
+    echo -e "  [✓] Host Role: \033[32mStrand Node\033[0m"
+  fi
+
+  # 2. Display Manager Inspection
+  local dm_name="unknown"
+  if [ -L /etc/systemd/system/display-manager.service ]; then
+    dm_name="$(basename "$(readlink -f /etc/systemd/system/display-manager.service)" .service)"
+  fi
+  echo -e "  [i] Active/Default Display Manager: \033[33m$dm_name\033[0m"
+
+  if [ "$dm_name" = "plasmalogin" ]; then
+    echo -e "  [✓] Display Manager Compatibility: \033[32mCompatible (plasma-login-manager active)\033[0m"
+  else
+    echo -e "  [!] Display Manager Notice: Currently using \033[33m$dm_name\033[0m."
+    echo -e "      Knot ephemeral unattended first-login is built for \033[1mplasma-login-manager\033[0m."
+    echo -e "      Recommendation: Run '\033[36mknot autologin migrate-dm\033[0m' if you wish to opt into plasma-login-manager."
+  fi
+
+  # 3. Active Session Check
+  local user
+  user="$(autologin_detect_user)"
+  echo -e "  [i] Target Login User: \033[36m$user\033[0m"
+  local sess=""
+  sess="$(screen_get_local_session "$user")"
+  if [ -n "$sess" ]; then
+    local locked
+    locked="$(loginctl show-session "$sess" -p LockedHint --value)"
+    echo -e "  [✓] Active Session: \033[32mSession $sess detected (Locked: $locked)\033[0m"
+  else
+    echo -e "  [i] Active Session: None (at display manager login screen)"
+  fi
+
+  # 4. Swarm Network Fence Check
+  local active_swarm
+  active_swarm="$(knot_get_active_swarm)"
+  if [ -n "$active_swarm" ] && [ "$active_swarm" != "none" ]; then
+    echo -e "  [✓] Network Fence: \033[32mActive swarm [$active_swarm] verified\033[0m"
+  else
+    echo -e "  [!] Network Fence: \033[33mNo active swarm hardware fence detected\033[0m"
+  fi
+
+  # 5. Anchor Reachability & Lock Status Check
+  local a_state
+  a_state="$(autologin_anchor_status)"
+  if [ "$a_state" = "UNLOCKED" ]; then
+    echo -e "  [✓] Anchor Status: \033[32mUNLOCKED (Strand autologin permitted)\033[0m"
+  elif [ "$a_state" = "LOCKED" ]; then
+    echo -e "  [!] Anchor Status: \033[33mLOCKED (Strand autologin gated until Anchor unlocks)\033[0m"
+  else
+    echo -e "  [✗] Anchor Status: \033[31mOFFLINE or Unreachable\033[0m"
+  fi
+}
+
+autologin_migrate_dm() {
+  local force=0
+  if [ "${1:-}" = "-y" ] || [ "${1:-}" = "--yes" ]; then
+    force=1
+  fi
+
+  knot_log_info "Knot Display Manager Migration to plasma-login-manager"
+  echo ""
+  echo "This operation will:"
+  echo "  1. Verify / install plasma-login-manager via pacman."
+  echo "  2. Disable the currently active display manager (e.g. sddm.service)."
+  echo "  3. Enable plasmalogin.service as display-manager.service."
+  echo ""
+
+  if [ $force -eq 0 ]; then
+    read -r -p "Proceed with display manager migration? [y/N] " response
+    case "$response" in
+      [yY][eE][sS]|[yY]) ;;
+      *)
+        knot_log_info "Migration cancelled by operator."
+        return 0
+        ;;
+    esac
+  fi
 
   # 1. Install plasma-login-manager if missing
-  if ! pacman -Q plasma-login-manager >/dev/null 2>&1; then
+  if ! pacman -Q plasma-login-manager >/dev/null; then
     knot_log_info "Installing plasma-login-manager via pacman..."
     if ! sudo pacman -S --needed --noconfirm plasma-login-manager; then
       knot_log_err "Failed to install plasma-login-manager"
       return 1
     fi
     knot_log_ok "plasma-login-manager installed successfully."
-  fi
-
-  # 2. Check if SDDM is enabled
-  local sddm_enabled=0
-  if systemctl is-enabled sddm.service >/dev/null 2>&1; then
-    sddm_enabled=1
-  fi
-
-  # 3. Disable SDDM and switch to plasmalogin if needed
-  if [ $sddm_enabled -eq 1 ]; then
-    knot_log_info "Migrating display manager from SDDM to plasma-login-manager..."
-    sudo systemctl disable sddm.service
-    sudo systemctl enable plasmalogin.service
-    knot_log_ok "Display manager migrated to plasmalogin.service (effective on next start)."
-  elif ! systemctl is-enabled plasmalogin.service >/dev/null 2>&1; then
-    knot_log_info "Enabling plasmalogin.service as display-manager.service..."
-    sudo systemctl enable plasmalogin.service
-    knot_log_ok "plasmalogin.service enabled."
   else
-    knot_log_ok "plasma-login-manager is already enabled and active."
+    knot_log_ok "plasma-login-manager is already installed."
   fi
 
-  return 0
+  # 2. Check and disable SDDM if enabled
+  if systemctl is-enabled sddm.service >/dev/null; then
+    knot_log_info "Disabling sddm.service..."
+    sudo systemctl disable sddm.service
+  fi
+
+  # 3. Enable plasmalogin
+  knot_log_info "Enabling plasmalogin.service..."
+  sudo systemctl enable plasmalogin.service
+  knot_log_ok "Display manager successfully migrated to plasmalogin.service (effective on next start)."
 }
 
 autologin_anchor_status() {
@@ -132,19 +306,19 @@ autologin_anchor_status() {
 
   if ! out="$("${ssh_cmd[@]}")"; then
     echo "OFFLINE"
-    return 2
+    return 0
   fi
 
   if [ -z "$out" ]; then
     echo "OFFLINE"
-    return 2
+    return 0
   fi
 
   local line
   line="$(echo "$out" | grep '|' | tail -n1)"
   if [ -z "$line" ]; then
     echo "OFFLINE"
-    return 2
+    return 0
   fi
 
   local u sid seat stype locked
@@ -155,10 +329,10 @@ autologin_anchor_status() {
     return 0
   elif [ "$locked" = "yes" ]; then
     echo "LOCKED"
-    return 1
+    return 0
   else
     echo "OFFLINE"
-    return 2
+    return 0
   fi
 }
 
@@ -177,56 +351,48 @@ autologin_execute_local() {
     return 0
   fi
 
-  # 1. Verify Active Swarm Network Fence
-  local active_swarm=""
-  if [ "${_KNOT_GUARD_RUNNING:-0}" -eq 0 ] && [ -x /usr/local/bin/knot-guard ]; then
-    # Verify knot-guard actually supports --check-active to prevent recursion with legacy guard scripts
-    if grep -q "check-active" /usr/local/bin/knot-guard 2>/dev/null; then
-      local probed=""
-      if probed="$(/usr/local/bin/knot-guard --check-active 2>/dev/null)"; then
-        if [ -n "$probed" ] && [ "$probed" != "none" ]; then
-          active_swarm="$probed"
-        fi
-      fi
-    fi
-  fi
-  if [ -z "$active_swarm" ]; then
-    active_swarm="$(knot_get_active_swarm)"
+  # Non-destructive check probe
+  local probe=""
+  if ! probe="$(autologin_check)"; then
+    : # Probe returned non-zero, handled below
   fi
 
-  if [ -z "$active_swarm" ] || [ "$active_swarm" = "none" ]; then
-    knot_log_warn "Refusing auto-login: Outside any verified swarm hardware network fence."
-    return 1
-  fi
-
-  # 2. Check Anchor Status of Active Swarm
-  local anchor_state
-  anchor_state="$(autologin_anchor_status)"
-  if [ "$anchor_state" != "UNLOCKED" ]; then
-    knot_log_warn "Refusing auto-login: Active swarm [$active_swarm] Anchor is not unlocked (state: $anchor_state)."
-    return 1
-  fi
-
-  # 3. Detect user and check existing graphical session
-  local user
-  user="$(autologin_detect_user)"
-
-  local sess
-  sess="$(screen_get_local_session "$user")"
-  if [ -n "$sess" ]; then
-    local locked
-    locked="$(loginctl show-session "$sess" -p LockedHint --value)"
-    if [ "$locked" = "yes" ]; then
-      knot_log_info "Session $sess is currently locked. Unlocking display session..."
+  case "$probe" in
+    ALREADY_LOGGED_IN)
+      knot_log_ok "User session is already active and unlocked on $my_host. No login required."
+      return 0
+      ;;
+    SESSION_LOCKED)
+      knot_log_info "Session is currently locked on $my_host. Unlocking display session..."
       screen_unlock_local
       return 0
-    else
-      knot_log_ok "Session $sess is already active and unlocked. No login required."
-      return 0
-    fi
-  fi
+      ;;
+    OUTSIDE_FENCE)
+      knot_log_warn "Refusing auto-login: Outside any verified swarm hardware network fence."
+      return 1
+      ;;
+    ANCHOR_LOCKED)
+      knot_log_warn "Refusing auto-login: Active swarm Anchor is locked."
+      return 1
+      ;;
+    ANCHOR_OFFLINE)
+      knot_log_warn "Refusing auto-login: Active swarm Anchor is offline or unreachable."
+      return 1
+      ;;
+    DM_MIGRATION_RECOMMENDED)
+      knot_log_warn "Display manager is not plasma-login-manager. Ephemeral auto-login requires plasmalogin.service."
+      knot_log_info "Run 'knot autologin doctor' for diagnostic guidance, or 'knot autologin migrate-dm' to opt in."
+      return 1
+      ;;
+    READY_FOR_AUTOLOGIN)
+      ;;
+    *)
+      knot_log_warn "Auto-login check probe returned: $probe"
+      ;;
+  esac
 
-  # 4. Ephemeral Autologin Execution via plasmalogin
+  local user
+  user="$(autologin_detect_user)"
   knot_log_info "Anchor is UP and UNLOCKED. Performing ephemeral first login for user '$user' on $my_host..."
 
   local conf_file="/etc/plasmalogin.conf"
@@ -234,7 +400,7 @@ autologin_execute_local() {
   local backup_content=""
   if [ -r "$conf_file" ]; then
     had_existing=1
-    backup_content="$(< "$conf_file")"
+    backup_content="$(cat "$conf_file")"
   fi
 
   cleanup_autologin() {
@@ -263,12 +429,12 @@ CONF_EOF
   # Await active session on seat0 (up to 15s)
   local elapsed=0
   local new_sess=""
+  local stype=""
   while [ $elapsed -lt 30 ]; do
     sleep 0.5
     elapsed=$((elapsed + 1))
     new_sess="$(screen_get_local_session "$user")"
     if [ -n "$new_sess" ]; then
-      local stype
       stype="$(loginctl show-session "$new_sess" -p Type --value)"
       if [ "$stype" = "wayland" ] || [ "$stype" = "x11" ]; then
         break
@@ -330,8 +496,10 @@ autologin_reconcile_all() {
   my_host="$(knot_detect_hostname)"
   local nodes_dirs=()
   local primary_dir=""
-  if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
-    nodes_dirs+=("$primary_dir")
+  if command -v knot_get_nodes_dir >/dev/null; then
+    if primary_dir="$(knot_get_nodes_dir)" && [ -d "$primary_dir" ]; then
+      nodes_dirs+=("$primary_dir")
+    fi
   fi
   local user_home
   user_home="$(knot_detect_user_home)"
@@ -357,19 +525,19 @@ autologin_reconcile_all() {
         continue
       fi
 
-    local strand_status=""
-    if strand_status="$("$KNOT_ROOT/bin/knot" exec "$id" "knot screen status-raw")"; then
-      local strand_line
-      strand_line="$(echo "$strand_status" | grep -E 'NO_SESSION|\|' | tail -n1)"
-      if [ "$strand_line" = "NO_SESSION" ]; then
-        knot_log_info "Strand '$id' ($host) is waiting at login screen. Initiating auto-login..."
-        autologin_trigger_remote "$id"
+      local strand_status=""
+      if strand_status="$("$KNOT_ROOT/bin/knot" exec "$id" "knot screen status-raw")"; then
+        local strand_line
+        strand_line="$(echo "$strand_status" | grep -E 'NO_SESSION|\|' | tail -n1)"
+        if [ "$strand_line" = "NO_SESSION" ]; then
+          knot_log_info "Strand '$id' ($host) is waiting at login screen. Initiating auto-login..."
+          autologin_trigger_remote "$id"
+        else
+          knot_log_info "Strand '$id' ($host) already has an active session ($strand_line)."
+        fi
       else
-        knot_log_info "Strand '$id' ($host) already has an active session ($strand_line)."
+        knot_log_warn "Strand '$id' ($host) is unreachable."
       fi
-    else
-      knot_log_warn "Strand '$id' ($host) is unreachable."
-    fi
     done
   done
 
@@ -392,14 +560,14 @@ autologin_fix_kwallet() {
   knot_log_info "  3. Leave the New Password and Verify fields BLANK (empty)."
   knot_log_info "  4. Click OK and confirm 'Use empty password'."
 
-  if command -v kwalletmanager5 >/dev/null 2>&1; then
-    systemd-run --user kwalletmanager5 >/dev/null 2>&1 || kwalletmanager5 &
-  elif command -v kwalletmanager >/dev/null 2>&1; then
-    systemd-run --user kwalletmanager >/dev/null 2>&1 || kwalletmanager &
-  elif command -v qdbus6 >/dev/null 2>&1; then
-    systemd-run --user qdbus6 org.kde.kwalletd6 /modules/kwalletd6 org.kde.KWallet.changePassword kdewallet 0 "Knot" >/dev/null 2>&1 || true
-  elif command -v qdbus >/dev/null 2>&1; then
-    systemd-run --user qdbus org.kde.kwalletd5 /modules/kwalletd5 org.kde.KWallet.changePassword kdewallet 0 "Knot" >/dev/null 2>&1 || true
+  if command -v kwalletmanager5 >/dev/null; then
+    systemd-run --user kwalletmanager5
+  elif command -v kwalletmanager >/dev/null; then
+    systemd-run --user kwalletmanager
+  elif command -v qdbus6 >/dev/null; then
+    systemd-run --user qdbus6 org.kde.kwalletd6 /modules/kwalletd6 org.kde.KWallet.changePassword kdewallet 0 "Knot"
+  elif command -v qdbus >/dev/null; then
+    systemd-run --user qdbus org.kde.kwalletd5 /modules/kwalletd5 org.kde.KWallet.changePassword kdewallet 0 "Knot"
   fi
 
   knot_log_ok "KWallet dialog launched on active desktop display."

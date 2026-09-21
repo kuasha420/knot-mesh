@@ -39,8 +39,9 @@ package() {
     local destdir="${pkgdir}/usr/lib/knot-mesh"
     mkdir -p "${destdir}" "${pkgdir}/usr/bin"
 
-    # Copy mesh core, bin, templates, and skills
-    cp -r core bin templates skills "${destdir}/"
+    # Copy mesh core, bin, templates, and runtime skills
+    cp -r core bin templates runtime "${destdir}/"
+    ln -sfn "runtime/skills" "${destdir}/skills"
 
     # Copy systemd units if present
     if [ -d "systemd" ]; then

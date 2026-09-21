@@ -201,7 +201,7 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
                     ps.write(f'export KNOT_PROJECT="{project_name}"\n')
                     ps.write(f'export KNOT_PEERS="{",".join(nodes)}"\n')
                     ps.write(f'export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:$PATH"\n')
-                    ps.write(f'if ! PDIR="$("{knot_root}/skills/swarm-council/scripts/resolve_project.py" "{project_name}" 2>&1)"; then PDIR="{knot_root}"; fi\n')
+                    ps.write(f'if ! PDIR="$("{knot_root}/runtime/skills/swarm-council/scripts/resolve_project.py" "{project_name}")"; then PDIR="{knot_root}"; fi\n')
                     ps.write('if [ -d "$PDIR" ]; then cd "$PDIR"; fi\n')
                     ps.write(f'echo -e "\\033[1;36m╔══════════════════════════════════════════════════════════════════════╗\\033[0m"\n')
                     ps.write(f'echo -e "\\033[1;36m║\\033[0m  🛰️  \\033[1mKnot Swarm Interactive Cockpit: @[{node}]\\033[0m ({desc})"\n')

@@ -112,10 +112,10 @@ source "$KNOT_ROOT/core/modules/swarm_sync.sh"
 
 # Mock KNOT_ROOT with simulated binaries and skill
 MOCK_ROOT="$TMP_DIR/mock_root"
-mkdir -p "$MOCK_ROOT/bin" "$MOCK_ROOT/skills/swarm-council/scripts"
+mkdir -p "$MOCK_ROOT/bin" "$MOCK_ROOT/runtime/skills/swarm-council/scripts"
 touch "$MOCK_ROOT/bin/knot" "$MOCK_ROOT/bin/knot-installer"
 chmod +x "$MOCK_ROOT/bin/knot" "$MOCK_ROOT/bin/knot-installer"
-echo "print('council_hook')" > "$MOCK_ROOT/skills/swarm-council/scripts/council_hook.py"
+echo "print('council_hook')" > "$MOCK_ROOT/runtime/skills/swarm-council/scripts/council_hook.py"
 
 # Pre-populate dummy config.json with useAiCredits=true
 mkdir -p "$HOME/.gemini/config" "$HOME/.gemini/antigravity-cli"

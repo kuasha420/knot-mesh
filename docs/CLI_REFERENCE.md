@@ -166,15 +166,23 @@ knot screen toggle                 # Toggle lock state
 ---
 
 ### `knot autologin`
-Manages headless session unlocking and automated session resumption when the Anchor is unlocked.
+Advisory opt-in auto-login and display manager orchestration module. Eliminates first-login friction on Strands when Anchor is online and unlocked without forcing destructive system changes.
 
 ```bash
-knot autologin status              # Check autologin readiness and session status
-knot autologin unlock              # Execute coordinated unlock on local or strand nodes
-knot autologin lock                # Lock node sessions
-knot autologin enable              # Enable autologin service on boot
-knot autologin disable             # Disable autologin service
+knot autologin status              # Inspect autologin readiness, current session, and DM config
+knot autologin check               # Non-mutating advisory check of DM compatibility and config
+knot autologin doctor              # Deep health diagnosis of display manager and autologin preconditions
+knot autologin migrate-dm          # Opt-in display manager migration for headless Wayland auto-unlock (interactive confirmation)
+knot autologin local               # Execute local session login/unlock sequence
+knot autologin reconcile           # Reconcile auto-login across all reachable swarm strands
+knot autologin fix-kwallet         # Launch KDE Wallet password manager to configure empty password for unattended autologin
+knot autologin <node_id>           # Trigger remote auto-login on a specific strand node
 ```
+
+- **Features & Safety Guarantees**:
+  - **Advisory Non-Destructive Operation**: Display manager migrations are strictly opt-in; existing display managers (GDM, LightDM, SDDM) are never replaced without explicit user confirmation.
+  - **Configuration Backups & Cleanup**: Automatic backup creation (`.bak`) before modifying any DM configuration, with cleanup traps ensuring atomic writes.
+  - **KWallet Prompt Elimination**: `fix-kwallet` launches the KDE Wallet password manager dialog to configure empty passwords, avoiding GUI unlock prompts during unattended boot.
 
 ---
 
@@ -192,17 +200,20 @@ knot kvm lock-toggle               # Toggle cursor confinement
 ---
 
 ### `knot kdeconnect`
-Manages KDE Connect mesh synchronization, custom device discovery, and cross-device clipboard sharing.
+Manages KDE Connect mesh synchronization, custom device discovery, device pairing, and cross-device clipboard sharing.
 
 ```bash
-knot kdeconnect status             # Show paired devices and clipboard status
-knot kdeconnect sync               # Synchronize swarm IP hints into local customDevices
-knot kdeconnect sync --all         # Propagate customDevices and enforce clipboard across fleet
+knot kdeconnect status             # Show paired devices, IP hints, and clipboard status locally
+knot kdeconnect status --all       # Fleet-wide KDE Connect status across all active swarm nodes
+knot kdeconnect sync               # Synchronize swarm IP hints into local customDevices & enforce clipboard plugins
+knot kdeconnect sync --all         # Propagate customDevices and enforce clipboard across the entire fleet
+knot kdeconnect pair <node_id>     # Initiate bidirectional pairing request with a specific mesh peer
 ```
 
 - **Features**:
-  - Automatically merges swarm node IP addresses into `customDevices` while preserving existing devices (e.g. smartphones).
-  - Enables `kdeconnect.clipboard` and `kdeconnect.clipboard.daemon` plugins across all paired workstations.
+  - **Idempotent Python INI Parsing**: Parses `kdeglobals` and KDE Connect configuration without clobbering case sensitivity, preserving existing paired devices (e.g. smartphones).
+  - **Clipboard Daemon Enforcement**: Automatically verifies and activates `kdeconnect.clipboard` and `kdeconnect.clipboard.daemon` plugins across all paired workstations.
+  - **Dynamic Mesh Discovery**: Discovers swarm node IPs from active swarm manifests and appends them to `customDevices` for immediate local subnet discovery.
 
 ---
 

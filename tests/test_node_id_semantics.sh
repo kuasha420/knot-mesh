@@ -13,7 +13,7 @@ bash -n "$KNOT_ROOT/core/resolver.sh"
 bash -n "$KNOT_ROOT/core/modules/ssh.sh"
 bash -n "$KNOT_ROOT/core/gitops.sh"
 bash -n "$KNOT_ROOT/bin/knot"
-python3 -m py_compile "$KNOT_ROOT/skills/swarm-council/scripts/resolve_node.py"
+python3 -m py_compile "$KNOT_ROOT/runtime/skills/swarm-council/scripts/resolve_node.py"
 python3 -m py_compile "$KNOT_ROOT/core/hub/hub.py"
 echo "  -> Syntax audit: OK"
 
@@ -103,7 +103,7 @@ res_id="$(KNOT_NODE_ID="" PATH="$NEW_PATH" knot_detect_node_id)"
 echo "  -> Hostname vs Node ID detection without 'hostname' binary: OK"
 
 echo "=== [Test 4] Python Dynamic Node ID Resolver (resolve_node.py) ==="
-py_res="$(KNOT_NODE_ID="" PATH="$NEW_PATH" python3 "$KNOT_ROOT/skills/swarm-council/scripts/resolve_node.py")"
+py_res="$(KNOT_NODE_ID="" PATH="$NEW_PATH" python3 "$KNOT_ROOT/runtime/skills/swarm-council/scripts/resolve_node.py")"
 [ "$py_res" = "rog-ally" ] || { echo "Expected rog-ally from resolve_node.py, got $py_res" >&2; exit 1; }
 
 # Test alias match
@@ -116,7 +116,7 @@ cat << JSON_EOF > "$SWARM_NODES/laptop.json"
   "role": "strand"
 }
 JSON_EOF
-py_alias_res="$(KNOT_NODE_ID="" python3 "$KNOT_ROOT/skills/swarm-council/scripts/resolve_node.py" "laptop-linux")"
+py_alias_res="$(KNOT_NODE_ID="" python3 "$KNOT_ROOT/runtime/skills/swarm-council/scripts/resolve_node.py" "laptop-linux")"
 [ "$py_alias_res" = "laptop-linux" ] || { echo "Expected laptop-linux from list match, got $py_alias_res" >&2; exit 1; }
 echo "  -> Python resolve_node.py semantics: OK"
 

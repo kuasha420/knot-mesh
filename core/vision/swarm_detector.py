@@ -15,6 +15,8 @@ import shutil
 import logging
 import tempfile
 import subprocess
+import sys
+import glob
 from typing import Dict, Any, List, Optional
 from PIL import Image
 
@@ -70,24 +72,55 @@ class SwarmVisionDetector:
                     orig_w, orig_h = im.size
 
             # Format node context for the agent
-            known_nodes = swarm_nodes or []
+            known_nodes = list(swarm_nodes) if swarm_nodes else []
+            if not known_nodes:
+                user_home = os.path.expanduser("~")
+                manifest_dirs = glob.glob(os.path.join(user_home, ".config/knot/swarms/*/nodes")) + \
+                                glob.glob("/etc/knot/swarms.d/*/nodes")
+                seen_ids = set()
+                for mdir in manifest_dirs:
+                    if os.path.isdir(mdir):
+                        for mfile in glob.glob(os.path.join(mdir, "*.json")):
+                            try:
+                                with open(mfile, "r") as mf:
+                                    mdata = json.load(mf)
+                                    nid = mdata.get("id") or os.path.splitext(os.path.basename(mfile))[0]
+                                    if nid not in seen_ids:
+                                        seen_ids.add(nid)
+                                        mdata["id"] = nid
+                                        known_nodes.append(mdata)
+                            except Exception as me:
+                                sys.stderr.write(f"[swarm_detector] Error reading manifest {mfile}: {me}\n")
+
+            anchor_node_id = anchor_id
+            if not anchor_node_id:
+                for n in known_nodes:
+                    if n.get("role") == "anchor":
+                        anchor_node_id = n.get("id")
+                        break
+            if not anchor_node_id and known_nodes:
+                anchor_node_id = known_nodes[0].get("id")
+            if not anchor_node_id:
+                anchor_node_id = "node_a"
+
             node_lines = []
-            anchor_node_id = anchor_id or "rog-ally"
             for n in known_nodes:
                 nid = n.get("id", "unknown")
                 hname = n.get("hostname", nid)
                 role = n.get("role", "strand")
                 disp = n.get("display", {})
-                w = disp.get("width", 1920)
-                h = disp.get("height", 1080)
-                node_lines.append(f"- {nid} (hostname: {hname}, role: {role}, resolution: {w}x{h})")
+                w = disp.get("width", 1920) if isinstance(disp, dict) else 1920
+                h = disp.get("height", 1080) if isinstance(disp, dict) else 1080
+                caps = n.get("capabilities", [])
+                caps_str = f", capabilities: {','.join(caps)}" if caps else ""
+                node_lines.append(f"- {nid} (hostname: {hname}, role: {role}, resolution: {w}x{h}{caps_str})")
 
             if not node_lines:
                 node_lines = [
-                    "- laptop (role: strand laptop, 1920x1080)",
-                    "- PurrfectSoftwareLimited (role: strand workstation desktop monitor, 2560x1440)",
-                    "- rog-ally (role: anchor workstation, primary external display DP-2 2560x1440, internal eDP-1 1920x1080)",
-                    "- steamdeck-eos (role: strand handheld gaming PC, 1280x800)"
+                    f"- {anchor_node_id} (role: anchor workstation, resolution: 2560x1440)",
+                    "- node_b (role: strand laptop, resolution: 1920x1080)",
+                    "- node_c (role: strand desktop monitor, resolution: 2560x1440)",
+                    "- node_d (role: strand handheld PC, resolution: 1280x800)"
                 ]
 
             node_context = "\n".join(node_lines)
@@ -105,13 +138,13 @@ class SwarmVisionDetector:
                 f"5. Match each display with the corresponding Knot node ID from the list above.\n"
                 f"6. Determine its position relative to the primary center anchor ('left', 'right', 'down', 'up', 'anchor', 'anchor_internal').\n"
                 f"7. Multi-Display Geometry & Fractional Spans Rules:\n"
-                f"   - If the anchor node ({anchor_node_id}) has an internal secondary screen (e.g. ASUS ROG Ally built-in screen eDP-1 docked below the center monitor):\n"
-                f"     * Label that internal screen position_relative_to_anchor: 'anchor_internal', matched_node_id: '{anchor_node_id}:eDP-1'.\n"
-                f"     * The bottom edge left 50% [0, 50] routes locally via OS to eDP-1.\n"
-                f"     * Any downward transition to an external handheld (e.g. steamdeck-eos) must route from the right half: span [50, 100], target_span [0, 100].\n"
-                f"     * steamdeck-eos routes up: span [0, 100], target_span [50, 100].\n"
-                f"   - Laptops sitting lower on the left (e.g. laptop): span [25, 100], target_span [0, 85]. Reciprocal on laptop right: span [0, 85], target_span [25, 100].\n"
-                f"   - Aligned monitors on the right (e.g. PurrfectSoftwareLimited): span [0, 100], target_span [0, 100]. Reciprocal on right left: span [0, 100], target_span [0, 100].\n"
+                f"   - If the anchor node ({anchor_node_id}) has an internal secondary screen docked below the center monitor:\n"
+                f"     * Label that internal screen position_relative_to_anchor: 'anchor_internal', matched_node_id: '{anchor_node_id}:internal'.\n"
+                f"     * The bottom edge left 50% [0, 50] routes locally via OS to the internal screen.\n"
+                f"     * Any downward transition to an external handheld device must route from the right half: span [50, 100], target_span [0, 100].\n"
+                f"     * External handheld routes up: span [0, 100], target_span [50, 100].\n"
+                f"   - Laptops sitting lower on the left flank: span [25, 100], target_span [0, 85]. Reciprocal on right: span [0, 85], target_span [25, 100].\n"
+                f"   - Aligned monitors on the right flank: span [0, 100], target_span [0, 100]. Reciprocal on left: span [0, 100], target_span [0, 100].\n"
                 f"8. Synthesize a complete bidirectional reciprocal layout dictionary for Deskflow KVM.\n"
                 f"9. Provide concise, high-level reasoning.\n\n"
                 f"Return ONLY valid JSON formatted inside a ```json code block conforming to this schema:\n"
@@ -122,31 +155,31 @@ class SwarmVisionDetector:
                 f"    {{\n"
                 f'      "box_2d": [ymin, xmin, ymax, xmax],\n'
                 f'      "device_type": "laptop",\n'
-                f'      "device_name": "laptop",\n'
-                f'      "matched_node_id": "laptop",\n'
+                f'      "device_name": "node_b",\n'
+                f'      "matched_node_id": "node_b",\n'
                 f'      "position_relative_to_anchor": "left",\n'
                 f'      "span": [25, 100],\n'
                 f'      "confidence": 0.95,\n'
-                f'      "description": "ASUS gaming laptop displaying Discord on far-left"\n'
+                f'      "description": "Secondary workstation laptop screen on left flank"\n'
                 f"    }}\n"
                 f"  ],\n"
                 f'  "proposed_layout": {{\n'
                 f'    "{anchor_node_id}": {{\n'
-                f'      "left": {{"node": "laptop", "span": [25, 100], "target_span": [0, 85]}},\n'
-                f'      "right": {{"node": "PurrfectSoftwareLimited", "span": [0, 100], "target_span": [0, 100]}},\n'
-                f'      "down": {{"node": "steamdeck-eos", "span": [50, 100], "target_span": [0, 100]}}\n'
+                f'      "left": {{"node": "node_b", "span": [25, 100], "target_span": [0, 85]}},\n'
+                f'      "right": {{"node": "node_c", "span": [0, 100], "target_span": [0, 100]}},\n'
+                f'      "down": {{"node": "node_d", "span": [50, 100], "target_span": [0, 100]}}\n'
                 f"    }},\n"
-                f'    "laptop": {{\n'
+                f'    "node_b": {{\n'
                 f'      "right": {{"node": "{anchor_node_id}", "span": [0, 85], "target_span": [25, 100]}}\n'
                 f"    }},\n"
-                f'    "PurrfectSoftwareLimited": {{\n'
+                f'    "node_c": {{\n'
                 f'      "left": {{"node": "{anchor_node_id}", "span": [0, 100], "target_span": [0, 100]}}\n'
                 f"    }},\n"
-                f'    "steamdeck-eos": {{\n'
+                f'    "node_d": {{\n'
                 f'      "up": {{"node": "{anchor_node_id}", "span": [0, 100], "target_span": [50, 100]}}\n'
                 f"    }}\n"
                 f"  }},\n"
-                f'  "reasoning": "Explanation of layout and detected displays"\n'
+                f'  "reasoning": "Spatial reasoning across detected displays"\n'
                 f"}}"
             )
 
@@ -202,7 +235,7 @@ class SwarmVisionDetector:
             if temp_img_path and os.path.exists(temp_img_path):
                 try:
                     os.remove(temp_img_path)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("Failed to remove temporary image %s: %s", temp_img_path, exc)
 
 swarm_detector = SwarmVisionDetector()

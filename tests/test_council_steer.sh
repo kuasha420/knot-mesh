@@ -44,7 +44,7 @@ echo "PASSED"
 
 # 3. Tournament pack scaffolding verification
 echo -n "3. Testing tournament pack prompt scaffolding... "
-scaffold_json="$(python3 "$KNOT_ROOT/skills/swarm-council/scripts/scaffolder.py" --pack tournament --dry-run)"
+scaffold_json="$(python3 "$KNOT_ROOT/runtime/skills/swarm-council/scripts/scaffolder.py" --pack tournament --dry-run)"
 pack_name="$(echo "$scaffold_json" | jq -r '.pack')"
 if [ "$pack_name" != "tournament" ]; then
   echo "FAILED (Expected pack 'tournament', got '$pack_name')"
@@ -61,7 +61,7 @@ echo "PASSED"
 echo -n "4. Testing tournament referee points calculation... "
 referee_test="$(python3 -c "
 import sys
-sys.path.insert(0, '$KNOT_ROOT/skills/swarm-council/scripts')
+sys.path.insert(0, '$KNOT_ROOT/runtime/skills/swarm-council/scripts')
 from tournament_referee import calculate_volley_points, verify_proof
 
 pts, ace, smash, elegance = calculate_volley_points(4200.0, True)
@@ -87,7 +87,7 @@ echo "PASSED"
 echo -n "5. Testing confluence.py remote control socket configuration... "
 conf_test="$(python3 -c "
 import sys, os
-sys.path.insert(0, '$KNOT_ROOT/skills/swarm-council/scripts')
+sys.path.insert(0, '$KNOT_ROOT/runtime/skills/swarm-council/scripts')
 from confluence import generate_session_conf
 
 conf = generate_session_conf(

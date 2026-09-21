@@ -27,7 +27,7 @@ def analyze_desk_photo(
         image_input: File path (str), raw image bytes (bytes), or PIL.Image
         mode: "auto" (default: try swarm AI, fallback to offline), "swarm", or "offline"
         swarm_nodes: Optional list of connected node metadata dicts
-        anchor_id: Optional anchor node ID (defaults to 'rog-ally' or center node)
+        anchor_id: Optional anchor node ID (defaults to 'desktop' or center node)
 
     Returns:
         Structured dictionary conforming to the Knot topology analysis schema.

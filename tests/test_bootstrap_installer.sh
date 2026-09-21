@@ -34,8 +34,8 @@ PKG_TEST_DIR="$(mktemp -d)"
   source "$KNOT_ROOT/PKGBUILD"
   package
 )
-if [ ! -d "$PKG_TEST_DIR/usr/lib/knot-mesh/skills/swarm-council" ]; then
-  echo "Error: skills/swarm-council missing from package build output!" >&2
+if [ ! -d "$PKG_TEST_DIR/usr/lib/knot-mesh/runtime/skills/swarm-council" ]; then
+  echo "Error: runtime/skills/swarm-council missing from package build output!" >&2
   exit 1
 fi
 for bin_name in knot knot-installer knot-agent knot-hub knot-autounlock knot-stripd; do
