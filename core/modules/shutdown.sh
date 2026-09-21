@@ -62,9 +62,12 @@ shutdown_stop_local_services() {
   knot_log_info "Gracefully stopping local Knot services on $(knot_detect_hostname)..."
 
   # 1. Stop Knot Worker Agent
-  if systemctl --user is-active knot-agent.service >/dev/null 2>&1; then
+  if systemctl --user is-active --quiet knot-agent.service; then
     knot_log_info "Stopping knot-agent.service (releasing active tasks)..."
-    systemctl --user stop knot-agent.service 2>/dev/null || true
+    local stop_err=""
+    if ! stop_err="$(systemctl --user stop knot-agent.service 2>&1)"; then
+      knot_log_warn "Notice: failed to stop knot-agent.service: $stop_err"
+    fi
   fi
 
   # 2. Stop Deskflow KVM if running
@@ -88,7 +91,7 @@ shutdown_stop_local_services() {
   fi
   if [ -z "$anchor_host" ]; then
     local a_manifest=""
-    if a_manifest="$(knot_get_manifest_path "desktop" 2>/dev/null)"; then
+    if a_manifest="$(knot_get_manifest_path "desktop")"; then
       local h
       h="$(awk -F'"' '/"hostname":/ {print $4}' "$a_manifest")"
       if [ -n "$h" ]; then anchor_host="$h"; fi
@@ -123,7 +126,7 @@ shutdown_resume_local_services() {
   fi
   if [ -z "$anchor_host" ]; then
     local a_manifest=""
-    if a_manifest="$(knot_get_manifest_path "desktop" 2>/dev/null)"; then
+    if a_manifest="$(knot_get_manifest_path "desktop")"; then
       local h
       h="$(awk -F'"' '/"hostname":/ {print $4}' "$a_manifest")"
       if [ -n "$h" ]; then anchor_host="$h"; fi
@@ -131,10 +134,18 @@ shutdown_resume_local_services() {
   fi
 
   if [ -n "$anchor_host" ] && [ "$my_host" = "$anchor_host" ]; then
-    systemctl --user start knot-hub.service 2>/dev/null || true
+    local start_err=""
+    if ! start_err="$(systemctl --user start knot-hub.service 2>&1)"; then
+      knot_log_warn "Notice: failed to start knot-hub.service: $start_err"
+    fi
   fi
-  systemctl --user start knot-agent.service 2>/dev/null || true
-  systemctl --user start knot-deskflow.service 2>/dev/null || true
+  local start_err=""
+  if ! start_err="$(systemctl --user start knot-agent.service 2>&1)"; then
+    knot_log_warn "Notice: failed to start knot-agent.service: $start_err"
+  fi
+  if ! start_err="$(systemctl --user start knot-deskflow.service 2>&1)"; then
+    knot_log_warn "Notice: failed to start knot-deskflow.service: $start_err"
+  fi
   knot_log_ok "Local Knot services active."
 }
 
@@ -147,16 +158,23 @@ shutdown_exec_local() {
   time_spec="$(shutdown_parse_delay "$delay_arg")"
 
   if [ "$action" = "cancel" ]; then
-    sudo shutdown -c 2>/dev/null || true
+    local c_err="" c_rc=0
+    c_err="$(sudo shutdown -c 2>&1)" || c_rc=$?
+    if [ $c_rc -ne 0 ]; then
+      knot_log_warn "Notice: sudo shutdown -c returned code $c_rc: $c_err"
+    fi
     shutdown_resume_local_services
     knot_log_ok "Shutdown/reboot cancelled on $(knot_detect_hostname)."
     return 0
   fi
 
   if [ "$action" = "show" ] || [ "$action" = "status" ]; then
-    local my_host show_out
+    local my_host show_out="" s_rc=0
     my_host="$(knot_detect_hostname)"
-    show_out="$(shutdown --show 2>&1)" || true
+    show_out="$(shutdown --show 2>&1)" || s_rc=$?
+    if [ $s_rc -ne 0 ]; then
+      knot_log_warn "Notice: shutdown --show returned code $s_rc: $show_out"
+    fi
     echo "[$my_host] $show_out"
     return 0
   fi
@@ -186,8 +204,7 @@ shutdown_exec_remote() {
   local wall_msg="${4:-Shutdown scheduled via Knot Swarm}"
 
   local manifest=""
-  manifest="$(knot_get_manifest_path "$target" 2>/dev/null || true)"
-  if [ -z "$manifest" ] || [ ! -f "$manifest" ]; then
+  if ! manifest="$(knot_get_manifest_path "$target")" || [ -z "$manifest" ] || [ ! -f "$manifest" ]; then
     knot_log_err "Unknown node '$target'"
     return 1
   fi
@@ -206,9 +223,14 @@ shutdown_exec_remote() {
   fi
 
   if [ "$action" = "show" ] || [ "$action" = "status" ]; then
-    local remote_status
-    if ! remote_status="$(ssh -o BatchMode=yes -o ConnectTimeout=3 -p "$port" "$target" "shutdown --show 2>&1 || true")"; then
-      remote_status="Unreachable"
+    local remote_status="" r_rc=0
+    remote_status="$(ssh -o BatchMode=yes -o ConnectTimeout=3 -p "$port" "$target" "shutdown --show 2>&1")" || r_rc=$?
+    if [ $r_rc -ne 0 ]; then
+      if [ $r_rc -eq 255 ]; then
+        remote_status="Unreachable"
+      else
+        remote_status="No scheduled shutdown or error ($r_rc): $remote_status"
+      fi
     fi
     echo "[$target / $host] $remote_status"
     return 0
@@ -246,7 +268,7 @@ shutdown_exec_all() {
 
   local nodes_dirs=()
   local primary_dir=""
-  if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+  if primary_dir="$(knot_get_nodes_dir)" && [ -d "$primary_dir" ]; then
     nodes_dirs+=("$primary_dir")
   fi
   local user_home
@@ -305,9 +327,8 @@ shutdown_exec_all() {
   # 1. Shut down / schedule strands first
   for s in "${strands[@]}"; do
     local s_manifest=""
-    s_manifest="$(knot_get_manifest_path "$s" 2>/dev/null || true)"
     local s_host=""
-    if [ -n "$s_manifest" ] && [ -f "$s_manifest" ]; then
+    if s_manifest="$(knot_get_manifest_path "$s")" && [ -f "$s_manifest" ]; then
       s_host="$(awk -F'"' '/"hostname":/ {print $4}' "$s_manifest")"
     fi
     if [ "$s_host" != "$my_host" ]; then

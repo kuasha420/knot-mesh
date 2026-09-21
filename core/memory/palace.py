@@ -192,8 +192,8 @@ class HybridLogicalClock:
                     else:
                         self.latest_time = phys_now
                         self.counter = 0
-        except (ValueError, IndexError):
-            pass
+        except (ValueError, IndexError) as e:
+            sys.stderr.write(f"Notice: [memory] Invalid remote HLC format: {e}\n")
 
 
 # -------------------------------------------------------------
@@ -249,10 +249,10 @@ class MemoryPalaceClient:
                                     d = json.load(f)
                                     if d.get("hostname") == my_host:
                                         return d.get("id", my_host)
-                            except (OSError, json.JSONDecodeError):
-                                pass
-                except OSError:
-                    pass
+                            except (OSError, json.JSONDecodeError) as e:
+                                sys.stderr.write(f"Notice: [memory] Could not parse node definition {fp}: {e}\n")
+                except OSError as e:
+                    sys.stderr.write(f"Notice: [memory] Could not list node directory {ndir}: {e}\n")
         return my_host
 
     def _create_connection(self) -> sqlite3.Connection:
@@ -279,18 +279,18 @@ class MemoryPalaceClient:
             try:
                 import sqlite_vec
                 sqlite_vec.load(conn)
-            except (ImportError, sqlite3.OperationalError):
-                pass
+            except (ImportError, sqlite3.OperationalError) as e:
+                sys.stderr.write(f"Notice: [memory] Optional sqlite-vec extension not loaded: {e}\n")
 
             # Check for crsqlite
             for ext_name in ["crsqlite", "crsqlite.so"]:
                 try:
                     conn.load_extension(ext_name)
                     break
-                except sqlite3.OperationalError:
-                    pass
-        except (AttributeError, sqlite3.OperationalError):
-            pass
+                except sqlite3.OperationalError as e:
+                    sys.stderr.write(f"Notice: [memory] Optional crsqlite extension '{ext_name}' not loaded: {e}\n")
+        except (AttributeError, sqlite3.OperationalError) as e:
+            sys.stderr.write(f"Notice: [memory] Extension loading not supported or failed: {e}\n")
 
     def _get_connection(self) -> sqlite3.Connection:
         if self._in_memory_conn is not None:

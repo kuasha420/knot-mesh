@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 # Knot Swarm Decentralized Memory Palace & Vault module
 
 cmd_memory() {

@@ -32,7 +32,8 @@ def detect_local_ips() -> List[str]:
                     ip = parts[1].split("/")[0]
                     if ip not in ips:
                         ips.append(ip)
-    except Exception:
+    except Exception as e:
+        sys.stderr.write(f"Notice: [tls] Hostname IP lookup failed: {e}\n")
         # Fallback socket lookup
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -41,8 +42,8 @@ def detect_local_ips() -> List[str]:
             s.close()
             if ip not in ips:
                 ips.append(ip)
-        except Exception:
-            pass
+        except Exception as fe:
+            sys.stderr.write(f"Notice: [tls] Fallback UDP socket IP lookup failed: {fe}\n")
     return ips
 
 

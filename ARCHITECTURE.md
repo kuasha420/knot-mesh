@@ -14,7 +14,23 @@
 
 ---
 
-## 2. Mesh Hierarchy & Topology
+## 2. Two-Tier Mesh Hierarchy & Architecture
+
+Knot Mesh is partitioned into two cleanly decoupled architectural planes:
+
+### Tier 1: Device-to-Device (D2D) Physical Workspace Fabric
+The foundational infrastructure layer managing physical machines, hardware network boundaries, displays, and KVM virtualization:
+- **Hardware Network Fencing (`knot-guard`)**: Gateway MAC and BSSID discovery pinning active swarm profiles to physical locations.
+- **Wayland-Native Spatial KVM (`knot-deskflow`)**: Sub-pixel cursor crossovers, dynamic spatial topology compilation, and InputCapture persistence across Wayland compositors.
+- **Dynamic PAM Gating (`knot-auth-check`)**: Mathematical CIDR subnet validation for ephemeral passwordless sudo execution.
+- **Display Management & Auto-Unlock (`knot-autounlock`)**: Unlocking and waking Wayland/KDE display sessions on cursor entry.
+
+### Tier 2: Agent-to-Agent (A2A) Cognitive Swarm Layer
+The autonomous multi-agent intelligence layer orchestrating distributed AI agent instances across the mesh:
+- **Swarm Council Plane (`knot council`)**: Out-of-band collaborative deliberation across autonomous CLI agents with zero startup token overhead and topological Kitty confluence multiplexing.
+- **Linda Tuplespace & Blackboard Hub (`knot-hub`, `knot-agent`)**: Distributed state synchronization, leasing, and task coordination.
+- **Decentralized Memory Palace (`core/memory/`)**: Vault and working memory sharing across node agents.
+- **Antigravity CLI Orchestrator (`core/modules/antigravity.sh`)**: Headless agy CLI discovery, session execution slices, and Google OAuth credential syncing.
 
 ```
                                   ┌─────────────────────────────────────────┐
@@ -191,4 +207,33 @@ Swarm Council operates independently of Knot's Blackboard Hub and Linda Tuplespa
 - **Topological Tiling Layouts**: Confluence mode configures Kitty with scale-aware layouts (`grid`, `sidebyside`, `splits`, `tall`, `fat`, `stacked`).
 - **Dynamic Scale Detection**: Queries Wayland / KDE Plasma display scaling (`kscreen-doctor -o`, `QT_SCALE_FACTOR`, `GDK_SCALE`) and dynamically calculates optimal cockpit typography (8.0pt to 12.0pt).
 - **Session Resumption**: `knot council resume [run_id]` re-opens the cockpit and re-attaches all panes using `agy -c` with zero prompt overhead.
+
+---
+
+## 9. Runtime Skills Architecture (`runtime/skills/`)
+
+Autonomous agent capabilities are fully decoupled from core bash orchestrators and relocated to the standardized `runtime/skills/` directory adhering to the open Agent Skills specification:
+
+- **Directory Structure**:
+  - `runtime/skills/goal-with-lease/`: Autonomous goal execution with Linda tuplespace artifact locking and distributed heartbeats.
+  - `runtime/skills/swarm-council/`: Confluence cockpit coordination, multi-agent steering, and discussion thread reconciliations.
+- **Skill Specification Format**:
+  - Each skill directory is anchored by `SKILL.md`, documenting instructions, input schemas, environmental prerequisites, and operational contracts.
+  - Skills interact with the underlying mesh strictly via clean CLI entrypoints (`knot`, `knot council`) or REST APIs, preserving strict tier decoupling between A2A cognitive processes and D2D system plumbing.
+
+---
+
+## 10. PSL Gold Standard Error Transparency Contracts
+
+System reliability and observability across Knot Mesh are governed by the Product Systems Language (PSL) Gold Standard:
+
+### Zero Error Swallowing Mandate
+- **Strict Ban on Error Suppression**: The patterns `2>/dev/null`, `&>/dev/null`, `> /dev/null 2>&1`, `|| true`, and `|| :` are permanently banned across all production scripts (`bin/*`), runtime modules (`core/modules/*.sh`), libraries (`core/lib.sh`), and test suites (`tests/*.sh`).
+- **Python Exception Hygiene**: Bare `except:` and swallowed `except ...: pass` blocks are strictly forbidden. All exceptions must be explicitly captured and logged or re-raised.
+- **Shell Hygiene Contract**: Every bash script strictly executes under `set -euo pipefail`.
+- **POSIX-Standard Command Probing**: Command and utility detection uses standard `command -v <cmd> >/dev/null` without stderr redirection.
+- **Systemd Service Inspection**: Service states are probed using native systemd quiet flags (`systemctl --user is-active --quiet <unit>`, `systemctl is-enabled --quiet <unit>`).
+- **DBus & Subprocess Diagnostics**: Status codes and stderr outputs from DBus calls (`busctl`, `qdbus`) and subprocesses are explicitly inspected, with non-zero exits logged transparently to stderr via `knot_log_warn` or `knot_log_err`.
+- **Automated Continuous Enforcement**: `tests/test_psl_integrity.sh` provides automated CI validation across all 5 PSL audits (Pattern Scanning, Shell Hygiene, Syntax, Python Integrity, and Executable Permissions).
+
 

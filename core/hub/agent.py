@@ -57,8 +57,8 @@ def is_on_ac_power() -> bool:
             try:
                 if open(online_file).read().strip() == "1":
                     return True
-            except Exception:
-                pass
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
         type_file = os.path.join(ps_dir, s, "type")
         if os.path.exists(type_file):
             try:
@@ -66,8 +66,8 @@ def is_on_ac_power() -> bool:
                 if st_type in ("mains", "usb"):
                     if os.path.exists(online_file) and open(online_file).read().strip() == "1":
                         return True
-            except Exception:
-                pass
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
     return False
 
 
@@ -85,8 +85,8 @@ def get_battery_capacity() -> int | None:
                 try:
                     with open(cap_file, "r") as f:
                         return int(f.read().strip())
-                except Exception:
-                    pass
+                except Exception as _err:
+                    sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
     return None
 
 
@@ -105,8 +105,8 @@ def detect_node_id() -> str:
                 val = f.read().strip()
                 if val:
                     return val
-        except Exception:
-            pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
     # 3. Dynamic match against active swarm node definitions
     hostname = socket.gethostname().lower()
@@ -119,8 +119,8 @@ def detect_node_id() -> str:
                     if c and c != "none":
                         active_id = c
                         break
-            except Exception:
-                pass
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
     nodes_dir = os.path.join(user_home, f".config/knot/swarms/{active_id}/nodes")
     if os.path.isdir(nodes_dir):
@@ -135,8 +135,8 @@ def detect_node_id() -> str:
                         aliases = [a.lower() for a in m.get("aliases", [])]
                         if hostname == nid.lower() or hostname == m_host or hostname in aliases:
                             return nid
-                except Exception:
-                    pass
+                except Exception as _err:
+                    sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
     # 4. Known fallback mappings for physical Knot fleet machines
     known_mappings = {
@@ -160,15 +160,15 @@ def detect_capabilities(node_id: str) -> list[str]:
     try:
         if subprocess.run(["nvidia-smi", "-L"], capture_output=True).returncode == 0:
             caps.extend(["gpu_cuda", "nvidia_gpu", "rtx_3050"])
-    except Exception:
-        pass
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
     try:
         p = subprocess.run(["lspci"], capture_output=True, text=True)
         if "radeon" in p.stdout.lower() or "amd" in p.stdout.lower():
             caps.append("amd_gpu")
-    except Exception:
-        pass
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
     # Steam Deck specific checks
     is_deck = False
@@ -179,8 +179,8 @@ def detect_capabilities(node_id: str) -> list[str]:
                 content = f.read().lower()
                 if "jupiter" in content or "galileo" in content:
                     is_deck = True
-        except Exception:
-            pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
     if is_deck or node_id == "steamdeck":
         caps.extend(["steamdeck", "embedded_gamepad", "handheld_display", "controller_input"])
@@ -217,8 +217,8 @@ def ensure_headless_shims() -> str:
                 with open(path, "w") as f:
                     f.write(shim_script)
                 os.chmod(path, 0o755)
-            except Exception:
-                pass
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
     return shims_dir
 
 
@@ -296,8 +296,8 @@ def is_kwallet_unlocked() -> bool:
                         return False
                     if "true" in p_open.stdout:
                         return True
-        except Exception:
-            pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
     # 2. Check FreeDesktop Secret Service default collection Locked property
     try:
@@ -311,8 +311,8 @@ def is_kwallet_unlocked() -> bool:
                 return False
             if "false" in p_sec.stdout:
                 return True
-    except Exception:
-        pass
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
     # 3. Probe secret-tool search as fallback
     try:
@@ -327,8 +327,8 @@ def is_kwallet_unlocked() -> bool:
                     if not val:
                         return False
                     return True
-    except Exception:
-        pass
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
     return True
 
@@ -365,8 +365,8 @@ def sync_oauth_token_file() -> dict | None:
                                 tf.write(secret_json + "\n")
                             os.chmod(primary_token, 0o600)
                         return parsed
-        except Exception:
-            pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
     # Fallback to local token files
     token_candidates = [
@@ -378,8 +378,8 @@ def sync_oauth_token_file() -> dict | None:
             try:
                 with open(tf, "r") as f:
                     return json.load(f)
-            except Exception:
-                pass
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
     return None
 
 
@@ -829,8 +829,8 @@ class AgentWorker:
                         if self.power_inhibitor_proc or self.dbus_inhibit_cookie is not None:
                             self._release_power_inhibit("Swarm is dormant / idle (>30m)")
 
-            except Exception:
-                pass
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
             self.stop_event.wait(10.0)
 
@@ -852,8 +852,8 @@ class AgentWorker:
                     if m:
                         self.dbus_inhibit_cookie = int(m.group(1))
                         print(f"[Power] ⚡ D-Bus PowerManagement inhibited (Cookie {self.dbus_inhibit_cookie})")
-            except Exception:
-                pass
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
         # 2. Systemd sleep:idle inhibitor (via sudo or unprivileged)
         proc = None
@@ -870,8 +870,8 @@ class AgentWorker:
                     # Final fallback to idle inhibitor
                     cmd = ["systemd-inhibit", "--what=idle", "--who=Knot Swarm", f"--why={reason_str}", "sleep", "infinity"]
                     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
         self.power_inhibitor_proc = proc
         if proc and proc.poll() is None:
@@ -888,8 +888,8 @@ class AgentWorker:
                     "--method", "org.freedesktop.PowerManagement.Inhibit.UnInhibit",
                     str(self.dbus_inhibit_cookie)
                 ], capture_output=True, text=True, timeout=3)
-            except Exception:
-                pass
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
             self.dbus_inhibit_cookie = None
 
         # 2. Terminate systemd-inhibit process
@@ -900,8 +900,8 @@ class AgentWorker:
             except Exception:
                 try:
                     self.power_inhibitor_proc.kill()
-                except Exception:
-                    pass
+                except Exception as _err:
+                    sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
             self.power_inhibitor_proc = None
         print(f"[Power] 💤 Sleep inhibitor released: {reason}")
 
@@ -981,8 +981,8 @@ class AgentWorker:
             }
             try:
                 self.hub.post_node_activity(self.node_id, self.current_activity)
-            except Exception:
-                pass
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
             stop_tail = threading.Event()
 
@@ -1012,8 +1012,8 @@ class AgentWorker:
                                     if os.path.exists(cand):
                                         transcript_path = cand
                                         break
-                    except Exception:
-                        pass
+                    except Exception as _err:
+                        sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
                     if transcript_path:
                         break
                     time.sleep(0.3)
@@ -1024,8 +1024,8 @@ class AgentWorker:
                         self.current_activity["elapsed_sec"] = round(time.time() - start_ts, 1)
                         try:
                             self.hub.post_node_activity(self.node_id, self.current_activity)
-                        except Exception:
-                            pass
+                        except Exception as _err:
+                            sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
                     return
 
                 last_hb = time.time()
@@ -1097,20 +1097,20 @@ class AgentWorker:
                                     if did_update:
                                         self.hub.post_node_activity(self.node_id, self.current_activity)
                                         last_hb = time.time()
-                                except Exception:
-                                    pass
+                                except Exception as _err:
+                                    sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
                             else:
                                 now_t = time.time()
                                 if now_t - last_hb >= 1.5:
                                     self.current_activity["elapsed_sec"] = round(now_t - start_ts, 1)
                                     try:
                                         self.hub.post_node_activity(self.node_id, self.current_activity)
-                                    except Exception:
-                                        pass
+                                    except Exception as _err:
+                                        sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
                                     last_hb = now_t
                                 time.sleep(0.25)
-                except Exception:
-                    pass
+                except Exception as _err:
+                    sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
             tail_thread = threading.Thread(target=_tail_worker, daemon=True)
             tail_thread.start()
@@ -1160,8 +1160,8 @@ class AgentWorker:
                 }
                 try:
                     self.hub.post_node_activity(self.node_id, self.current_activity)
-                except Exception:
-                    pass
+                except Exception as _err:
+                    sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
     def chat_mention_worker(self):
         """
@@ -1288,8 +1288,8 @@ class AgentWorker:
                                         if rm.get("sender") == self.node_id and rm.get("created_at", 0) >= int(start_turn_time):
                                             already_posted = True
                                             break
-                            except Exception:
-                                pass
+                            except Exception as _err:
+                                sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
                             is_wrapper_stub = False
                             if reply:
@@ -1348,11 +1348,11 @@ class AgentWorker:
                                             if os.path.exists(cand):
                                                 palace.ingest_antigravity_transcript(cand, s_id, self.node_id)
                                                 break
-                                    except Exception:
-                                        pass
+                                    except Exception as _err:
+                                        sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
                                 threading.Thread(target=_bg_chat_ingest, daemon=True).start()
-            except Exception:
-                pass
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
     def run(self):
         print(f"[*] Knot Swarm Worker starting on node: {self.node_id} ({self.hostname})")
@@ -1386,8 +1386,8 @@ class AgentWorker:
                 task_meta = {}
                 try:
                     task_meta = json.loads(task.get("meta") or "{}")
-                except Exception:
-                    pass
+                except Exception as _err:
+                    sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
                 task_project = task_meta.get("project") or "knot"
                 task_conv = task_meta.get("conversation_id") or None
 
@@ -1464,8 +1464,8 @@ def resolve_hub_url() -> str:
                     if content and content != "none":
                         active_id = content
                         break
-            except Exception:
-                pass
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
     conf_candidates = [
         f"/etc/knot/swarms.d/{active_id}.conf",
@@ -1488,8 +1488,8 @@ def resolve_hub_url() -> str:
                             anchor_id = line.split("=", 1)[1].strip().strip('"')
                         elif line.startswith("HUB_PORT="):
                             hub_port = int(line.split("=", 1)[1].strip().strip('"'))
-            except Exception:
-                pass
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
             if anchor_host or anchor_id:
                 break
 
@@ -1507,16 +1507,16 @@ def resolve_hub_url() -> str:
                 ip = p.stdout.strip()
                 if ip and ip != "127.0.0.1":
                     return f"https://{ip}:{hub_port}"
-    except Exception:
-        pass
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
     # If anchor_host is an IP or resolvable hostname
     if anchor_host:
         try:
             socket.gethostbyname(anchor_host)
             return f"https://{anchor_host}:{hub_port}"
-        except Exception:
-            pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
     # Fallback to local loopback HTTPS
     return f"https://127.0.0.1:{hub_port}"

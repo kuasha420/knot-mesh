@@ -117,8 +117,8 @@ def main():
     if resolve_swarm_palette:
         try:
             dynamic_palette = resolve_swarm_palette(swarm_id="home")
-        except Exception:
-            pass
+        except Exception as e:
+            sys.stderr.write(f"Notice: [quota_view] Failed to resolve swarm palette: {e}\n")
 
     deduped = {}
     for n in nodes:

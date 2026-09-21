@@ -27,8 +27,8 @@ def fetch_thread_data(discussion_id, backend="auto", run_id="", db_path=""):
                             backend = "mesh"
                         elif mdata.get("db") == "ghd":
                             backend = "ghd"
-                except Exception:
-                    pass
+                except Exception as _err:
+                    sys.stderr.write(f"Notice: [reconcile] Handled exception: {_err}\n")
         if backend == "auto":
             if discussion_id.startswith("mesh_") or discussion_id.startswith("run_") or not discussion_id.startswith("D_"):
                 backend = "mesh"

@@ -316,8 +316,8 @@ def get_canonical_node_id(node_id: str) -> str:
                         aliases = [a.lower() for a in m.get("aliases", [])]
                         if nid_lower in (can_id.lower(), m_host, *aliases):
                             return can_id
-                except Exception:
-                    pass
+                except Exception as e:
+                    sys.stderr.write(f"Notice: [hub] Failed to parse node manifest {fp}: {e}\n")
     known_mappings = {
         "steamdeck-eos": "steamdeck",
     }
@@ -361,8 +361,8 @@ def capture_node_screen(node_id: str, force: bool = False, quality: str = "low")
             if (now - mtime) < ttl and os.path.getsize(cache_file) > 500:
                 with open(cache_file, "rb") as f:
                     return f.read(), "image/jpeg"
-        except Exception:
-            pass
+        except Exception as e:
+            sys.stderr.write(f"Notice: [hub] Failed to read cached screen {cache_file}: {e}\n")
 
     lock = _get_screen_lock(node_id)
     lock_timeout = 2.0 if is_high else 5.0
@@ -1780,8 +1780,8 @@ class Database:
                             INSERT OR IGNORE INTO conversations (id, project_id, title, description, created_by, created_at, updated_at)
                             VALUES (?, ?, 'Main Swarm', 'Primary swarm coordination channel', 'system', ?, ?)
                         """, (main_conv_id, pid, now, now))
-                except Exception:
-                    pass
+                except Exception as e:
+                    sys.stderr.write(f"Notice: [hub] Failed to register project conversation {pid}: {e}\n")
 
         with conn:
             cur = conn.cursor()
@@ -1872,8 +1872,8 @@ class Database:
             try:
                 with open(target_json, "w", encoding="utf-8") as fp:
                     json.dump(native_spec, fp, indent=2)
-            except Exception:
-                pass
+            except Exception as e:
+                sys.stderr.write(f"Notice: [hub] Failed to write native project spec {target_json}: {e}\n")
 
         proj = self.get_project(project_id)
         if proj:
@@ -2464,8 +2464,8 @@ class Database:
             if d.get("quota_data"):
                 try:
                     d["quota_data"] = json.loads(d["quota_data"])
-                except Exception:
-                    pass
+                except Exception as e:
+                    sys.stderr.write(f"Notice: [hub] Failed to parse quota_data JSON: {e}\n")
             if isinstance(d.get("quota_data"), dict):
                 qd = d["quota_data"]
                 if "gemini_5h_reset" in qd:
@@ -2482,8 +2482,8 @@ class Database:
             if d.get("power_state"):
                 try:
                     d["power"] = json.loads(d["power_state"])
-                except Exception:
-                    pass
+                except Exception as e:
+                    sys.stderr.write(f"Notice: [hub] Failed to parse power_state JSON: {e}\n")
             d["activity"] = self._node_activities.get(can_id, {})
             if isinstance(d["power"], dict) and d["activity"]:
                 d["power"]["activity"] = d["activity"]
@@ -3086,8 +3086,8 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                     except queue.Empty:
                         self.wfile.write(b": heartbeat\n\n")
                         self.wfile.flush()
-            except (ConnectionResetError, BrokenPipeError):
-                pass
+            except (ConnectionResetError, BrokenPipeError) as e:
+                sys.stderr.write(f"Notice: [hub] SSE subscriber disconnected: {e}\n")
             finally:
                 with _subscribers_lock:
                     _subscribers.discard(q)

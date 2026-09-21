@@ -37,8 +37,8 @@ def resolve_local_node_id(nodes=None):
                     val = nf.read().strip()
                     if val:
                         return val
-            except Exception:
-                pass
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [resolve_node] Handled exception: {_err}\n")
 
     # 3. System hostname via socket.gethostname() and uname -n
     cur_host = ""
@@ -51,16 +51,16 @@ def resolve_local_node_id(nodes=None):
     if not cur_host:
         try:
             cur_host = os.uname().nodename.strip()
-        except Exception:
-            pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [resolve_node] Handled exception: {_err}\n")
 
     if not cur_host:
         try:
             res = subprocess.run(["uname", "-n"], capture_output=True, text=True, check=False)
             if res.returncode == 0:
                 cur_host = res.stdout.strip()
-        except Exception:
-            pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [resolve_node] Handled exception: {_err}\n")
 
     cur_host_short = cur_host.split(".")[0] if cur_host else ""
 
@@ -83,8 +83,8 @@ def resolve_local_node_id(nodes=None):
             ):
                 detected_nid = nid
                 break
-        except Exception:
-            pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [resolve_node] Handled exception: {_err}\n")
 
     if detected_nid:
         if not nodes or detected_nid in nodes or cur_host in nodes or cur_host_short in nodes:

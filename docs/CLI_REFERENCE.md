@@ -22,6 +22,8 @@ This document provides a comprehensive command-line reference for both `knot` (d
   - [knot resolve](#knot-resolve)
   - [knot shutdown](#knot-shutdown)
   - [knot council](#knot-council)
+  - [knot topology](#knot-topology)
+  - [knot memory](#knot-memory)
 - [2. `knot-installer` — Onboarding & Lifecycle CLI](#2-knot-installer--onboarding--lifecycle-cli)
   - [knot-installer init](#knot-installer-init)
   - [knot-installer invite](#knot-installer-invite)
@@ -40,6 +42,23 @@ This document provides a comprehensive command-line reference for both `knot` (d
 | `KNOT_RUNTIME_DIR` | Directory containing runtime fences, sockets, and transient PID files. | `/run/knot` |
 | `KNOT_VERSION` | Knot release version override. | `1.0.0-rc5` |
 | `KNOT_TEST_MODE` | If set (`1`), bypasses graphical prompts and system modifications. | Empty |
+
+---
+
+## Error Handling & Diagnostic Observability (PSL Gold Standard)
+
+All Knot Mesh CLI utilities, daemon processes, and test suites strictly enforce the **PSL Gold Standard**:
+- **Zero Error Swallowing**: Subcommands never swallow errors or discard stderr into `/dev/null` (`2>/dev/null`, `&>/dev/null`, `>/dev/null 2>&1`, `|| true`, and `|| :` are permanently banned).
+- **Exit Code Contracts**:
+  - `0`: Operation succeeded; target is healthy and operational.
+  - `1`: Operational failure, health check violation, or unreachable peer.
+  - `2`: Invalid CLI syntax or unknown arguments.
+- **Diagnostic Logging Format**:
+  - `[✓]` (Green): Successful state transition or healthy component.
+  - `[•]` (Cyan/Blue): Informational progress or active dispatch notice.
+  - `[!]` (Yellow): Warning, locked state, or non-fatal diagnostic emitted to `stderr`.
+  - `[✗]` (Red): Hard error, broken precondition, or failed execution emitted to `stderr`.
+- **Automated Validation**: Automated CI verification via `tests/test_psl_integrity.sh` ensures ongoing compliance across 100% of codebase files.
 
 ---
 
@@ -229,6 +248,24 @@ knot swarm auth [node_id]          # Verify Google OAuth token validity for head
 
 ---
 
+### `knot auth`
+Manages Antigravity Google OAuth authentication, token synchronization from KWallet and FreeDesktop Secret Service, and graphical login terminal launching across mesh nodes.
+
+```bash
+knot auth [node_id]                # Interactive SSH login on a specific node
+knot auth local                    # Interactive login on local workstation
+knot auth sync                     # Synchronize tokens from KWallet/Secret Service locally
+knot auth sync --all               # Fleet-wide token synchronization across all active nodes
+knot auth <node_id> --gui          # Launch graphical Konsole directly on target node's display
+```
+
+- **Diagnostic Behavior**:
+  - Automatically queries KWallet DBus interface and Secret Service collection `Locked` status.
+  - Transparently logs warnings to `stderr` if KWallet is locked or secret retrieval fails.
+  - Automatically restarts `knot-agent.service` upon token synchronization.
+
+---
+
 ### `knot exec`
 Executes arbitrary shell commands across one or all nodes in the swarm via hardened SSH batch sessions.
 
@@ -245,11 +282,16 @@ knot exec --all <command...>       # Execute command concurrently across all act
 ---
 
 ### `knot resolve`
-Resolves a node ID to its active reachable IP address and SSH port using the cached leases and mDNS resolver.
+Resolves a canonical node ID to its active reachable IP address and SSH port using cached leases, mDNS, and live ARP table lookups.
 
 ```bash
 knot resolve <node_id> [port]
 ```
+
+- **Diagnostic Behavior**:
+  - Exits with code `0` and outputs resolved IP address on success.
+  - Exits immediately with code `1` and emits error diagnostics to `stderr` if the node is nonexistent, offline, or unresolvable.
+  - Transparently validates and invalidates stale lease caches automatically.
 
 - **Example**:
   ```bash
@@ -260,7 +302,7 @@ knot resolve <node_id> [port]
 ---
 
 ### `knot shutdown`
-Coordinates scheduled or immediate power management across the mesh.
+Coordinates graceful service teardown, task release, and poweroff/reboot operations across the mesh.
 
 ```bash
 knot shutdown status               # Show pending shutdown/reboot timers across the fleet
@@ -270,6 +312,11 @@ knot shutdown [node] reboot        # Reboot a specific node immediately
 knot shutdown --all poweroff       # Gracefully power off all Strands, then the Anchor
 knot shutdown --all reboot         # Reboot all Strands, then the Anchor
 ```
+
+- **Diagnostic Behavior**:
+  - **Graceful Service Teardown**: Automatically stops `knot-agent.service` (releasing active tasks) and `knot-deskflow.service`, followed by `knot-hub.service` on Anchor, and executes `sync` before halting.
+  - **Cancellation Recovery**: Running `knot shutdown cancel` automatically unfreezes and restarts local mesh services (`knot-hub`, `knot-agent`, `knot-deskflow`).
+  - **Remote Error Transparency**: In `knot shutdown status`, distinguishes cleanly between unreachable nodes (`Exit 255`) and absent timer schedules without masking error states.
 
 - **Options**:
   - `--delay <minutes|now>`: Delay before shutdown (e.g. `+10` for 10 minutes, `23:00`, or `now`).
@@ -432,6 +479,72 @@ Prunes mission directories older than the specified retention window.
 ```bash
 knot council clean [days]        # Default: 7 days
 ```
+
+---
+
+### `knot topology`
+Multi-screen spatial topology reasoning and visual layout management module. Renders 2D spatial ASCII representations of active swarm displays, triggers camera-based computer vision layout analysis, aligns multi-display outputs (such as ROG Ally eDP-1 with external monitors), and flashes high-contrast display identification overlays.
+
+```bash
+knot topology [show|refresh|align-internal|identify|guide] [options]
+```
+
+- **Subcommands**:
+  - `knot topology show` (or `knot topology`): Displays current 2D ASCII screen layout, Anchor screen identity, active screen list, and lock status.
+  - `knot topology refresh --photo <path> [--mode auto|swarm|offline] [--apply]`: Analyzes a camera photo of physical monitors using computer vision (`swarm_detector` / `offline_detector`), automatically inferring relative physical screen positions, spans, and boundaries. If `--apply` is specified, updates `topology.json` and dynamically restarts `knot-deskflow` and `knot-stripd`.
+  - `knot topology align-internal`: Automatically aligns internal handheld displays (eDP-1) with connected external monitors via KDE KScreen (`kscreen-doctor`), preventing display overlapping.
+  - `knot topology identify [--all]`: Spawns fullscreen high-contrast colored overlays displaying node identity and display numbers across screens to facilitate visual physical layout mapping.
+  - `knot topology guide`: Outputs photography, lighting, and camera positioning best practices for optimal computer vision spatial detection.
+
+- **Options**:
+  - `--photo <image.jpg>`: Path to input photo of physical workspace displays.
+  - `--mode <auto|swarm|offline>`: Visual engine mode (`swarm` uses Linda tuplespace / Swarm detector; `offline` uses local heuristics; `auto` selects automatically).
+  - `--apply`: Automatically writes generated topology to `~/.config/knot/swarms/<swarm>/topology.json` and updates KVM configurations.
+
+---
+
+### `knot memory`
+Decentralized Memory Palace and Vault module backed by embedded SQLite with CRDT synchronization and in-process vector cosine similarity. Manages dual-pool cognitive storage (local scratchpad vs. swarm-shared), artifact storage, and hardware node-role system prompt profiles.
+
+```bash
+knot memory <store|recall|map|promote|relate|artifact-put|artifact-get|profile|export-crdt|test> [options]
+```
+
+- **Subcommands**:
+  - `knot memory store`: Stores a memory into the spatial palace.
+    ```bash
+    knot memory store --wing <wing> --hall <hall> --drawer <drawer> --title "<title>" --content "<content>" [--pool shared|local] [--importance 1-10] [--tags t1,t2]
+    ```
+  - `knot memory recall`: Recalls memories using vector cosine similarity or spatial path query.
+    ```bash
+    knot memory recall --query "<search text>" [--wing <wing>] [--hall <hall>] [--pool shared|local|all] [--limit 5] [--min-score 0.1]
+    ```
+  - `knot memory map`: Displays the complete spatial hierarchy tree (wings, halls, drawers) of memories stored in the local SQLite palace.
+  - `knot memory promote`: Promotes a local scratchpad observation to the swarm-shared memory pool with an importance boost.
+    ```bash
+    knot memory promote --id <memory_id> [--boost 2.0]
+    ```
+  - `knot memory relate`: Creates an associative typed edge between two memories.
+    ```bash
+    knot memory relate --source <id1> --target <id2> --type <depends_on|relates_to|supercedes> [--weight 1.0]
+    ```
+  - `knot memory artifact-put`: Uploads a text or binary artifact to the local artifact closet.
+    ```bash
+    knot memory artifact-put --name <filename> [--file <path>] [--content "<text>"] [--type text|code|image]
+    ```
+  - `knot memory artifact-get`: Retrieves an artifact by its unique ID.
+    ```bash
+    knot memory artifact-get --id <artifact_id>
+    ```
+  - `knot memory profile`: Displays the hardware node-role profile, capabilities, constraints, and system prompt for a node role (e.g. `anchor_architect`, `compute_worker`, `handheld_controller`).
+    ```bash
+    knot memory profile <role_or_node>
+    ```
+  - `knot memory export-crdt`: Exports local memory changesets since a given database version for swarm-wide CRDT synchronization.
+    ```bash
+    knot memory export-crdt [--since <version>]
+    ```
+  - `knot memory test`: Runs the comprehensive embedded SQLite memory palace self-test suite (validates artifacts, dual pools, promotion, vector recall, hierarchy map, and profiles).
 
 ---
 

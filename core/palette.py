@@ -218,8 +218,8 @@ def resolve_swarm_palette(
                 try:
                     with open(os.path.join(nodes_dir, fname), "r") as f:
                         node_manifests[nid] = json.load(f)
-                except Exception:
-                    pass
+                except Exception as e:
+                    sys.stderr.write(f"Notice: [palette] Failed to parse node manifest {fname}: {e}\n")
 
     all_nodes_set: Set[str] = set()
     if node_ids:

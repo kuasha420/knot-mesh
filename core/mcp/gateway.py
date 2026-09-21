@@ -448,9 +448,9 @@ class KnotMCPGateway:
                     output_parts.append("(No output produced)")
                 output_parts.append(f"\n[Exit code: {exit_code}]")
                 return "\n".join(output_parts), not ok
-        except Exception:
+        except Exception as e:
             # Hub exec request failed or unreachable, fallback to local CLI
-            pass
+            sys.stderr.write(f"Notice: [mcp-gateway] Hub /mesh/exec request failed ({e}); falling back to local knot exec\n")
 
         # Local fallback via knot exec CLI
         knot_bin = shutil.which("knot") or os.path.abspath(os.path.join(os.path.dirname(__file__), "../../bin/knot"))
@@ -488,8 +488,8 @@ class KnotMCPGateway:
                 models_resp = self.hub.request("/swarm/models", timeout=3.0)
                 if isinstance(models_resp, dict):
                     models_data = models_resp
-            except Exception:
-                pass
+            except Exception as e:
+                sys.stderr.write(f"Notice: [mcp-gateway] Failed to fetch /swarm/models: {e}\n")
 
             default_model = models_data.get("default_model", "gemini-3.8-flash-high")
             node_models = models_data.get("node_models", {})

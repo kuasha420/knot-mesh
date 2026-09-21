@@ -114,8 +114,8 @@ def unlock_display_session(session_id: str, user: str) -> bool:
                 if res.returncode == 0:
                     simulated = True
                     break
-            except Exception:
-                pass
+            except Exception as e:
+                sys.stderr.write(f"[knot-autounlock] Notice: ScreenSaver SimulateUserActivity check failed with {qdbus_bin}: {e}\n")
     if not simulated:
         sys.stderr.write("[knot-autounlock] Notice: ScreenSaver SimulateUserActivity not available on this seat\n")
 
@@ -134,10 +134,10 @@ def run_monitor():
     if is_anchor:
         try:
             knot_bin = "/usr/local/bin/knot" if os.path.exists("/usr/local/bin/knot") else "knot"
-            subprocess.Popen([knot_bin, "autologin", "reconcile"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen([knot_bin, "autologin", "reconcile"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             last_reconcile_attempt = time.time()
-        except Exception:
-            pass
+        except Exception as e:
+            sys.stderr.write(f"[knot-autounlock] Failed to spawn autologin reconcile: {e}\n")
 
     while not stop_requested:
         # Use --user-unit so journalctl queries system.journal correctly across all distributions
@@ -191,16 +191,16 @@ def run_monitor():
                                             text=True
                                         )
                                         break
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        sys.stderr.write(f"[knot-autounlock] Notice: ScreenSaver SimulateUserActivity failed with {qdbus_bin}: {e}\n")
 
                             if is_anchor and (now - last_reconcile_attempt > 30.0):
                                 last_reconcile_attempt = now
                                 try:
                                     knot_bin = "/usr/local/bin/knot" if os.path.exists("/usr/local/bin/knot") else "knot"
-                                    subprocess.Popen([knot_bin, "autologin", "reconcile"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                                except Exception:
-                                    pass
+                                    subprocess.Popen([knot_bin, "autologin", "reconcile"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                except Exception as e:
+                                    sys.stderr.write(f"[knot-autounlock] Failed to spawn autologin reconcile: {e}\n")
                     else:
                         sys.stderr.write(f"[knot-autounlock] Warning: Could not locate active graphical session for user '{user}'\n")
 
@@ -211,11 +211,11 @@ def run_monitor():
                 try:
                     proc.terminate()
                     proc.wait(timeout=2)
-                except Exception:
+                except Exception as e:
                     try:
                         proc.kill()
-                    except Exception:
-                        pass
+                    except Exception as ke:
+                        sys.stderr.write(f"[knot-autounlock] Notice: Failed to kill journalctl process: {ke}\n")
 
         if not stop_requested:
             sys.stderr.write("[knot-autounlock] Journal stream disconnected, reconnecting in 1s...\n")

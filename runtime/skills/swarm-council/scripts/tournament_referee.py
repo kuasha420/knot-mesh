@@ -175,8 +175,8 @@ def main():
                     nodes = [n.strip() for n in nodes.split(",") if n.strip()]
                 opening_node = mdata.get("opening_node") or (nodes[0] if nodes else "")
                 target_rounds = mdata.get("target_rounds") or target_rounds
-        except Exception:
-            pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [tournament_referee] Handled exception: {_err}\n")
 
     db_path = get_mesh_db_path()
     if not nodes and os.path.exists(db_path):
@@ -186,8 +186,8 @@ def main():
             cur.execute("SELECT DISTINCT node_id FROM council_messages WHERE run_id = ?", (args.run_id,))
             nodes = [r[0] for r in cur.fetchall() if r[0]]
             conn.close()
-        except Exception:
-            pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [tournament_referee] Handled exception: {_err}\n")
 
     if not nodes:
         try:

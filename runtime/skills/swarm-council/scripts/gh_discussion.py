@@ -182,8 +182,8 @@ def resolve_repo(owner="", repo=""):
         if m:
             det_owner, det_repo = m.group(1), m.group(2)
             return owner or det_owner, repo or det_repo
-    except Exception:
-        pass
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [gh_discussion] Handled exception: {_err}\n")
     return owner or "kuasha420", repo or "knot-mesh"
 
 def main():

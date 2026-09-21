@@ -344,13 +344,13 @@ NOTIFY_EOF
       knot_log_info "Fetching Deskflow mesh TLS certificate from Anchor..."
       local hub_addr="${ANCHOR_HOST}:${HUB_PORT:-4242}"
       local fetched=0
-      if curl -kfsSL "https://${hub_addr}/dist/deskflow.pem" -o "$tls_dir/deskflow.pem" 2>/dev/null; then
+      if curl -kfsSL "https://${hub_addr}/dist/deskflow.pem" -o "$tls_dir/deskflow.pem"; then
         fetched=1
         knot_log_ok "Synchronized Deskflow TLS certificate from Anchor Hub."
       elif [ -n "$KNOT_CLI" ]; then
         local resolved_ip
         if resolved_ip="$("$KNOT_CLI" resolve "$ANCHOR_TARGET" 4242 2>&1)"; then
-          if curl -kfsSL "https://${resolved_ip}:4242/dist/deskflow.pem" -o "$tls_dir/deskflow.pem" 2>/dev/null; then
+          if curl -kfsSL "https://${resolved_ip}:4242/dist/deskflow.pem" -o "$tls_dir/deskflow.pem"; then
             fetched=1
             knot_log_ok "Synchronized Deskflow TLS certificate from Anchor IP ($resolved_ip)."
           fi
@@ -413,7 +413,10 @@ X-KDE-GlobalAccel-CommandShortcut=true
 DESKTOP_EOF
 
   if command -v kwriteconfig6 >/dev/null; then
-    kwriteconfig6 --file kglobalshortcutsrc --group "services" --group "knot-kvm-lock.desktop" --key "_launch" "ScrollLock,none,Knot KVM Lock Toggle"
+    local kw_err=""
+    if ! kw_err="$(kwriteconfig6 --file kglobalshortcutsrc --group "services" --group "knot-kvm-lock.desktop" --key "_launch" "ScrollLock,none,Knot KVM Lock Toggle" 2>&1)"; then
+      knot_log_warn "Notice: kwriteconfig6 failed to configure KVM lock shortcut: $kw_err"
+    fi
   fi
 
   # 8. Deploy Unified Dual-Role Deskflow Runner (Anchor Server / Strand Client)
@@ -627,9 +630,14 @@ fi
 RUNNER_EOF
   chmod 755 "$user_bin/knot-deskflow"
   ln -sf "$user_bin/knot-deskflow" "$user_bin/knot-deskflow-client"
-  if command -v sudo >/dev/null && sudo -n true 2>/dev/null; then
-    sudo cp -f "$user_bin/knot-deskflow" /usr/local/bin/knot-deskflow 2>/dev/null || true
-    sudo ln -sf /usr/local/bin/knot-deskflow /usr/local/bin/knot-deskflow-client 2>/dev/null || true
+  if command -v sudo >/dev/null && sudo -n true 2>&1; then
+    local cp_err="" ln_err=""
+    if ! cp_err="$(sudo cp -f "$user_bin/knot-deskflow" /usr/local/bin/knot-deskflow 2>&1)"; then
+      knot_log_warn "Notice: Failed to copy knot-deskflow to /usr/local/bin: $cp_err"
+    fi
+    if ! ln_err="$(sudo ln -sf /usr/local/bin/knot-deskflow /usr/local/bin/knot-deskflow-client 2>&1)"; then
+      knot_log_warn "Notice: Failed to symlink knot-deskflow-client in /usr/local/bin: $ln_err"
+    fi
   fi
 
   knot_log_info "Deploying Unified Knot Deskflow systemd service..."

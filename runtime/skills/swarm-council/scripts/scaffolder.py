@@ -90,8 +90,8 @@ def discover_online_nodes(knot_root):
             parts = line.split()
             if len(parts) >= 5 and parts[4] == "ONLINE":
                 nodes.append(parts[0])
-    except Exception:
-        pass
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [scaffolder] Handled exception: {_err}\n")
     if not nodes:
         local_host = "localhost"
         try:
@@ -119,8 +119,8 @@ def resolve_chunks(project_dir=None):
     try:
         out = subprocess.check_output(["git", "-C", pdir, "ls-files"], text=True, stderr=subprocess.DEVNULL)
         git_files = [line.strip() for line in out.splitlines() if line.strip()]
-    except Exception:
-        pass
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [scaffolder] Handled exception: {_err}\n")
 
     if not git_files and os.path.isdir(pdir):
         for root, dirs, files in os.walk(pdir):
@@ -454,8 +454,8 @@ def main():
                 hints = pdata.get("hints", {})
                 coverage_ratio = hints.get("divide:coverage", coverage_ratio)
                 sidequest_pct = hints.get("sidequest:capacity", sidequest_pct)
-        except Exception:
-            pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [scaffolder] Handled exception: {_err}\n")
 
     # Determine nodes
     if args.nodes:
@@ -493,8 +493,8 @@ def main():
             try:
                 with open(meta_file) as mf:
                     meta_data = json.load(mf)
-            except Exception:
-                pass
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [scaffolder] Handled exception: {_err}\n")
         meta_data.update({
             "run_id": run_id,
             "pack": args.pack,

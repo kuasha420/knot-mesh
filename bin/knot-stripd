@@ -389,8 +389,8 @@ class KnotStripDaemon(QObject):
                                     cached_ip = lf.read().strip()
                                     if cached_ip:
                                         ctrl.ips.add(cached_ip)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                sys.stderr.write(f"[knot-stripd] Notice: Failed to read cached lease {lfile}: {e}\n")
 
             res = subprocess.run(
                 ["ss", "-t", "state", "established", "( sport = :24800 )"],
@@ -446,8 +446,8 @@ class KnotStripDaemon(QObject):
                             devices.append(dev)
                         else:
                             dev.close()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        sys.stderr.write(f"[knot-stripd] Notice: Error inspecting device capabilities: {e}\n")
             except Exception as e:
                 sys.stderr.write(f"[knot-stripd] Failed to list input devices: {e}\n")
 
@@ -472,12 +472,13 @@ class KnotStripDaemon(QObject):
                                             sys.stderr.write(f"[knot-stripd] ScrollLock ignored; cursor on remote screen '{self.active_screen}'\n")
                         except OSError:
                             raise
-            except Exception:
+            except Exception as e:
+                sys.stderr.write(f"[knot-stripd] Notice: Exception during device select/read loop: {e}\n")
                 for d in devices:
                     try:
                         d.close()
-                    except Exception:
-                        pass
+                    except Exception as de:
+                        sys.stderr.write(f"[knot-stripd] Notice: Error closing device: {de}\n")
                 time.sleep(1)
 
     def _journal_worker(self):

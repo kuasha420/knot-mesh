@@ -19,8 +19,11 @@ autounlock_configure() {
   local user_bin="$home/.local/bin"
   mkdir -p "$user_bin"
   ln -sf "$bin_src" "$user_bin/knot-autounlock"
-  if command -v sudo >/dev/null && sudo -n true 2>/dev/null; then
-    sudo ln -sf "$bin_src" "/usr/local/bin/knot-autounlock" 2>/dev/null || true
+  if command -v sudo >/dev/null && sudo -n true 2>&1; then
+    local ln_err=""
+    if ! ln_err="$(sudo ln -sf "$bin_src" "/usr/local/bin/knot-autounlock" 2>&1)"; then
+      knot_log_warn "Notice: Failed to symlink knot-autounlock to /usr/local/bin: $ln_err"
+    fi
   fi
 
   # 2. Deploy systemd user service
@@ -127,9 +130,17 @@ screen_unlock_local() {
 
   # Simulate activity to wake monitor / reset idle timer
   if command -v qdbus6 >/dev/null; then
-    qdbus6 org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.SimulateUserActivity
+    local qd_err="" qd_rc=0
+    qd_err="$(qdbus6 org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.SimulateUserActivity 2>&1)" || qd_rc=$?
+    if [ $qd_rc -ne 0 ]; then
+      knot_log_warn "Notice: SimulateUserActivity exited with code $qd_rc: $qd_err"
+    fi
   elif command -v qdbus >/dev/null; then
-    qdbus org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.SimulateUserActivity
+    local qd_err="" qd_rc=0
+    qd_err="$(qdbus org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.SimulateUserActivity 2>&1)" || qd_rc=$?
+    if [ $qd_rc -ne 0 ]; then
+      knot_log_warn "Notice: SimulateUserActivity exited with code $qd_rc: $qd_err"
+    fi
   fi
 }
 
@@ -185,7 +196,7 @@ screen_status() {
     my_host="$(knot_detect_hostname)"
     local nodes_dirs=()
     local primary_dir=""
-    if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+    if primary_dir="$(knot_get_nodes_dir)" && [ -d "$primary_dir" ]; then
       nodes_dirs+=("$primary_dir")
     fi
     local user_home
@@ -260,7 +271,7 @@ screen_unlock() {
     my_host="$(knot_detect_hostname)"
     local nodes_dirs=()
     local primary_dir=""
-    if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+    if primary_dir="$(knot_get_nodes_dir)" && [ -d "$primary_dir" ]; then
       nodes_dirs+=("$primary_dir")
     fi
     local user_home
@@ -305,7 +316,7 @@ screen_lock() {
     my_host="$(knot_detect_hostname)"
     local nodes_dirs=()
     local primary_dir=""
-    if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+    if primary_dir="$(knot_get_nodes_dir)" && [ -d "$primary_dir" ]; then
       nodes_dirs+=("$primary_dir")
     fi
     local user_home

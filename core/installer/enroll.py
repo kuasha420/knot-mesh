@@ -56,8 +56,8 @@ def detect_display_specs() -> Dict[str, Any]:
         try:
             out = subprocess.check_output(["bash", display_sh, "--json"], text=True)
             return json.loads(out)
-        except Exception:
-            pass
+        except Exception as e:
+            sys.stderr.write(f"Notice: [enroll] Failed to read display.sh specs: {e}\n")
 
     specs = {
         "resolution": "1920x1080",
@@ -84,10 +84,10 @@ def detect_display_specs() -> Dict[str, Any]:
                 if len(parts) >= 2:
                     try:
                         specs["scale"] = float(parts[1])
-                    except ValueError:
-                        pass
-    except Exception:
-        pass
+                    except ValueError as ve:
+                        sys.stderr.write(f"Notice: [enroll] Invalid scale format: {ve}\n")
+    except Exception as e:
+        sys.stderr.write(f"Notice: [enroll] kscreen-doctor detection failed: {e}\n")
     return specs
 
 
@@ -104,8 +104,8 @@ def detect_local_pubkey() -> str:
                 check=True,
                 capture_output=True
             )
-        except Exception:
-            pass
+        except Exception as e:
+            sys.stderr.write(f"Notice: [enroll] ssh-keygen failed: {e}\n")
     if os.path.exists(pub_path):
         with open(pub_path, "r") as f:
             return f.read().strip()
@@ -252,8 +252,8 @@ ALLOW_DESKFLOW_KVM="true"
         os.makedirs(swarm_subdir, exist_ok=True)
         with open(os.path.join(swarm_subdir, "swarm.conf"), "w") as f:
             f.write(conf_content)
-    except Exception:
-        pass
+    except Exception as e:
+        sys.stderr.write(f"Notice: [enroll] Failed to write swarm.conf: {e}\n")
 
     # Automatically activate this newly enrolled swarm
     state_dir = os.path.join(user_home, ".local/state/knot")
@@ -261,16 +261,16 @@ ALLOW_DESKFLOW_KVM="true"
         os.makedirs(state_dir, exist_ok=True)
         with open(os.path.join(state_dir, "active_swarm"), "w") as f:
             f.write(f"{swarm_id}\n")
-    except Exception:
-        pass
+    except Exception as e:
+        sys.stderr.write(f"Notice: [enroll] Failed to write active_swarm to state_dir: {e}\n")
 
     run_dir = os.environ.get("KNOT_RUNTIME_DIR", "/run/knot")
     if os.path.isdir(run_dir) and os.access(run_dir, os.W_OK):
         try:
             with open(os.path.join(run_dir, "active_swarm"), "w") as f:
                 f.write(f"{swarm_id}\n")
-        except Exception:
-            pass
+        except Exception as e:
+            sys.stderr.write(f"Notice: [enroll] Failed to write active_swarm to run_dir: {e}\n")
 
     # Mutual SSH: Install Anchor public key into Strand authorized_keys
     anchor_pubkey = enrollment_result.get("anchor_pubkey", "").strip()
@@ -283,8 +283,8 @@ ALLOW_DESKFLOW_KVM="true"
             try:
                 with open(auth_file, "r") as f:
                     existing_keys = f.read()
-            except Exception:
-                pass
+            except Exception as e:
+                sys.stderr.write(f"Notice: [enroll] Failed to read authorized_keys: {e}\n")
         if anchor_pubkey not in existing_keys:
             try:
                 with open(auth_file, "a") as f:
@@ -303,8 +303,8 @@ ALLOW_DESKFLOW_KVM="true"
             try:
                 with open(ssh_cfg, "r") as f:
                     existing_cfg = f.read()
-            except Exception:
-                pass
+            except Exception as e:
+                sys.stderr.write(f"Notice: [enroll] Failed to read ssh config: {e}\n")
         if f"Host {anchor_id}" not in existing_cfg:
             try:
                 entry = f"""
@@ -321,8 +321,8 @@ Host {anchor_id} {enrollment_result.get("anchor_hostname", anchor_id)}
                 with open(ssh_cfg, "a") as f:
                     f.write(entry)
                 os.chmod(ssh_cfg, 0o600)
-            except Exception:
-                pass
+            except Exception as e:
+                sys.stderr.write(f"Notice: [enroll] Failed to write ssh config entry: {e}\n")
 
     # Fetch authoritative Deskflow TLS certificate directly from Anchor Hub
     tls_dir = os.path.join(user_home, ".config/Deskflow/tls")

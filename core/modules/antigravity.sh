@@ -10,34 +10,63 @@ fi
 source "$KNOT_ROOT/core/lib.sh"
 
 antigravity_detect_cli() {
-  if command -v agy >/dev/null 2>&1 || command -v antigravity >/dev/null 2>&1; then
-    return 0
-  elif [ -x "$HOME/.local/bin/agy" ] || [ -x "/usr/bin/agy" ] || [ -x "/usr/local/bin/agy" ] || [ -x "/usr/bin/antigravity" ]; then
+  local cli_path=""
+  cli_path="$(antigravity_get_cli_path)"
+  if [ -n "$cli_path" ] && [ -x "$cli_path" ]; then
     return 0
   fi
   return 1
 }
 
 antigravity_get_cli_path() {
-  if command -v agy >/dev/null 2>&1; then
-    command -v agy
-  elif command -v antigravity >/dev/null 2>&1; then
-    command -v antigravity
+  local p=""
+  if command -v agy >/dev/null; then
+    p="$(command -v agy)"
   elif [ -x "$HOME/.local/bin/agy" ]; then
-    echo "$HOME/.local/bin/agy"
-  elif [ -x "/usr/bin/agy" ]; then
-    echo "/usr/bin/agy"
+    p="$HOME/.local/bin/agy"
   elif [ -x "/usr/local/bin/agy" ]; then
-    echo "/usr/local/bin/agy"
-  elif [ -x "/usr/bin/antigravity" ]; then
-    echo "/usr/bin/antigravity"
-  else
-    echo ""
+    p="/usr/local/bin/agy"
+  elif [ -x "/usr/bin/agy" ]; then
+    p="/usr/bin/agy"
   fi
+
+  if [ -n "$p" ] && [ -x "$p" ]; then
+    echo "$p"
+    return 0
+  fi
+
+  local fallback_candidates=()
+  if command -v antigravity >/dev/null; then
+    fallback_candidates+=("$(command -v antigravity)")
+  fi
+  for cand_path in "$HOME/.local/bin/antigravity" "/usr/local/bin/antigravity" "/usr/bin/antigravity"; do
+    if [ -x "$cand_path" ]; then
+      fallback_candidates+=("$cand_path")
+    fi
+  done
+
+  local tested=""
+  for cand in "${fallback_candidates[@]}"; do
+    [[ " $tested " =~ " $cand " ]] && continue
+    tested="$tested $cand"
+    local test_out="" rc=0
+    if command -v timeout >/dev/null; then
+      test_out="$(timeout 3 "$cand" --version 2>&1)" || rc=$?
+    else
+      test_out="$("$cand" --version 2>&1)" || rc=$?
+    fi
+    if [ $rc -eq 0 ] && [ -n "$test_out" ]; then
+      echo "$cand"
+      return 0
+    fi
+  done
+
+  echo ""
+  return 0
 }
 
 antigravity_get_version() {
-  local agy_path
+  local agy_path=""
   agy_path="$(antigravity_get_cli_path)"
   if [ -z "$agy_path" ]; then
     echo "not_installed"
@@ -45,7 +74,11 @@ antigravity_get_version() {
   fi
 
   local ver_out="" rc=0
-  ver_out="$("$agy_path" --version 2>&1)" || rc=$?
+  if command -v timeout >/dev/null; then
+    ver_out="$(timeout 3 "$agy_path" --version 2>&1)" || rc=$?
+  else
+    ver_out="$("$agy_path" --version 2>&1)" || rc=$?
+  fi
   if [ $rc -eq 0 ] && [ -n "$ver_out" ]; then
     echo "$ver_out" | head -n1 | awk '{print $NF}'
     return 0
@@ -90,7 +123,7 @@ antigravity_run_local_systemd() {
   local shims_dir
   shims_dir="$(antigravity_ensure_shims)"
 
-  if command -v systemd-run >/dev/null 2>&1; then
+  if command -v systemd-run >/dev/null; then
     systemd-run --user --pipe \
       --setenv="PATH=$shims_dir:/usr/local/bin:/usr/bin:/bin" \
       --setenv=BROWSER=/bin/true \
@@ -109,12 +142,19 @@ antigravity_sync_credentials() {
   local token_file="$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
   mkdir -p "$(dirname "$token_file")"
 
-  if command -v secret-tool >/dev/null 2>&1; then
-    local secret_json=""
-    secret_json="$(secret-tool search service gemini 2>/dev/null | awk -F'secret = ' '/^secret = / {print $2}' | head -n1)"
-    if [ -n "$secret_json" ] && echo "$secret_json" | jq -e '.token.access_token or .token.refresh_token' >/dev/null 2>&1; then
+  if command -v secret-tool >/dev/null; then
+    local secret_json="" st_out="" st_rc=0
+    st_out="$(secret-tool search service gemini 2>&1)" || st_rc=$?
+    if [ $st_rc -eq 0 ]; then
+      secret_json="$(echo "$st_out" | awk -F'secret = ' '/^secret = / {print $2}' | head -n1)"
+    else
+      knot_log_warn "Notice: secret-tool search failed (exit code $st_rc): $st_out"
+    fi
+    if [ -n "$secret_json" ] && echo "$secret_json" | jq -e '.token.access_token or .token.refresh_token' >/dev/null; then
       local current_json=""
-      [ -f "$token_file" ] && current_json="$(cat "$token_file" 2>/dev/null)"
+      if [ -f "$token_file" ]; then
+        current_json="$(cat "$token_file")"
+      fi
       if [ "$current_json" != "$secret_json" ]; then
         echo "$secret_json" > "$token_file"
         chmod 600 "$token_file"
@@ -124,7 +164,7 @@ antigravity_sync_credentials() {
     fi
   fi
 
-  if [ -s "$token_file" ] && jq -e '.token.access_token or .token.refresh_token' "$token_file" >/dev/null 2>&1; then
+  if [ -s "$token_file" ] && jq -e '.token.access_token or .token.refresh_token' "$token_file" >/dev/null; then
     return 0
   fi
   return 1
@@ -135,21 +175,45 @@ antigravity_is_kwallet_unlocked() {
   # Check KDE KWallet DBus interface (Plasma 6 / 5)
   for svc in org.kde.kwalletd6 org.kde.kwalletd5; do
     local mod="${svc##*.}"
-    if busctl --user call "$svc" "/modules/$mod" org.kde.KWallet isEnabled 2>/dev/null | grep -q "true"; then
-      local wallet
-      wallet="$(busctl --user call "$svc" "/modules/$mod" org.kde.KWallet localWallet 2>/dev/null | awk -F'"' '{print $2}' || echo "kdewallet")"
-      [ -z "$wallet" ] && wallet="kdewallet"
-      if busctl --user call "$svc" "/modules/$mod" org.kde.KWallet isOpen s "$wallet" 2>/dev/null | grep -q "false"; then
-        return 1
+    local en_out="" en_rc=0
+    en_out="$(busctl --user call "$svc" "/modules/$mod" org.kde.KWallet isEnabled 2>&1)" || en_rc=$?
+    if [ $en_rc -eq 0 ]; then
+      if echo "$en_out" | grep -q "true"; then
+        local wallet="kdewallet" wal_out="" wal_rc=0
+        wal_out="$(busctl --user call "$svc" "/modules/$mod" org.kde.KWallet localWallet 2>&1)" || wal_rc=$?
+        if [ $wal_rc -eq 0 ]; then
+          local parsed_wal
+          parsed_wal="$(echo "$wal_out" | awk -F'"' '{print $2}')"
+          if [ -n "$parsed_wal" ]; then wallet="$parsed_wal"; fi
+        else
+          knot_log_warn "Notice: DBus call $svc localWallet failed (exit code $wal_rc): $wal_out"
+        fi
+
+        local open_out="" open_rc=0
+        open_out="$(busctl --user call "$svc" "/modules/$mod" org.kde.KWallet isOpen s "$wallet" 2>&1)" || open_rc=$?
+        if [ $open_rc -eq 0 ]; then
+          if echo "$open_out" | grep -q "false"; then
+            return 1
+          fi
+        else
+          knot_log_warn "Notice: DBus call $svc isOpen failed (exit code $open_rc): $open_out"
+        fi
       fi
+    else
+      knot_log_warn "Notice: DBus service $svc isEnabled call failed (exit code $en_rc): $en_out"
     fi
   done
 
   # Check Secret Service collection Locked property
-  local locked
-  locked="$(busctl --user get-property org.freedesktop.secrets /org/freedesktop/secrets/aliases/default org.freedesktop.Secret.Collection Locked 2>/dev/null || echo "")"
-  if echo "$locked" | grep -q "true"; then
-    return 1
+  local locked="" lock_out="" rc_lock=0
+  lock_out="$(busctl --user get-property org.freedesktop.secrets /org/freedesktop/secrets/aliases/default org.freedesktop.Secret.Collection Locked 2>&1)" || rc_lock=$?
+  if [ $rc_lock -eq 0 ]; then
+    locked="$lock_out"
+    if echo "$locked" | grep -q "true"; then
+      return 1
+    fi
+  else
+    knot_log_warn "Notice: Secret Service collection status check failed (exit code $rc_lock): $lock_out"
   fi
   return 0
 }
@@ -164,11 +228,13 @@ antigravity_check_auth_local() {
 
   # Ensure credentials are sync'd first if unlocked
   if antigravity_is_kwallet_unlocked; then
-    antigravity_sync_credentials || true
+    if ! antigravity_sync_credentials; then
+      knot_log_warn "Notice: local credential synchronization failed or no credentials found"
+    fi
   fi
 
   local token_file="$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
-  if [ -s "$token_file" ] && jq -e '.token.access_token or .token.refresh_token' "$token_file" >/dev/null 2>&1; then
+  if [ -s "$token_file" ] && jq -e '.token.access_token or .token.refresh_token' "$token_file" >/dev/null; then
     return 0
   fi
 
@@ -197,10 +263,11 @@ antigravity_exec_node() {
   my_host="$(knot_detect_hostname)"
 
   local manifest=""
-  manifest="$(knot_get_manifest_path "$target" 2>/dev/null || true)"
   local target_host="$target"
-  if [ -n "$manifest" ] && [ -f "$manifest" ]; then
-    target_host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+  if manifest="$(knot_get_manifest_path "$target")"; then
+    if [ -f "$manifest" ]; then
+      target_host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+    fi
   fi
 
   # Ensure --dangerously-skip-permissions is set for headless autonomous agent executions
@@ -257,8 +324,11 @@ antigravity_onboard() {
     return 0
   fi
 
-  local ver
-  ver="$(antigravity_get_version)"
+  local ver="unknown"
+  local v_out=""
+  if v_out="$(antigravity_get_version 2>&1)"; then
+    ver="$v_out"
+  fi
   knot_log_ok "Antigravity CLI detected: version $ver"
 
   knot_log_info "Checking Antigravity authentication status..."
@@ -278,11 +348,11 @@ antigravity_onboard() {
 
   knot_log_info "Initiating guided authentication terminal on graphical display..."
 
-  if command -v konsole >/dev/null 2>&1; then
+  if command -v konsole >/dev/null; then
     systemd-run --user konsole -e "$agy_bin"
     knot_log_info "Launched Konsole on local display. Please log in with Google, then press Enter here to verify."
     read -r -p "Press [Enter] once authentication is complete in the opened terminal..."
-  elif command -v kitty >/dev/null 2>&1; then
+  elif command -v kitty >/dev/null; then
     systemd-run --user kitty "$agy_bin"
     knot_log_info "Launched Kitty on local display. Please log in with Google, then press Enter here to verify."
     read -r -p "Press [Enter] once authentication is complete in the opened terminal..."
@@ -309,7 +379,7 @@ antigravity_swarm_status() {
 
   local nodes_dirs=()
   local primary_dir=""
-  if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+  if primary_dir="$(knot_get_nodes_dir)" && [ -d "$primary_dir" ]; then
     nodes_dirs+=("$primary_dir")
   fi
   local user_home
@@ -337,7 +407,10 @@ antigravity_swarm_status() {
 
     if [ "$host" = "$my_host" ]; then
       if antigravity_detect_cli; then
-        ver="$(antigravity_get_version)"
+        local v_out=""
+        if v_out="$(antigravity_get_version 2>&1)"; then
+          ver="$v_out"
+        fi
         if ! antigravity_is_kwallet_unlocked; then
           auth_status="${C_YELLOW}KWALLET LOCKED${C_RESET}"
         else
@@ -365,9 +438,13 @@ antigravity_swarm_status() {
         dur="$(echo "$remote_probe" | grep -o '"duration_seconds":[0-9.]*' | cut -d: -f2 | awk '{printf "%.2fs", $1}')"
         if [ -n "$dur" ]; then latency="$dur"; fi
 
-        local remote_ver=""
-        remote_ver="$(timeout 15 knot exec "$id" "PATH=\"\$HOME/.local/bin:\$PATH\" agy --version" 2>&1 | head -n1 | awk '{print $NF}' || echo "")"
-        if [ -n "$remote_ver" ]; then ver="$remote_ver"; else ver="installed"; fi
+        local remote_ver="" rv_rc=0
+        remote_ver="$(timeout 15 knot exec "$id" "PATH=\"\$HOME/.local/bin:\$PATH\" agy --version" 2>&1 | head -n1 | awk '{print $NF}')" || rv_rc=$?
+        if [ $rv_rc -eq 0 ] && [ -n "$remote_ver" ]; then
+          ver="$remote_ver"
+        else
+          ver="installed"
+        fi
       else
         if [ $rc -eq 124 ]; then
           auth_status="${C_YELLOW}KEYRING LOCKED / TIMED OUT${C_RESET}"
@@ -396,7 +473,7 @@ antigravity_swarm_test() {
   if [ "$target" = "all" ] || [ "$target" = "--all" ]; then
     local nodes_dirs=()
     local primary_dir=""
-    if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+    if primary_dir="$(knot_get_nodes_dir)" && [ -d "$primary_dir" ]; then
       nodes_dirs+=("$primary_dir")
     fi
     local user_home
@@ -438,7 +515,7 @@ antigravity_swarm_test() {
 
   if [ $rc -eq 0 ] && echo "$raw_out" | grep -q '"status":[[:space:]]*"SUCCESS"'; then
     local response dur in_tok out_tok total_tok cid
-    if command -v jq >/dev/null 2>&1 && [ -n "$json_line" ]; then
+    if command -v jq >/dev/null && [ -n "$json_line" ]; then
       response="$(echo "$json_line" | jq -r '.response // ""')"
       dur="$(echo "$json_line" | jq -r '(.duration_seconds // 0) | tostring' | awk '{printf "%.2fs", $1}')"
       in_tok="$(echo "$json_line" | jq -r '.usage.input_tokens // "?"')"
@@ -491,7 +568,7 @@ antigravity_get_my_node() {
   my_host="$(knot_detect_hostname)"
   local nodes_dirs=()
   local primary_dir=""
-  if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+  if primary_dir="$(knot_get_nodes_dir)" && [ -d "$primary_dir" ]; then
     nodes_dirs+=("$primary_dir")
   fi
   local user_home
@@ -542,10 +619,12 @@ antigravity_swarm_auth() {
     shift
     if [ "${1:-}" = "--all" ]; then
       knot_log_info "Synchronizing Antigravity credentials across all mesh nodes..."
-      antigravity_sync_credentials || true
+      if ! antigravity_sync_credentials; then
+        knot_log_warn "Local Antigravity credentials could not be synchronized."
+      fi
       local nodes_dirs=()
       local primary_dir=""
-      if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+      if primary_dir="$(knot_get_nodes_dir)" && [ -d "$primary_dir" ]; then
         nodes_dirs+=("$primary_dir")
       fi
       local user_home
@@ -567,14 +646,20 @@ antigravity_swarm_auth() {
           if [[ " ${seen_nodes[*]:-} " =~ " ${id} " ]]; then continue; fi
           seen_nodes+=("$id")
           if [ "$host" != "$(knot_detect_hostname)" ] && [ "$id" != "$(knot_detect_hostname)" ]; then
-            ssh -o BatchMode=yes -o ConnectTimeout=4 "$id" "knot auth sync" || true
+            local sync_err="" sync_rc=0
+            sync_err="$(ssh -o BatchMode=yes -o ConnectTimeout=4 "$id" "knot auth sync" 2>&1)" || sync_rc=$?
+            if [ $sync_rc -ne 0 ]; then
+              knot_log_warn "Failed to sync credentials to node '$id' (exit code $sync_rc): $sync_err"
+            fi
           fi
         done
       done
       knot_log_ok "Credential sync complete across swarm."
       return 0
     else
-      antigravity_sync_credentials || true
+      if ! antigravity_sync_credentials; then
+        knot_log_warn "Local Antigravity credentials could not be synchronized."
+      fi
       local r_out=""
       if ! r_out="$(systemctl --user restart knot-agent.service 2>&1)"; then
         knot_log_warn "Notice: knot-agent.service not running or could not restart: $r_out"
@@ -599,8 +684,13 @@ antigravity_swarm_auth() {
   if [ "$target" = "local" ] || [ "$target" = "$my_node" ]; then
     knot_log_info "Launching interactive Antigravity CLI login on local node ($my_node)..."
     agy
-    antigravity_sync_credentials || true
-    systemctl --user restart knot-agent.service 2>/dev/null || true
+    if ! antigravity_sync_credentials; then
+      knot_log_warn "Local Antigravity credentials could not be synchronized."
+    fi
+    local r_out=""
+    if ! r_out="$(systemctl --user restart knot-agent.service 2>&1)"; then
+      knot_log_warn "Notice: knot-agent.service not running or restart failed: $r_out"
+    fi
     knot_log_ok "Authentication complete and credentials synced."
     return 0
   fi
@@ -611,8 +701,9 @@ antigravity_swarm_auth() {
     if [ "$target" = "steamdeck" ]; then
       uid="1001"
     fi
-    ssh "$target" "WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/$uid nohup konsole -e agy >/dev/null 2>&1 &"
-    knot_log_ok "Konsole opened on $target screen. Follow the on-screen prompt to log in."
+    local log_file="/tmp/knot_konsole_agy.log"
+    ssh "$target" "WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/$uid nohup konsole -e agy > '$log_file' 2>&1 &"
+    knot_log_ok "Konsole opened on $target screen (logging to $log_file). Follow the on-screen prompt to log in."
     return 0
   fi
 

@@ -37,7 +37,7 @@ doctor_check_local() {
     anchor_host="${ANCHOR_HOST:-desktop}"
   fi
 
-  if [ "$my_host" = "$anchor_host" ] || [ "$my_host" = "$anchor_id" ]; then
+  if [ "$my_host" = "$anchor_host" ] || [ "$my_host" = "$anchor_id" ] || knot_is_anchor; then
     is_anchor=1
   else
     local nodes_dir
@@ -269,11 +269,15 @@ doctor_check_local() {
   if [[ "$engines" =~ "firewalld" ]]; then
     local fw_ports
     if fw_ports="$(sudo -n firewall-cmd --list-ports 2>&1)"; then
-      if echo "$fw_ports" | grep -q "4242/tcp"; then
-        doc_ok "firewalld allows port 4242/tcp (Knot Hub / Onboarding)"
+      if [ $is_anchor -eq 1 ]; then
+        if echo "$fw_ports" | grep -q "4242/tcp"; then
+          doc_ok "firewalld allows port 4242/tcp (Knot Hub / Onboarding)"
+        else
+          doc_fail "firewalld BLOCKS port 4242/tcp (Knot Hub / Onboarding)"
+          failures=$((failures + 1))
+        fi
       else
-        doc_fail "firewalld BLOCKS port 4242/tcp (Knot Hub / Onboarding)"
-        failures=$((failures + 1))
+        doc_info "Strand node: inbound port 4242/tcp not required (Hub runs on Anchor)"
       fi
       if echo "$fw_ports" | grep -q "24800/tcp"; then
         doc_ok "firewalld allows port 24800/tcp (Deskflow KVM)"
@@ -287,11 +291,15 @@ doctor_check_local() {
   elif [[ "$engines" =~ "ufw" ]]; then
     local ufw_out
     if ufw_out="$(sudo -n ufw status 2>&1)"; then
-      if echo "$ufw_out" | grep -q "4242"; then
-        doc_ok "UFW allows port 4242/tcp (Knot Hub)"
+      if [ $is_anchor -eq 1 ]; then
+        if echo "$ufw_out" | grep -q "4242"; then
+          doc_ok "UFW allows port 4242/tcp (Knot Hub)"
+        else
+          doc_fail "UFW BLOCKS port 4242/tcp (Knot Hub)"
+          failures=$((failures + 1))
+        fi
       else
-        doc_fail "UFW BLOCKS port 4242/tcp (Knot Hub)"
-        failures=$((failures + 1))
+        doc_info "Strand node: inbound port 4242/tcp not required (Hub runs on Anchor)"
       fi
       if echo "$ufw_out" | grep -q "24800"; then
         doc_ok "UFW allows port 24800/tcp (Deskflow KVM)"
@@ -304,11 +312,29 @@ doctor_check_local() {
     doc_ok "No restrictive firewall blocking local mesh ports (Engine: $engines)"
   fi
 
+  if [ $is_anchor -eq 0 ]; then
+    local hub_addr="${anchor_host:-desktop}"
+    local h_port="4242"
+    if [ -r "/etc/knot/swarms.d/${active_swarm}.conf" ]; then
+      local parsed_port
+      parsed_port="$(awk -F= '/HUB_PORT=/ {gsub(/[^0-9]/, "", $2); print $2}' "/etc/knot/swarms.d/${active_swarm}.conf")"
+      [ -n "$parsed_port" ] && h_port="$parsed_port"
+    fi
+    if command -v curl >/dev/null; then
+      local probe_out=""
+      if probe_out="$(curl -kfsSL --max-time 3 "https://${hub_addr}:${h_port}/health" 2>&1)"; then
+        doc_ok "Anchor Knot Hub (https://${hub_addr}:${h_port}/health) is reachable"
+      else
+        doc_info "Anchor Knot Hub (https://${hub_addr}:${h_port}/health) outbound probe: $probe_out"
+      fi
+    fi
+  fi
+
   # 6. Auto-Unlock & Screen Session
   echo -e "\n${C_BOLD}[Auto-Unlock & Screen Session]${C_RESET}"
-  if systemctl is-enabled plasmalogin.service >/dev/null 2>&1; then
+  if systemctl is-enabled --quiet plasmalogin.service; then
     doc_ok "Display manager standardized on plasma-login-manager (plasmalogin.service)"
-  elif systemctl is-enabled sddm.service >/dev/null 2>&1; then
+  elif systemctl is-enabled --quiet sddm.service; then
     doc_warn "Display manager is SDDM; run 'knot repair' to migrate to plasma-login-manager"
     warnings=$((warnings + 1))
   fi
@@ -429,9 +455,12 @@ doctor_check_local() {
   fi
   # 7. Antigravity Swarm Node Health
   echo -e "\n${C_BOLD}[Antigravity Swarm Node Health]${C_RESET}"
-  if command -v antigravity_detect_cli >/dev/null 2>&1 && antigravity_detect_cli; then
-    local agy_ver
-    agy_ver="$(antigravity_get_version)"
+  if command -v antigravity_detect_cli >/dev/null && antigravity_detect_cli; then
+    local agy_ver="unknown"
+    local v_out=""
+    if v_out="$(antigravity_get_version 2>&1)"; then
+      agy_ver="$v_out"
+    fi
     doc_ok "Antigravity CLI installed: version $agy_ver"
 
     local agy_test_out="" agy_rc=0
@@ -487,7 +516,7 @@ doctor_diagnose() {
     my_host="$(knot_detect_hostname)"
     local nodes_dirs=()
     local primary_dir=""
-    if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+    if primary_dir="$(knot_get_nodes_dir)" && [ -d "$primary_dir" ]; then
       nodes_dirs+=("$primary_dir")
     fi
     local user_home
@@ -532,8 +561,7 @@ doctor_diagnose() {
     my_host="$(knot_detect_hostname)"
     local target_host=""
     local manifest=""
-    manifest="$(knot_get_manifest_path "$target" 2>/dev/null || true)"
-    if [ -n "$manifest" ] && [ -f "$manifest" ]; then
+    if manifest="$(knot_get_manifest_path "$target")" && [ -f "$manifest" ]; then
       target_host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
     fi
 
@@ -788,7 +816,9 @@ doctor_repair_local() {
     mkdir -p "$user_unit_dir"
     ln -sf "$agent_svc" "$user_unit_dir/knot-agent.service"
     local r_out=""
-    if r_out="$(systemctl --user daemon-reload 2>&1)"; then :; fi
+    if ! r_out="$(systemctl --user daemon-reload 2>&1)"; then
+      knot_log_warn "Notice: daemon-reload failed: $r_out"
+    fi
     local a_probe=""
     if a_probe="$(systemctl --user is-active knot-agent.service 2>&1)"; then
       if [ "$a_probe" != "active" ]; then
@@ -839,7 +869,7 @@ doctor_repair() {
   fi
   if [ -z "$anchor_host" ]; then
     local a_manifest=""
-    if a_manifest="$(knot_get_manifest_path "$anchor_id" 2>/dev/null)"; then
+    if a_manifest="$(knot_get_manifest_path "$anchor_id")"; then
       anchor_host="$(awk -F'"' '/"hostname":/ {print $4}' "$a_manifest")"
     fi
   fi
@@ -887,7 +917,7 @@ doctor_repair() {
     user_home="$(knot_detect_user_home)"
     local nodes_dirs=()
     local primary_dir=""
-    if primary_dir="$(knot_get_nodes_dir 2>/dev/null)" && [ -d "$primary_dir" ]; then
+    if primary_dir="$(knot_get_nodes_dir)" && [ -d "$primary_dir" ]; then
       nodes_dirs+=("$primary_dir")
     fi
     for d in "$user_home/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
@@ -939,8 +969,8 @@ data = json.dumps({
 req = urllib.request.Request("https://'"${anchor_host:-127.0.0.1}"':4242/tasks/post", data=data, headers={"Content-Type": "application/json"})
 try:
     urllib.request.urlopen(req, context=ctx, timeout=3)
-except Exception:
-    pass
+except Exception as e:
+    sys.stderr.write(f"Notice: Failed to post self-healing task to Hub: {e}\n")
 '
         fi
       fi

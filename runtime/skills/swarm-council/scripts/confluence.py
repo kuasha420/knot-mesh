@@ -44,8 +44,8 @@ def detect_display_scale() -> float:
                 s = float(val)
                 if s > 0:
                     return s
-            except ValueError:
-                pass
+            except ValueError as _err:
+                sys.stderr.write(f"Notice: [confluence] Handled exception: {_err}\n")
 
     # 2. Check kscreen-doctor -o (KDE Plasma 6 Wayland)
     try:
@@ -61,8 +61,8 @@ def detect_display_scale() -> float:
             s = float(m.group(1))
             if s > 0:
                 return s
-    except Exception:
-        pass
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [confluence] Handled exception: {_err}\n")
 
     # 3. Check wlr-randr (wlroots Wayland)
     try:
@@ -77,8 +77,8 @@ def detect_display_scale() -> float:
             s = float(m.group(1))
             if s > 0:
                 return s
-    except Exception:
-        pass
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [confluence] Handled exception: {_err}\n")
 
     return 1.0
 
@@ -100,8 +100,8 @@ def load_topology(knot_root):
             try:
                 with open(c) as f:
                     return json.load(f)
-            except Exception:
-                pass
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [confluence] Handled exception: {_err}\n")
     local_node = resolve_local_node_id()
     return {
         "anchor": local_node,
@@ -120,8 +120,8 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
     if resolve_swarm_palette:
         try:
             dynamic_palette = resolve_swarm_palette(node_ids=nodes)
-        except Exception:
-            pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [confluence] Handled exception: {_err}\n")
 
     tiling_layouts = {
         "grid": "layout grid",
@@ -336,8 +336,8 @@ def main():
                 active_border = p[local_nid].hex
             elif nodes and nodes[0] in p:
                 active_border = p[nodes[0]].hex
-        except Exception:
-            pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [confluence] Handled exception: {_err}\n")
 
     socket_path = f"/tmp/kitty-council-{args.run_id}.sock"
     meta_file = os.path.join(missions_dir, "meta.json")
@@ -348,8 +348,8 @@ def main():
             mdata["socket"] = socket_path
             with open(meta_file, "w") as mf:
                 json.dump(mdata, mf, indent=2)
-        except Exception:
-            pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [confluence] Handled exception: {_err}\n")
 
     if not args.dry_run:
         env = os.environ.copy()

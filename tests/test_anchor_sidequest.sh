@@ -77,8 +77,8 @@ fi
 
 echo "=== [Side Quest Test 3] Offline Peer & Nonexistent Node Fast-Fail ==="
 start_time=$(date +%s)
-if bash "$RESOLVER" nonexistent_node_xyz 2>/dev/null; then
-  echo "Error: nonexistent node resolved unexpectedly!" >&2
+if probe_out="$(bash "$RESOLVER" nonexistent_node_xyz 2>&1)"; then
+  echo "Error: nonexistent node resolved unexpectedly! Output: $probe_out" >&2
   exit 1
 else
   end_time=$(date +%s)

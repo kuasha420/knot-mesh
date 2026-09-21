@@ -89,8 +89,8 @@ def run_local_ai_inference(prompt, timeout_sec=4):
                     if match:
                         inner = json.loads(match.group(0))
                         return inner.get("mode"), inner.get("rationale", "")
-    except Exception:
-        pass
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [classifier] Handled exception: {_err}\n")
     return None, None
 
 def main():

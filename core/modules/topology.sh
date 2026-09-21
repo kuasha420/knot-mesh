@@ -171,10 +171,12 @@ except Exception as e:
     sys.exit(1)
 "
 
-  local analysis_json
-  if ! analysis_json="$(python3 -c "$py_code" 2>/dev/null)"; then
+  local analysis_json="" py_rc=0
+  analysis_json="$(python3 -c "$py_code" 2>&1)" || py_rc=$?
+  if [ $py_rc -ne 0 ]; then
     # If direct import fails due to CWD or path, try through Knot hub
-    knot_log_warn "Local execution failed, forwarding to Knot Hub API..."
+    knot_log_warn "Local execution failed ($py_rc): $analysis_json"
+    knot_log_info "Forwarding to Knot Hub API..."
     analysis_json="$(curl -k -s -X POST https://127.0.0.1:4242/topology/analyze-photo \
       -H 'Content-Type: application/json' \
       -d "{\"image_path\": \"$photo_path\", \"mode\": \"$mode\"}" | jq -r '.result // empty')"
@@ -243,8 +245,13 @@ print('Updated ' + '$topo_file')
 "
     # Recompile and reload Deskflow & Stripd
     deskflow_configure
-    systemctl --user restart knot-deskflow.service 2>/dev/null || true
-    systemctl --user restart knot-stripd.service 2>/dev/null || true
+    local r_err=""
+    if ! r_err="$(systemctl --user restart knot-deskflow.service 2>&1)"; then
+      knot_log_warn "Notice: knot-deskflow.service restart failed: $r_err"
+    fi
+    if ! r_err="$(systemctl --user restart knot-stripd.service 2>&1)"; then
+      knot_log_warn "Notice: knot-stripd.service restart failed: $r_err"
+    fi
     knot_log_ok "Topology successfully refreshed and applied to mesh!"
   else
     echo ""
@@ -270,27 +277,40 @@ topology_align_internal() {
 
   # Update node manifest and recompile Deskflow
   if [ -x "$KNOT_ROOT/core/installer/display.sh" ]; then
-    local fresh_disp
-    fresh_disp="$("$KNOT_ROOT/core/installer/display.sh" --json 2>/dev/null || true)"
-    if [ -n "$fresh_disp" ]; then
-      for target_mf in "$home/.config/knot/swarms/${active_swarm}/nodes/${my_host}.json" "$home/.config/knot/swarms/${active_swarm}/nodes/rog-ally.json"; do
-        if [ -f "$target_mf" ]; then
-          python3 -c "
+    local fresh_disp="" disp_rc=0
+    if fresh_disp="$("$KNOT_ROOT/core/installer/display.sh" --json)"; then
+      if [ -n "$fresh_disp" ]; then
+        for target_mf in "$home/.config/knot/swarms/${active_swarm}/nodes/${my_host}.json" "$home/.config/knot/swarms/${active_swarm}/nodes/rog-ally.json"; do
+          if [ -f "$target_mf" ]; then
+            local py_err="" py_rc=0
+            py_err="$(python3 -c "
 import json, sys
 with open('$target_mf', 'r') as f:
     d = json.load(f)
 d['display'] = json.loads('''$fresh_disp''')
 with open('$target_mf', 'w') as f:
     json.dump(d, f, indent=2)
-" 2>/dev/null || true
-        fi
-      done
+" 2>&1)" || py_rc=$?
+            if [ $py_rc -ne 0 ]; then
+              knot_log_warn "Notice: Failed to update display manifest $target_mf ($py_rc): $py_err"
+            fi
+          fi
+        done
+      fi
+    else
+      disp_rc=$?
+      knot_log_warn "Notice: display.sh --json exited with code $disp_rc"
     fi
   fi
 
   deskflow_configure
-  systemctl --user restart knot-deskflow.service 2>/dev/null || true
-  systemctl --user restart knot-stripd.service 2>/dev/null || true
+  local r_err=""
+  if ! r_err="$(systemctl --user restart knot-deskflow.service 2>&1)"; then
+    knot_log_warn "Notice: knot-deskflow.service restart failed: $r_err"
+  fi
+  if ! r_err="$(systemctl --user restart knot-stripd.service 2>&1)"; then
+    knot_log_warn "Notice: knot-stripd.service restart failed: $r_err"
+  fi
   knot_log_ok "Internal display topology synchronized with Deskflow KVM."
 }
 
@@ -332,37 +352,63 @@ topology_identify() {
 
   # Wake display from DPMS power-save and simulate user activity
   if command -v kscreen-doctor >/dev/null; then
-    kscreen-doctor --dpms on >/dev/null 2>&1 || true
+    local kd_err="" kd_rc=0
+    kd_err="$(kscreen-doctor --dpms on 2>&1)" || kd_rc=$?
+    if [ $kd_rc -ne 0 ]; then
+      knot_log_warn "Notice: kscreen-doctor --dpms on exited with code $kd_rc: $kd_err"
+    fi
   fi
   if command -v qdbus6 >/dev/null; then
-    qdbus6 org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.SimulateUserActivity >/dev/null 2>&1 || true
+    local qd_err="" qd_rc=0
+    qd_err="$(qdbus6 org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.SimulateUserActivity 2>&1)" || qd_rc=$?
+    if [ $qd_rc -ne 0 ]; then
+      knot_log_warn "Notice: qdbus6 SimulateUserActivity exited with code $qd_rc: $qd_err"
+    fi
   elif command -v qdbus >/dev/null; then
-    qdbus org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.SimulateUserActivity >/dev/null 2>&1 || true
+    local qd_err="" qd_rc=0
+    qd_err="$(qdbus org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.SimulateUserActivity 2>&1)" || qd_rc=$?
+    if [ $qd_rc -ne 0 ]; then
+      knot_log_warn "Notice: qdbus SimulateUserActivity exited with code $qd_rc: $qd_err"
+    fi
   fi
 
   # Auto-unlock graphical session if locked so overlay is not obscured by lockscreen
   if command -v loginctl >/dev/null; then
     local u_name
     u_name="$(knot_detect_user)"
-    local s_id
-    s_id="$(loginctl show-user "$u_name" -p Display --value 2>/dev/null || true)"
+    local s_id=""
+    if ! s_id="$(loginctl show-user "$u_name" -p Display --value 2>&1)"; then
+      s_id=""
+    fi
     if [ -z "$s_id" ]; then
-      s_id="$(loginctl list-sessions --no-legend 2>/dev/null | awk -v u="$u_name" '$3==u && $4~/seat/ {print $1; exit}')"
+      local s_list=""
+      if s_list="$(loginctl list-sessions --no-legend 2>&1)"; then
+        s_id="$(echo "$s_list" | awk -v u="$u_name" '$3==u && $4~/seat/ {print $1; exit}')"
+      fi
     fi
     if [ -n "$s_id" ]; then
-      local is_locked
-      is_locked="$(loginctl show-session "$s_id" -p LockedHint --value 2>/dev/null || true)"
-      if [ "$is_locked" = "yes" ]; then
-        loginctl unlock-session "$s_id" >/dev/null 2>&1 || true
+      local is_locked=""
+      if is_locked="$(loginctl show-session "$s_id" -p LockedHint --value 2>&1)"; then
+        if [ "$is_locked" = "yes" ]; then
+          local ul_err="" ul_rc=0
+          ul_err="$(loginctl unlock-session "$s_id" 2>&1)" || ul_rc=$?
+          if [ $ul_rc -ne 0 ]; then
+            knot_log_warn "Notice: loginctl unlock-session failed ($ul_rc): $ul_err"
+          fi
+        fi
       fi
     fi
   fi
 
   if [ "$broadcast_all" -eq 1 ]; then
     knot_log_info "Flashing display calibration pattern swarm-wide across all mesh nodes..."
-    curl -k -s -X POST https://127.0.0.1:4242/topology/identify \
+    local c_out="" c_rc=0
+    c_out="$(curl -k -s -X POST https://127.0.0.1:4242/topology/identify \
       -H "Content-Type: application/json" \
-      -d "{\"bg\": \"$bg\", \"duration_sec\": $duration}" >/dev/null 2>&1 || true
+      -d "{\"bg\": \"$bg\", \"duration_sec\": $duration}" 2>&1)" || c_rc=$?
+    if [ $c_rc -ne 0 ]; then
+      knot_log_warn "Notice: curl to topology/identify failed ($c_rc): $c_out"
+    fi
   fi
 
   knot_log_info "Opening high-contrast display identification overlay on local displays (bg: $bg, duration: ${duration}s)..."

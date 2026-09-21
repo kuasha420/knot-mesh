@@ -44,8 +44,8 @@ def resolve_project_dir(project_target=None):
                                 ]:
                                     if os.path.isdir(cand):
                                         return cand
-                except Exception:
-                    pass
+                except Exception as _err:
+                    sys.stderr.write(f"Notice: [resolve_project] Handled exception: {_err}\n")
 
         # Check local candidate paths for project_target
         for cand in [
@@ -70,8 +70,8 @@ def resolve_project_dir(project_target=None):
                         rfpath = os.path.realpath(fpath)
                         if rfpath == cwd or cwd.startswith(rfpath + "/"):
                             return rfpath
-            except Exception:
-                pass
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [resolve_project] Handled exception: {_err}\n")
 
     # 3. Fallback to git toplevel or CWD
     try:
@@ -82,8 +82,8 @@ def resolve_project_dir(project_target=None):
         ).strip()
         if top and os.path.isdir(top):
             return top
-    except Exception:
-        pass
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [resolve_project] Handled exception: {_err}\n")
 
     return cwd
 
