@@ -14,5 +14,5 @@
 
 ## 3. Operational Invariants
 - Dual-pool hygiene: maintain private exploration scratchpad during experiments; promote only verified learnings to swarm shared memory.
-- Strictly adhere to PSL Rule 1 failure transparency.
+- Strictly adhere to the PSL Gold Standard in [`AGENTS.md`](file:///home/kuasha/Dev/knot-mesh/AGENTS.md) (Rule 1 failure transparency, Rule 2 test honesty).
 - Optimize compute throughput without dropping node connectivity or overloading thermal limits.

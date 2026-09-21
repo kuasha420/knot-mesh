@@ -49,12 +49,12 @@ Every milestone progresses through a strict 5-stage pipeline:
                                      ▼                                                              │
 ┌─────────────────────────────────────────────────────────────────────────┐                         │
 │ STAGE 3: CODE & PSL REVIEW (`subagent-X-hammer`)                        │                         │
-│ - Ruthlessly audits all changes against the PSL Gold Standard:          │                         │
-│   • Rule 1: Zero error swallowing (`2>/dev/null`, `|| true`, `|| :`).   │                         │
-│   • Rule 2: Zero homework in tests (no cherry-picking, no mocks).       │                         │
-│   • Rule 3: Complete package delivery (code + types + tests + docs).     │                         │
-│   • Rule 4: Verifiable automated proofs.                                │                         │
-│   • Rule 5: Stop and inquire (no synthetic workarounds).                │                         │
+│ - Ruthlessly audits all changes against the 5 Ground Rules in AGENTS.md:│                         │
+│   • Rule 1: Zero error swallowing & strict failure transparency.        │                         │
+│   • Rule 2: Do not do the product's homework in tests.                  │                         │
+│   • Rule 3: Complete package deliveries (code + types + tests + docs).  │                         │
+│   • Rule 4: Zero homework in verification (automated proof).            │                         │
+│   • Rule 5: Stop and inquire before overengineering workarounds.        │                         │
 │ - Verdict: PASS or REJECT with specific line-by-line defect list.       │                         │
 └──────────────────┬───────────────────────────────────▲──────────────────┘                         │
                    │ (Passed Hammer Review)            │                                            │

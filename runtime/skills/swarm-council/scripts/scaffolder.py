@@ -299,13 +299,10 @@ Your predecessor is `@{prev_node}`. Your successor is `@{next_node}`.
 ---
 
 ## 1. Operational Directives
-- **Mode**: Autonomous Multi-Agent Tournament.
-- **Focus**: Pure Cryptographic & Non-Deterministic Agent Benchmark.
-- **Targeted Anti-Patterns (MANDATORY)**:
-  1. DO NOT audit or inspect the Knot codebase, SKILL.md, or git history. Workspace tools and paths are pre-verified.
-  2. DO NOT run background polling loops or shell status checks without solving.
-  3. Focus 100% of cognitive effort on generating and solving cryptographic challenges.
-- **Observability**: Every action you take is visible to the operator in your cockpit pane.
+- **Mode**: Autonomous Cryptographic Tournament.
+- **Scope**: Dedicated exclusively to algorithmic synthesis, cryptographic challenge generation, and peer verification within your local scratchpad.
+- **Workflow**: Generate, solve, and pass one-way verifiable challenges along the ring routing chain.
+- **Observability**: Real-time telemetry logged to Mesh DB (`knot council reply`).
 - **Anti-Cheating Contract**: Provide only one-way verifiable constraints to peers. Zero leaked plain solutions.
 
 ---
@@ -351,11 +348,10 @@ def scaffold_prompt(node, base_prompt, assigned_chunks, run_id, discussion_url, 
 
 ---
 
-## 1. Operational Directives (CRITICAL)
+## 1. Operational Directives
 - **Mode**: Autonomous Verification Mode.
-- **Execution**: Execute inspection tools (`view_file`, `grep_search`, `run_command`, `find_by_name`) directly.
-- **DO NOT** halt to request manual confirmation or artifact review. Complete your assigned audits and tests autonomously.
-- **Strict Error Handling**: Adhere strictly to Rule 02 (zero error swallowing, `set -euo pipefail`). Report all unhandled errors.
+- **Autonomy**: Execute inspection tools directly (`view_file`, `grep_search`, `run_command`) and complete your assigned verifications autonomously without pausing for interactive manual confirmation.
+- **Engineering Integrity**: Adhere strictly to the PSL Gold Standard in AGENTS.md (Rule 1 zero error swallowing with `set -euo pipefail`, Rule 2 test honesty). Report all unhandled errors transparently.
 
 ---
 
@@ -398,13 +394,8 @@ All progress must be reported to the mission registry:
   ```
 
 {cli_reply_hint}- **Compact Milestone Checkpoints (25%, 50%, 75%)**:
-  - **MANDATORY CONCISENESS RULE**: Keep interim checkpoints strictly under 15-20 lines.
-  - **DO NOT** output the full audit discoveries, large code dumps, or exhaustive file listings in checkpoints!
-  - **STRICT FOCUS FOR CHECKPOINTS**:
-    1. **Liveness & Active Task**: Exactly what file or test you are actively inspecting right now.
-    2. **Velocity & ETA**: Current progress percentage and estimated time to completion.
-    3. **Curious Cases & Red Flags**: Anomalies, strange edge cases, or potential breaking bugs that the swarm must be aware of early.
-  - **Reserve Exhaustive Deliverables for `STATUS: FINAL`**: Comprehensive findings, validation matrices, tables, and release verdicts belong exclusively in your final completion reply.
+  - Keep checkpoints strictly under 15 lines: (1) current active task, (2) progress percentage & ETA, (3) anomalies or red flags.
+  - Reserve exhaustive matrices and full tables exclusively for your final reply (`STATUS: FINAL`).
 
 - **Verified Alerts**: Immediately post an `ALERT` if you discover a critical blocker or regression with high confidence.
 - **Peer Callouts**: When addressing a specific peer, use unmistakable markup: `@[node:<node_id>]`.

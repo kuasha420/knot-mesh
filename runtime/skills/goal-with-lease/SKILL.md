@@ -13,10 +13,11 @@ The **`/goal-with-lease`** paradigm enables Antigravity agents across the Knot h
 
 When operating under `/goal-with-lease`:
 1. **Delegation Scope**: The agent is granted full autonomy to create files, execute tests, refactor code, and coordinate with peer nodes within the explicit workstream boundaries.
-2. **Lease Invariants**: Every code modification must satisfy:
-   - **Zero Error Swallowing**: Strict adherence to PSL Rule 1 (`set -euo pipefail`, zero `2>/dev/null`, zero `|| true`).
-   - **Zero Homework**: Product code must directly execute; tests must never fake green results.
-   - **GPG Signing**: Every mainline commit must be cryptographically signed (`git commit -S`) using key `<CONFIGURED_GPG_KEY_ID>`.
+2. **Lease Invariants**: Every code modification must adhere unconditionally to the **PSL Gold Standard** ([`AGENTS.md`](file:///home/kuasha/Dev/knot-mesh/AGENTS.md)):
+   - **Rule 1 (Zero Error Swallowing & Strict Failure Transparency)**: `set -euo pipefail`, zero silent error suppression (`2>/dev/null`, `|| true`).
+   - **Rule 2 (No Product Homework in Tests)**: Product code must directly execute and be validated by tests without artificial bypasses or mocks.
+   - **Rule 3 (Complete Package Deliveries)**: Production code + strict types/shell hygiene + automated tests + updated documentation.
+   - **Cryptographic Signing**: Every mainline commit must be cryptographically signed (`git commit -S`).
 3. **Telemetry & Heartbeats**: The agent reports milestone progress (25%, 50%, 75%, FINAL) to the Knot Mesh DB (`knot council reply <run_id> --node <node_id> --status <status>`).
 
 ---

@@ -9,7 +9,7 @@ bash -n "$KNOT_ROOT/core/modules/swarm_sync.sh"
 bash -n "$KNOT_ROOT/bin/knot"
 echo "  -> swarm_sync.sh & bin/knot syntax: OK"
 
-echo "=== [Test 2] Rule 02 Zero Error Swallowing Code Audit ==="
+echo "=== [Test 2] PSL Rule 1 Zero Error Swallowing Code Audit ==="
 # Verify no 2>/dev/null, || true, or || : in new swarm_sync.sh
 if grep -rn "2>/dev/null" "$KNOT_ROOT/core/modules/swarm_sync.sh"; then
   echo "Error: Forbidden 2>/dev/null found in swarm_sync.sh" >&2
@@ -23,9 +23,9 @@ if grep -rn "|| :" "$KNOT_ROOT/core/modules/swarm_sync.sh"; then
   echo "Error: Forbidden || : found in swarm_sync.sh" >&2
   exit 1
 fi
-echo "  -> Rule 02 Zero Error Swallowing compliance: OK"
+echo "  -> PSL Rule 1 Zero Error Swallowing compliance: OK"
 
-echo "=== [Test 2b] Rule 01 Legacy Registry Cleanliness Audit ==="
+echo "=== [Test 2b] Legacy Registry Cleanliness Audit ==="
 if grep -rn "registry/nodes" "$KNOT_ROOT/bin/" "$KNOT_ROOT/core/"; then
   echo "Error: Forbidden legacy registry/nodes reference found in codebase" >&2
   exit 1

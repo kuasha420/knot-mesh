@@ -10,7 +10,7 @@ bash -n "$KNOT_ROOT/core/modules/swarm_sync.sh"
 bash -n "$KNOT_ROOT/bin/knot"
 echo "  -> Syntax audit: OK"
 
-echo "=== [Test 2] Rule 02 Zero Error Swallowing Code Audit ==="
+echo "=== [Test 2] PSL Rule 1 Zero Error Swallowing Code Audit ==="
 for f in "$KNOT_ROOT/core/modules/swarm_sync.sh"; do
   if grep -rn "2>/dev/null" "$f"; then
     echo "Error: Forbidden 2>/dev/null found in $f" >&2
@@ -30,7 +30,7 @@ if tail -n 100 "$KNOT_ROOT/core/lib.sh" | grep -q "2>/dev/null"; then
   echo "Error: Forbidden 2>/dev/null found in core/lib.sh install type functions" >&2
   exit 1
 fi
-echo "  -> Rule 02 compliance: OK"
+echo "  -> PSL Rule 1 compliance: OK"
 
 echo "=== [Test 3] Install Type Detection Logic ==="
 TMP_DIR="$(mktemp -d)"

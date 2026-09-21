@@ -10,7 +10,7 @@ COUNCIL_SCRIPTS="$KNOT_ROOT/runtime/skills/swarm-council/scripts"
 echo "=== Running Swarm Council Test Suite ==="
 
 # 1. Zero Error Swallowing Audit
-echo -n "1. Auditing codebase for zero error swallowing (Rule 02)... "
+echo -n "1. Auditing codebase for zero error swallowing (PSL Rule 1)... "
 if grep -rn '|| true' "$COUNCIL_SCRIPTS" "$KNOT_ROOT/core/modules/council.sh"; then
   echo "FAILED (Found || true in council engine)"
   exit 1
