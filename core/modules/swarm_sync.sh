@@ -324,10 +324,14 @@ swarm_sync_dev_heal_local() {
     chmod +x "$knot_root/bin/knot-installer"
   fi
 
-  # 3. Global Antigravity skill symlink
+  # 3. Global Antigravity skills symlinks
   mkdir -p "$home/.gemini/config/skills"
-  if [ -d "$knot_root/runtime/skills/swarm-council" ]; then
-    ln -sfn "$knot_root/runtime/skills/swarm-council" "$home/.gemini/config/skills/swarm-council"
+  if [ -d "$knot_root/runtime/skills" ]; then
+    for s in "$knot_root/runtime/skills"/*; do
+      [ -d "$s" ] || continue
+      s_name="$(basename "$s")"
+      ln -sfn "$s" "$home/.gemini/config/skills/$s_name"
+    done
   fi
 
   # 4. Global Antigravity lifecycle hook: ~/.gemini/config/hooks.json
@@ -422,8 +426,12 @@ swarm_sync_dev_heal_remote() {
       chmod +x "$DEV_DIR/bin/knot-installer"
     fi
 
-    if [ -d "$DEV_DIR/runtime/skills/swarm-council" ]; then
-      ln -sfn "$DEV_DIR/runtime/skills/swarm-council" "$HOME/.gemini/config/skills/swarm-council"
+    if [ -d "$DEV_DIR/runtime/skills" ]; then
+      for s in "$DEV_DIR/runtime/skills"/*; do
+        [ -d "$s" ] || continue
+        s_name="$(basename "$s")"
+        ln -sfn "$s" "$HOME/.gemini/config/skills/$s_name"
+      done
     fi
 
     cat << "EOF_HOOK" > "$HOME/.gemini/config/hooks.json"
