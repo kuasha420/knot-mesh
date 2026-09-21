@@ -151,6 +151,7 @@ Mesh nodes maintain standardized open-spec skill bundles in `runtime/skills/`:
 - `hardware-profiles`: Node-specific architecture, accelerator capabilities (CUDA, ROCm, UMA), and role definitions.
 - `swarm-council`: Confluence cockpit coordination, multi-agent steering, and discussion thread reconciliations.
 - `goal-with-lease`: Autonomous goal execution with Linda tuplespace artifact locking and distributed heartbeats.
+- `subagent-ladder`: Strictly user-invoked multi-agent SWE execution pipeline (Executioner -> Hammer -> Auditor) with deterministic workspace artifact bridge.
 
 ### 3. Swarm Telemetry & Testing
 To verify Antigravity agent connectivity across the mesh:

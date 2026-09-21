@@ -88,7 +88,7 @@ The autonomous multi-agent intelligence layer orchestrating distributed AI agent
    Move your mouse cursor fluidly across physical machines. Leverages Deskflow with a custom C `libportal` InputCapture shim tailored specifically for KWin Wayland session semantics.
 
 2. **🤖 Zero-Prompt Antigravity Multi-Agent Orchestration**  
-   Built-in Model Context Protocol (MCP) server (`core/mcp/gateway.py`) with 4 canonical tools and pre-approved operational skills in `runtime/skills/` (`knot-swarm`, `hardware-profiles`, `swarm-council`, `goal-with-lease`) grant agents headless mesh execution, shared memory palace recall, and distributed task fanout across nodes without human prompts.
+   Built-in Model Context Protocol (MCP) server (`core/mcp/gateway.py`) with 4 canonical tools and pre-approved operational skills in `runtime/skills/` (`knot-swarm`, `hardware-profiles`, `swarm-council`, `goal-with-lease`, `subagent-ladder`) grant agents headless mesh execution, shared memory palace recall, and distributed task fanout across nodes without human prompts.
 
 3. **💡 Ambient Spatial Awareness & Wayland LayerShell Strips**  
    Subtle, low-opacity PyQt6 Wayland LayerShell edge indicators (`knot-stripd`) glow softly along physical display boundaries, flashing dynamic visual cues when the cursor traverses between machines.

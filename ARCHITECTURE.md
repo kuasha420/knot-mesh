@@ -327,6 +327,7 @@ Autonomous agent capabilities are fully decoupled from core bash orchestrators a
   - `runtime/skills/hardware-profiles/`: Node-specific architecture, accelerator capabilities (CUDA, ROCm, UMA), and role definitions.
   - `runtime/skills/swarm-council/`: Confluence cockpit coordination, multi-agent steering, and discussion thread reconciliations.
   - `runtime/skills/goal-with-lease/`: Autonomous goal execution with Linda tuplespace artifact locking and distributed heartbeats.
+  - `runtime/skills/subagent-ladder/`: User-invoked multi-agent SWE execution pipeline (Executioner $\to$ Hammer $\to$ Auditor) with deterministic workspace artifact bridge.
 - **Skill Specification Format**:
   - Each skill directory is anchored by `SKILL.md`, documenting instructions, input schemas, environmental prerequisites, and operational contracts.
   - Skills interact with the underlying mesh strictly via clean CLI entrypoints (`knot`, `knot council`) or REST APIs, preserving strict tier decoupling between A2A cognitive processes and D2D system plumbing.

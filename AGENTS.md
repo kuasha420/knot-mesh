@@ -33,43 +33,12 @@ This repository strictly adheres to the PSL Gold Standard of engineering integri
 
 ---
 
-## 2. Subagent Ladder Protocol
+## 2. Multi-Agent SWE Execution Protocol
 
-To ensure rigorous quality control and architectural compliance across multi-agent execution pipelines, contributions must progress through the **Subagent Ladder**:
+For complex multi-phase engineering milestones, contributors and operators invoke the **`subagent-ladder`** operational skill ([`runtime/skills/subagent-ladder/SKILL.md`](file:///home/kuasha/Dev/knot-mesh/runtime/skills/subagent-ladder/SKILL.md)).
 
-```
-┌───────────────────────────┐
-│     Phase Executioner     │ ──► Implements approved phase plan tasks strictly within scope.
-└─────────────┬─────────────┘     Zero scope creep; enforces PSL Gold Standard.
-              │
-              ▼
-┌───────────────────────────┐
-│ Verification / Hammer     │ ──► Subject changes to aggressive adversarial verification,
-└─────────────┬─────────────┘     negative testing, and regression suites.
-              │
-              ▼
-┌───────────────────────────┐
-│      Audit & Signoff      │ ──► Validates repository boundaries, packaging integrity,
-└───────────────────────────┘     confidentiality compliance, and exit criteria before merge.
-```
-
-1. **Phase Executioner**:
-   * Strictly executes approved tasks defined in the phase plan.
-   * Adheres to the PSL Gold Standard and enforces `set -euo pipefail`.
-   * Introduces zero scope creep; touches only files relevant to the plan.
-   * Delivers exact file diffs and raw command outputs back to the coordinator.
-   * Self-remediates review defects reported by verification or audit nodes.
-
-2. **Verification & Stress Hammer**:
-   * Executes exhaustive automated test suites (`bash -n`, `py_compile`, unit/integration tests).
-   * Validates negative paths, boundary inputs, failure recoveries, and timeout behaviors.
-   * Rejects any test that violates Rule 2 (doing homework for the product).
-
-3. **Integrity & Compliance Auditor**:
-   * Validates packaging (`PKGBUILD`, systemd units, directory layouts).
-   * Verifies documentation matches implementation.
-   * Conducts leak detection (ensuring zero private IPs, personal usernames, or proprietary tokens exist in tree).
-   * Confirms all phase exit criteria are satisfied before final signoff.
+> [!IMPORTANT]
+> **User-Invoked Only**: Autonomous agents must **NEVER** auto-trigger or assume the multi-agent ladder pipeline on their own. The ladder workflow is strictly engaged upon explicit operator direction (e.g., `/subagent-ladder`, *"use subagent ladder"*). Single-turn queries and targeted bug fixes must be handled directly.
 
 ---
 
