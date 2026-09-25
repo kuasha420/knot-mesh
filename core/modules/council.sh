@@ -795,20 +795,20 @@ council_kill() {
   fi
 
   knot_log_info "Stopping council processes for $run_id..."
-  if pgrep -q -f "knot-council-$run_id"; then
+  if pgrep --quiet -f "knot-council-$run_id"; then
     pkill -f "knot-council-$run_id"
   fi
-  if pgrep -q -f "$run_id.*kitty"; then
+  if pgrep --quiet -f "$run_id.*kitty"; then
     pkill -f "$run_id.*kitty"
   fi
-  if pgrep -q -f "kitty.*$run_id"; then
+  if pgrep --quiet -f "kitty.*$run_id"; then
     pkill -f "kitty.*$run_id"
   fi
-  if pgrep -q -f "$run_id"; then
+  if pgrep --quiet -f "$run_id"; then
     pkill -f "$run_id"
   fi
   rm -f "/tmp/kitty-council-$run_id.sock"
-  "$KNOT_ROOT/bin/knot" exec --all "if pgrep -q -f $run_id; then pkill -f $run_id; fi"
+  "$KNOT_ROOT/bin/knot" exec --all "if pgrep --quiet -f $run_id; then pkill -f $run_id; fi"
   knot_log_ok "Council run $run_id halted across fleet."
 }
 

@@ -148,7 +148,7 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
         ""
     ]
 
-    local_node = resolve_local_node_id(nodes)
+    local_node = resolve_local_node_id()
 
     ordered_nodes = []
     if local_node and local_node in nodes:
@@ -331,7 +331,7 @@ def main():
     if resolve_swarm_palette:
         try:
             p = resolve_swarm_palette(node_ids=nodes)
-            local_nid = resolve_local_node_id(nodes)
+            local_nid = resolve_local_node_id()
             if local_nid in p:
                 active_border = p[local_nid].hex
             elif nodes and nodes[0] in p:
