@@ -31,10 +31,15 @@ The roadmap is structured across three distinct horizons of fidelity:
 
 ## 3. Horizon 2 (Intermediate: Medium Resolution) — Platform Maturation & Contracts
 
-* **KDE Connect D-Bus Clipboard Pairing State Harmonization (Next QA Priority)**:
+* **[Epic #62: Full E2E KDE Connect Fleet Audit & Wayland Clipboard Harmonization](https://github.com/kuasha420/knot-mesh/issues/62) (Immediate QA Priority)**:
   - Deep verification and test suite hardening of cross-device clipboard synchronization over KDE Connect and Deskflow.
   - Automated pairing state discovery, trust verification, and DBus Klipper integration without manual operator fallback.
-  - Robust handling of cross-strand credential and token transfer workflows.
+  - Robust handling of cross-strand credential, OAuth URL, and token transfer workflows.
+
+* **[Epic #61: Handheld Ambient HUDs & Cockpit Workflow Consolidation](https://github.com/kuasha420/knot-mesh/issues/61)**:
+  - Transition from working proof-of-concept to frictionless daily reality for multi-display ambient development.
+  - Consolidate swarm message methods (Mesh DB / Hub REST as golden path, GHD as out-of-band retreat, Kitty for local UI multiplexing only).
+  - Push-button fleet launch (`knot hud up / down / status`) and ambient systemd user supervision (`knot-hud@.service`).
 
 * **Knot Kommand Kafe (Tauri v2 / Handheld GUI)**:
   - Rust Tauri v2 desktop shell with ultra-low memory footprint (<50MB RAM).
