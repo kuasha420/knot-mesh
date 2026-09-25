@@ -757,7 +757,8 @@ auth_exec_node() {
       local uid="1000"
       if [ "$target" = "steamdeck" ]; then uid="1001"; fi
       local log_file="/tmp/knot_konsole_auth.log"
-      ssh "$target" "WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 XDG_RUNTIME_DIR=/run/user/$uid nohup konsole --title 'KNOT AUTH: $target' -e $remote_cmd > '$log_file' 2>&1 &"
+      local gui_cmd="bash -c \"export PATH=\\\"\$HOME/.local/bin:/usr/local/bin:\\\$PATH\\\"; knot auth login ${clean_args[*]}; echo; echo '[✓] Press Enter to close window...'; read\""
+      ssh "$target" "WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 XDG_RUNTIME_DIR=/run/user/$uid nohup konsole --title 'KNOT AUTH: $target' -e $gui_cmd > '$log_file' 2>&1 &"
       knot_log_ok "Konsole opened on $target screen (logging to $log_file). Follow the prompt on $target to log in."
       return 0
     fi
