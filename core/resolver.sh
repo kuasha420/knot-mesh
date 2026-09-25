@@ -121,7 +121,7 @@ is_port_open() {
     fi
   elif command -v socat >/dev/null; then
     local err=""
-    if err="$(socat -T 1 -u /dev/null "TCP:$ip:$port" 2>&1)"; then
+    if err="$(socat -u /dev/null "TCP:$ip:$port,connect-timeout=1" 2>&1)"; then
       return 0
     else
       return 1
