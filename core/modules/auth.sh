@@ -132,6 +132,21 @@ auth_switch() {
     chmod 0600 "$meta_file"
   fi
 
+  # Synchronize to SecretService if running on real desktop environment and keyring is unlocked
+  if [ -z "${KNOT_TEST_AUTH_DIR:-}" ] && command -v secret-tool >/dev/null; then
+    local lock_rc=0
+    auth_test_lock 0 || lock_rc=$?
+    if [ $lock_rc -eq 0 ]; then
+      local token_content
+      token_content="$(cat "$token_file")"
+      local st_err="" st_rc=0
+      st_err="$(printf "%s" "$token_content" | secret-tool store --label="Password for 'antigravity' on 'gemini'" service gemini username antigravity 2>&1)" || st_rc=$?
+      if [ $st_rc -ne 0 ]; then
+        knot_log_warn "Notice: secret-tool store failed ($st_rc): $st_err"
+      fi
+    fi
+  fi
+
   # Restart knot-agent.service if active
   if command -v systemctl >/dev/null; then
     local r_out="" r_rc=0
@@ -334,27 +349,66 @@ auth_login() {
     return 1
   fi
 
+  # Stash existing upstream CLI token symlink/file so agy triggers a fresh OAuth prompt
+  local upstream_token="$UPSTREAM_CLI_TOKEN_FILE"
+  local upstream_bak="${upstream_token}.knot_login_bak"
+  local stashed=0
+
+  if [ -e "$upstream_token" ] || [ -L "$upstream_token" ]; then
+    mv -f "$upstream_token" "$upstream_bak"
+    stashed=1
+  fi
+
+  local login_success=0
+  _cleanup_login() {
+    if [ "$login_success" -eq 0 ] && [ "$stashed" -eq 1 ] && [ -e "$upstream_bak" ]; then
+      mv -f "$upstream_bak" "$upstream_token"
+    elif [ "$login_success" -eq 1 ] && [ -e "$upstream_bak" ]; then
+      rm -f "$upstream_bak"
+    fi
+  }
+  trap _cleanup_login EXIT INT TERM
+
   knot_log_info "Initiating upstream login for profile '$alias'..."
+  echo -e "  ${C_YELLOW}1.${C_RESET} Select ${C_BOLD}1. Google OAuth${C_RESET} when prompted."
+  echo -e "  ${C_YELLOW}2.${C_RESET} Open the authorization URL in your browser and log in with your target Google account."
+  echo -e "  ${C_YELLOW}3.${C_RESET} Copy the authorization code and paste it right into the prompt below."
+  echo ""
+
+  local agy_rc=0
   if [ $no_browser -eq 1 ]; then
-    "$agy_bin" login --no-browser || "$agy_bin"
+    DBUS_SESSION_BUS_ADDRESS="" BROWSER=/bin/true "$agy_bin" || agy_rc=$?
   else
-    "$agy_bin"
+    DBUS_SESSION_BUS_ADDRESS="" "$agy_bin" || agy_rc=$?
+  fi
+  if [ $agy_rc -ne 0 ]; then
+    knot_log_warn "Notice: agy exited with status $agy_rc"
   fi
 
   # After login, harvest token from upstream token file
-  local upstream_token="$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
-  if [ ! -s "$upstream_token" ]; then
-    upstream_token="$HOME/.gemini/antigravity-cli/oauth-token.json"
+  local fresh_token=""
+  if [ -s "$upstream_token" ]; then
+    fresh_token="$upstream_token"
+  elif [ -s "$(dirname "$upstream_token")/oauth-token.json" ]; then
+    fresh_token="$(dirname "$upstream_token")/oauth-token.json"
+  elif [ -s "$HOME/.gemini/antigravity-cli/oauth-token.json" ]; then
+    fresh_token="$HOME/.gemini/antigravity-cli/oauth-token.json"
   fi
 
-  if [ ! -s "$upstream_token" ]; then
+  if [ -z "$fresh_token" ] || [ ! -s "$fresh_token" ]; then
     knot_log_err "Authentication finished but token file not found at $upstream_token."
     return 1
   fi
 
   local token_dest="$profile_dir/oauth-token.json"
-  cp -f "$upstream_token" "$token_dest"
+  cp -f "$fresh_token" "$token_dest"
   chmod 0600 "$token_dest"
+
+  login_success=1
+  trap - EXIT INT TERM
+  if [ -e "$upstream_bak" ]; then
+    rm -f "$upstream_bak"
+  fi
 
   # Extract email / user metadata if possible
   local email="unknown"
@@ -500,11 +554,352 @@ auth_remove() {
   knot_log_ok "Profile '$alias' removed."
 }
 
+# Check if a target node refers to the local machine
+auth_is_local_node() {
+  local target="${1:-}"
+  [ -z "$target" ] && return 1
+  if [ "$target" = "local" ] || [ "$target" = "localhost" ] || [ "$target" = "127.0.0.1" ]; then
+    return 0
+  fi
+  local my_nid="" nid_rc=0
+  my_nid="$(knot_detect_node_id 2>&1)" || nid_rc=$?
+  if [ $nid_rc -eq 0 ] && [ -n "$my_nid" ] && [ "$target" = "$my_nid" ]; then
+    return 0
+  fi
+  local my_h="" h_rc=0
+  my_h="$(knot_detect_hostname 2>&1)" || h_rc=$?
+  if [ $h_rc -eq 0 ] && [ -n "$my_h" ] && [ "$target" = "$my_h" ]; then
+    return 0
+  fi
+  return 1
+}
+
+# Check if a string is a known node ID or hostname in the mesh
+auth_is_node() {
+  local target="${1:-}"
+  [ -z "$target" ] && return 1
+  if auth_is_local_node "$target"; then
+    return 0
+  fi
+  local m_out="" m_rc=0
+  m_out="$(knot_get_manifest_path "$target" 2>&1)" || m_rc=$?
+  if [ $m_rc -eq 0 ] && [ -n "$m_out" ]; then
+    return 0
+  fi
+  local nodes_dirs=()
+  local primary_dir="" pd_rc=0
+  primary_dir="$(knot_get_nodes_dir 2>&1)" || pd_rc=$?
+  if [ $pd_rc -eq 0 ] && [ -d "$primary_dir" ]; then
+    nodes_dirs+=("$primary_dir")
+  fi
+  local user_home="" uh_rc=0
+  user_home="$(knot_detect_user_home 2>&1)" || uh_rc=$?
+  if [ $uh_rc -eq 0 ] && [ -n "$user_home" ]; then
+    for d in "$user_home/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
+      [ -d "$d" ] || continue
+      if [[ ! " ${nodes_dirs[*]} " =~ " ${d} " ]]; then
+        nodes_dirs+=("$d")
+      fi
+    done
+  fi
+  for ndir in "${nodes_dirs[@]}"; do
+    for mf in "$ndir/"*.json; do
+      [ -e "$mf" ] || continue
+      local mid="" mhost=""
+      mid="$(awk -F'"' '/"id":/ {print $4}' "$mf" 2>&1)" || continue
+      mhost="$(awk -F'"' '/"hostname":/ {print $4}' "$mf" 2>&1)" || continue
+      if [ "$target" = "$mid" ] || [ "$target" = "$mhost" ]; then
+        return 0
+      fi
+    done
+  done
+  return 1
+}
+
+# Collect list of all known node IDs across swarms
+auth_get_all_nodes() {
+  if [ -n "${KNOT_TEST_AUTH_DIR:-}" ]; then
+    echo "local"
+    return 0
+  fi
+
+  local nodes_dirs=()
+  local primary_dir="" pd_rc=0
+  primary_dir="$(knot_get_nodes_dir 2>&1)" || pd_rc=$?
+  if [ $pd_rc -eq 0 ] && [ -d "$primary_dir" ]; then
+    nodes_dirs+=("$primary_dir")
+  fi
+  local user_home="" uh_rc=0
+  user_home="$(knot_detect_user_home 2>&1)" || uh_rc=$?
+  if [ $uh_rc -eq 0 ] && [ -n "$user_home" ]; then
+    for d in "$user_home/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
+      [ -d "$d" ] || continue
+      if [[ ! " ${nodes_dirs[*]} " =~ " ${d} " ]]; then
+        nodes_dirs+=("$d")
+      fi
+    done
+  fi
+
+  local seen_nodes=()
+  for ndir in "${nodes_dirs[@]}"; do
+    for manifest in "$ndir/"*.json; do
+      [ -e "$manifest" ] || continue
+      local id="" id_rc=0
+      id="$(awk -F'"' '/"id":/ {print $4}' "$manifest" 2>&1)" || id_rc=$?
+      if [ $id_rc -eq 0 ] && [ -n "$id" ]; then
+        if [[ ! " ${seen_nodes[*]:-} " =~ " ${id} " ]]; then
+          seen_nodes+=("$id")
+        fi
+      fi
+    done
+  done
+
+  if [ ${#seen_nodes[@]} -eq 0 ]; then
+    local my_nid="" nid_rc=0
+    my_nid="$(knot_detect_node_id 2>&1)" || nid_rc=$?
+    if [ $nid_rc -eq 0 ] && [ -n "$my_nid" ]; then
+      seen_nodes+=("$my_nid")
+    else
+      seen_nodes+=("desktop")
+    fi
+  fi
+
+  echo "${seen_nodes[@]}"
+}
+
+# Forward an auth operation to a specific node
+auth_exec_node() {
+  local target="$1"
+  local action="$2"
+  shift 2
+  local args=("$@")
+
+  if auth_is_local_node "$target"; then
+    cmd_auth "$action" "${args[@]}"
+    return $?
+  fi
+
+  local remote_cmd="knot auth $action"
+  for a in "${args[@]}"; do
+    remote_cmd="$remote_cmd $(printf "%q" "$a")"
+  done
+
+  if [ "$action" = "login" ]; then
+    # Login is interactive and requires TTY allocation
+    if command -v cmd_exec >/dev/null; then
+      cmd_exec -tt "$target" "$remote_cmd"
+    else
+      ssh -tt "$target" "$remote_cmd"
+    fi
+  else
+    if command -v cmd_exec >/dev/null; then
+      cmd_exec "$target" "$remote_cmd"
+    else
+      local e_out="" e_rc=0
+      e_out="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$remote_cmd" 2>&1)" || e_rc=$?
+      if [ $e_rc -eq 0 ]; then
+        echo "$e_out"
+      else
+        knot_log_err "Remote auth operation on '$target' failed (exit code $e_rc): $e_out"
+        return $e_rc
+      fi
+    fi
+  fi
+}
+
+# Display authentication status across all nodes in the mesh
+auth_status_all() {
+  local json_mode=0
+  for a in "$@"; do
+    if [ "$a" = "--json" ]; then json_mode=1; fi
+  done
+
+  local nodes=()
+  read -ra nodes <<< "$(auth_get_all_nodes)"
+
+  if [ $json_mode -eq 1 ]; then
+    local first=1
+    echo -n "{\"nodes\":{"
+    for n in "${nodes[@]}"; do
+      local s_json="" s_rc=0
+      if auth_is_local_node "$n"; then
+        s_json="$(auth_status --json 2>&1)" || s_rc=$?
+      else
+        s_json="$(ssh -o BatchMode=yes -o ConnectTimeout=4 "$n" "knot auth status --json" 2>&1)" || s_rc=$?
+      fi
+      local jq_chk="" jq_rc=0
+      jq_chk="$(echo "$s_json" | jq . 2>&1)" || jq_rc=$?
+      if [ $s_rc -ne 0 ] || [ $jq_rc -ne 0 ] || [ -z "$s_json" ]; then
+        s_json="$(jq -n --arg err "$s_json" '{error: $err}')"
+      fi
+
+      if [ $first -eq 1 ]; then
+        first=0
+      else
+        echo -n ","
+      fi
+      echo -n "\"$n\":$s_json"
+    done
+    echo "}}"
+    return 0
+  fi
+
+  echo -e "${C_BOLD}--- Knot Mesh Fleet Authentication Status ---${C_RESET}"
+  printf "%-14s %-16s %-32s %-16s %-14s %-12s\n" "NODE" "ACTIVE PROFILE" "EMAIL" "PLAN" "TOKEN VALID" "KEYRING"
+  printf "%-14s %-16s %-32s %-16s %-14s %-12s\n" "----" "--------------" "-----" "----" "-----------" "-------"
+
+  for n in "${nodes[@]}"; do
+    local s_json="" s_rc=0
+    if auth_is_local_node "$n"; then
+      s_json="$(auth_status --json 2>&1)" || s_rc=$?
+    else
+      s_json="$(ssh -o BatchMode=yes -o ConnectTimeout=4 "$n" "knot auth status --json" 2>&1)" || s_rc=$?
+    fi
+
+    local active="-" email="-" tier="-" valid="Invalid" keyring="-"
+    local jq_chk="" jq_rc=0
+    jq_chk="$(echo "$s_json" | jq . 2>&1)" || jq_rc=$?
+    if [ $s_rc -eq 0 ] && [ $jq_rc -eq 0 ] && [ -n "$s_json" ]; then
+      active="$(echo "$s_json" | jq -r '.active_profile // "-"')"
+      email="$(echo "$s_json" | jq -r '.email // "-"')"
+      tier="$(echo "$s_json" | jq -r '.tier // "-"')"
+      local is_valid
+      is_valid="$(echo "$s_json" | jq -r '.token_valid')"
+      if [ "$is_valid" = "true" ]; then
+        valid="${C_GREEN}Valid${C_RESET}"
+      else
+        valid="${C_RED}Invalid${C_RESET}"
+      fi
+      local is_locked
+      is_locked="$(echo "$s_json" | jq -r '.keyring_locked')"
+      if [ "$is_locked" = "false" ]; then
+        keyring="${C_GREEN}Unlocked${C_RESET}"
+      elif [ "$is_locked" = "true" ]; then
+        keyring="${C_RED}Locked${C_RESET}"
+      else
+        keyring="Unmanaged"
+      fi
+    else
+      active="OFFLINE"
+      email="Connection failed"
+      tier="-"
+      valid="${C_RED}Offline${C_RESET}"
+      keyring="-"
+    fi
+    printf "%-14s %-16s %-32s %-16s %-23b %-20b\n" "$n" "$active" "$email" "$tier" "$valid" "$keyring"
+  done
+}
+
+# Display profiles across all nodes in the mesh
+auth_list_all() {
+  local nodes=()
+  read -ra nodes <<< "$(auth_get_all_nodes)"
+  for n in "${nodes[@]}"; do
+    echo -e "\n${C_CYAN}=== [$n] ===${C_RESET}"
+    if auth_is_local_node "$n"; then
+      auth_list "$@"
+    else
+      local l_out="" l_rc=0
+      l_out="$(ssh -o BatchMode=yes -o ConnectTimeout=4 "$n" "knot auth list" 2>&1)" || l_rc=$?
+      if [ $l_rc -eq 0 ]; then
+        echo "$l_out"
+      else
+        knot_log_warn "Notice: Failed to query profiles on '$n' (exit code $l_rc): $l_out"
+      fi
+    fi
+  done
+}
+
 # Top-level dispatcher for `knot auth`
 cmd_auth() {
+  # 1. Check for --node <node_id> / -n <node_id> flag in any position
+  local target_node=""
+  local filtered_args=()
+  local skip_next=0
+  local all_args=("$@")
+  local idx=0
+  for ((idx=0; idx<${#all_args[@]}; idx++)); do
+    if [ $skip_next -eq 1 ]; then
+      skip_next=0
+      continue
+    fi
+    local curr="${all_args[$idx]}"
+    if [ "$curr" = "--node" ] || [ "$curr" = "-n" ]; then
+      local next_idx=$((idx + 1))
+      if [ $next_idx -lt ${#all_args[@]} ]; then
+        target_node="${all_args[$next_idx]}"
+        skip_next=1
+      fi
+    elif [[ "$curr" =~ ^--node=(.*)$ ]]; then
+      target_node="${BASH_REMATCH[1]}"
+    else
+      filtered_args+=("$curr")
+    fi
+  done
+
+  # If explicit --node was provided, delegate to that node
+  if [ -n "$target_node" ]; then
+    local act="${filtered_args[0]:-status}"
+    local rem_args=()
+    if [ ${#filtered_args[@]} -gt 1 ]; then
+      rem_args=("${filtered_args[@]:1}")
+    fi
+    auth_exec_node "$target_node" "$act" "${rem_args[@]}"
+    return $?
+  fi
+
   local sub="${1:-status}"
   if [ $# -gt 0 ]; then shift; fi
 
+  # Check if first argument is --all or all
+  if [ "$sub" = "--all" ] || [ "$sub" = "all" ]; then
+    local next_sub="${1:-status}"
+    if [ $# -gt 0 ]; then shift; fi
+    case "$next_sub" in
+      status)
+        auth_status_all "$@"
+        return $?
+        ;;
+      list)
+        auth_list_all "$@"
+        return $?
+        ;;
+      sync)
+        antigravity_swarm_auth sync --all "$@"
+        return $?
+        ;;
+      *)
+        knot_log_err "Unsupported --all action '$next_sub'. Supported: status, list, sync."
+        return 1
+        ;;
+    esac
+  fi
+
+  # Check if first argument is a known node ID or hostname
+  if auth_is_node "$sub"; then
+    if [ $# -eq 0 ]; then
+      # Bare node targeting -> legacy interactive login
+      antigravity_swarm_auth "$sub"
+      return $?
+    elif [ "${1:-}" = "--gui" ]; then
+      antigravity_swarm_auth "$sub" "$@"
+      return $?
+    fi
+    local action="$1"
+    shift
+    case "$action" in
+      login|import|list|status|switch|remove|rm|test-lock)
+        auth_exec_node "$sub" "$action" "$@"
+        return $?
+        ;;
+      *)
+        antigravity_swarm_auth "$sub" "$action" "$@"
+        return $?
+        ;;
+    esac
+  fi
+
+  # Standard local subcommands
   case "$sub" in
     login)
       auth_login "$@"
@@ -513,10 +908,26 @@ cmd_auth() {
       auth_import "$@"
       ;;
     list)
-      auth_list "$@"
+      if [ "${1:-}" = "--all" ] || [ "${1:-}" = "all" ]; then
+        shift
+        auth_list_all "$@"
+      elif [ $# -gt 0 ] && auth_is_node "$1"; then
+        local t="$1"; shift
+        auth_exec_node "$t" list "$@"
+      else
+        auth_list "$@"
+      fi
       ;;
     status)
-      auth_status "$@"
+      if [ "${1:-}" = "--all" ] || [ "${1:-}" = "all" ]; then
+        shift
+        auth_status_all "$@"
+      elif [ $# -gt 0 ] && auth_is_node "$1"; then
+        local t="$1"; shift
+        auth_exec_node "$t" status "$@"
+      else
+        auth_status "$@"
+      fi
       ;;
     switch)
       auth_switch "$@"
@@ -528,24 +939,37 @@ cmd_auth() {
       auth_test_lock
       ;;
     sync)
-      # Preserves backward compatibility with legacy `knot auth sync [--all]`
       antigravity_swarm_auth sync "$@"
       ;;
     -h|--help)
       echo -e "${C_BOLD}knot auth - Multi-Tenant Authentication & Local Profile Sandboxing${C_RESET}"
       echo "Usage:"
-      echo "  knot auth login <profile-alias> [--no-browser]  Guided OAuth login into a dedicated profile"
-      echo "  knot auth list                                  List local profiles and active selection"
-      echo "  knot auth status [--json]                       Inspect active token health & lock state"
-      echo "  knot auth switch <profile-alias>                Atomically activate a local profile"
-      echo "  knot auth remove <profile-alias>                Remove a local profile from sandbox"
-      echo "  knot auth test-lock                             Non-blocking D-Bus SecretService probe"
-      echo "  knot auth sync [--all]                          Synchronize credentials across mesh"
-      echo "  knot auth [node_id] [--gui]                     Remote interactive login via SSH"
+      echo "  knot auth [<node_id>] login <alias> [--no-browser]  Guided OAuth login into a profile"
+      echo "  knot auth [<node_id>] import <alias> [token_file]   Import existing token into profile sandbox"
+      echo "  knot auth [<node_id>|--all] list                    List local or fleet profiles"
+      echo "  knot auth [<node_id>|--all] status [--json]         Inspect active token health across node(s)"
+      echo "  knot auth [<node_id>] switch <alias>                Atomically activate a profile"
+      echo "  knot auth [<node_id>] remove <alias>                Remove a profile from sandbox"
+      echo "  knot auth [<node_id>] test-lock                     Non-blocking D-Bus SecretService probe"
+      echo "  knot auth sync [--all]                              Synchronize credentials across mesh"
+      echo "  knot auth <node_id> [--gui]                         Interactive terminal or Konsole login"
+      echo ""
+      echo "Options:"
+      echo "  --node, -n <node_id>  Execute auth action on specified target node"
+      echo "  --all                 Sweep action across all mesh nodes (status, list, sync)"
+      echo "  --no-browser          Force device-code / headless terminal URL OAuth flow"
+      echo ""
+      echo "Examples:"
+      echo "  knot auth rog-ally import primary                   Sandbox active token on ROG Ally"
+      echo "  knot auth laptop import primary                     Sandbox active token on Laptop"
+      echo "  knot auth steamdeck import primary                  Sandbox active token on Steam Deck"
+      echo "  knot auth status --all                              Sweep active auth status across entire fleet"
+      echo "  knot auth list --all                                Display all profiles across entire fleet"
+      echo "  knot auth rog-ally login secondary --no-browser     Register secondary account on ROG Ally"
+      echo "  knot auth switch primary --node laptop              Activate primary profile on Laptop"
       return 0
       ;;
     *)
-      # Fallback to existing node-specific interactive auth if argument is a node name or --gui
       antigravity_swarm_auth "$sub" "$@"
       ;;
   esac

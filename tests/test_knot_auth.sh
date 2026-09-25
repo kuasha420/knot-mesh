@@ -212,6 +212,37 @@ if [ $leak_found -ne 0 ]; then
 fi
 echo "  [PASS] Zero network leakage invariant verified."
 
+# ------------------------------------------------------------------------------
+# Test 9: Local Node Targeting via --node / -n Flags
+# ------------------------------------------------------------------------------
+echo "--- [9/11] Testing --node / -n flag dispatch ---"
+status_node_json="$(knot auth --node local status --json)"
+echo "$status_node_json" | jq -e '.active_profile == "alpha"' >/dev/null
+status_n_json="$(knot auth -n localhost status --json)"
+echo "$status_n_json" | jq -e '.active_profile == "alpha"' >/dev/null
+echo "  [PASS] Node targeting via --node and -n flags verified."
+
+# ------------------------------------------------------------------------------
+# Test 10: Fleet Status Sweep (--all)
+# ------------------------------------------------------------------------------
+echo "--- [10/11] Testing fleet status sweep (knot auth status --all) ---"
+all_status_json="$(knot auth status --all --json)"
+echo "$all_status_json" | jq -e '.nodes' >/dev/null
+all_status_table="$(knot auth status --all)"
+echo "$all_status_table" | grep -q "ACTIVE PROFILE"
+echo "$all_status_table" | grep -q "TOKEN VALID"
+echo "  [PASS] knot auth status --all schema and table output verified."
+
+# ------------------------------------------------------------------------------
+# Test 11: Fleet Profile List Sweep (--all)
+# ------------------------------------------------------------------------------
+echo "--- [11/11] Testing fleet profile list sweep (knot auth list --all) ---"
+all_list_out="$(knot auth list --all)"
+echo "$all_list_out" | grep -q "==="
+echo "$all_list_out" | grep -q "alpha"
+echo "  [PASS] knot auth list --all multi-node output verified."
+
 echo "================================================================================"
-echo ">>> All 8 Issue #60 Auth Sandboxing Tests Passed 100% Green!"
+echo ">>> All 11 Issue #60 Auth Sandboxing & Multi-Node Tests Passed 100% Green!"
 echo "================================================================================"
+
