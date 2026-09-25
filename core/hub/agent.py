@@ -529,7 +529,7 @@ def fetch_model_quota() -> dict | None:
         "--output-format", "json"
     ]
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=35)
         raw_out = p.stdout.strip()
         json_line = None
         for line in reversed(raw_out.splitlines()):
