@@ -562,7 +562,12 @@ doctor_diagnose() {
           echo "$remote_out"
         fi
         if [ $rc -ne 0 ]; then
-          total_issues=$((total_issues + rc))
+          if [ $rc -eq 255 ]; then
+            total_issues=$((total_issues + 1))
+            doc_fail "Transport failure: Could not connect to node '$id' via SSH (exit 255)"
+          else
+            total_issues=$((total_issues + rc))
+          fi
         fi
       done
     done
@@ -588,7 +593,12 @@ doctor_diagnose() {
         echo "$remote_out"
       fi
       if [ $rc -ne 0 ]; then
-        total_issues=$((total_issues + rc))
+        if [ $rc -eq 255 ]; then
+          total_issues=$((total_issues + 1))
+          doc_fail "Transport failure: Could not connect to node '$target' via SSH (exit 255)"
+        else
+          total_issues=$((total_issues + rc))
+        fi
       fi
     fi
   fi
@@ -606,7 +616,11 @@ doctor_diagnose() {
     fi
   fi
   echo -e "${C_BOLD}=========================================${C_RESET}"
-  return $total_issues
+  local ret_code=$total_issues
+  if [ $ret_code -gt 255 ]; then
+    ret_code=255
+  fi
+  return $ret_code
 }
 
 # ------------------------------------------------------------------------------
@@ -631,7 +645,15 @@ doctor_repair_local() {
 
   knot_log_info "Repairing Knot components locally on $my_host..."
 
-  # 0. Ensure display manager is migrated to plasma-login-manager
+  # 0a. Flush stale lease cache to resolve DHCP IP drifts
+  local user_home
+  user_home="$(knot_detect_user_home)"
+  if [ -d "$user_home/.cache/knot/leases" ]; then
+    knot_log_info "Flushing cached network leases in $user_home/.cache/knot/leases..."
+    rm -f "$user_home/.cache/knot/leases/"*
+  fi
+
+  # 0b. Ensure display manager is migrated to plasma-login-manager
   source "$KNOT_ROOT/core/modules/autologin.sh"
   autologin_ensure_dm
 

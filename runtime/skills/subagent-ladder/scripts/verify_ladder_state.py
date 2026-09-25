@@ -53,9 +53,9 @@ def audit_transcript(log_path: Path) -> dict:
 
             # Check for direct coordinator file modifications
             if name in ("write_to_file", "replace_file_content"):
-                target = args.get("TargetFile", "")
-                # Ignore brain/artifact edits or scratch files
-                if target and not ("/brain/" in target or "/scratch/" in target or target.endswith(".md")):
+                target = args.get("TargetFile", "").strip("\"'")
+                # Ignore brain/artifact edits, skills, or markdown docs
+                if target and not ("/brain/" in target or "/scratch/" in target or "/skills/" in target or target.endswith(".md")):
                     coordinator_edits.append({
                         "step": entry.get("step_index", idx),
                         "tool": name,

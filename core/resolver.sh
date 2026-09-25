@@ -164,65 +164,140 @@ is_host_alive() {
   return 1
 }
 
-# --- TIER 0: Check lease cache ---
-if [ -r "$LEASE_FILE" ]; then
-  CACHED_IP="$(tr -d '[:space:]' < "$LEASE_FILE")"
-  if [ -n "$CACHED_IP" ] && is_host_alive "$CACHED_IP"; then
-    RESOLVED_IP="$CACHED_IP"
-  fi
-fi
-
-# --- TIER 0.5: Local Host Check ---
-if [ -z "$RESOLVED_IP" ]; then
-  MY_NODE_ID="$(knot_detect_node_id)"
-  MY_HOST="$(knot_detect_hostname)"
-  MY_HOST_SHORT="${MY_HOST%%.*}"
-  IS_LOCAL=0
-  if [ "$TARGET_NODE" = "$MY_NODE_ID" ] || [ "$TARGET_NODE" = "$MY_HOST" ] || [ "$TARGET_NODE" = "$MY_HOST_SHORT" ] || [ "$TARGET_NODE" = "localhost" ] || [ "$TARGET_NODE" = "127.0.0.1" ]; then
+# --- TIER 0: Local Host Check ---
+MY_NODE_ID="$(knot_detect_node_id)"
+MY_HOST="$(knot_detect_hostname)"
+MY_HOST_SHORT="${MY_HOST%%.*}"
+IS_LOCAL=0
+if [ "$TARGET_NODE" = "$MY_NODE_ID" ] || [ "$TARGET_NODE" = "$MY_HOST" ] || [ "$TARGET_NODE" = "$MY_HOST_SHORT" ] || [ "$TARGET_NODE" = "localhost" ] || [ "$TARGET_NODE" = "127.0.0.1" ]; then
+  IS_LOCAL=1
+elif [ -n "$MANIFEST" ] && [ -r "$MANIFEST" ]; then
+  M_HOST="$(awk -F'"' '/"hostname":/ {print $4}' "$MANIFEST")"
+  M_ID="$(awk -F'"' '/"id":/ {print $4}' "$MANIFEST")"
+  if [ "$M_ID" = "$MY_NODE_ID" ] || [ "$M_HOST" = "$MY_HOST" ] || [ "$M_HOST" = "$MY_HOST_SHORT" ] || [ "$M_ID" = "$MY_HOST" ] || [ "$M_ID" = "$MY_HOST_SHORT" ]; then
     IS_LOCAL=1
-  elif [ -n "$MANIFEST" ] && [ -r "$MANIFEST" ]; then
-    M_HOST="$(awk -F'"' '/"hostname":/ {print $4}' "$MANIFEST")"
-    M_ID="$(awk -F'"' '/"id":/ {print $4}' "$MANIFEST")"
-    if [ "$M_ID" = "$MY_NODE_ID" ] || [ "$M_HOST" = "$MY_HOST" ] || [ "$M_HOST" = "$MY_HOST_SHORT" ] || [ "$M_ID" = "$MY_HOST" ] || [ "$M_ID" = "$MY_HOST_SHORT" ]; then
-      IS_LOCAL=1
-    fi
   fi
-  if [ "$IS_LOCAL" -eq 1 ] && is_host_alive "127.0.0.1"; then
-    RESOLVED_IP="127.0.0.1"
+fi
+if [ "$IS_LOCAL" -eq 1 ] && is_host_alive "127.0.0.1"; then
+  RESOLVED_IP="127.0.0.1"
+fi
+
+HOSTNAME_VAL=""
+MDNS_HOST=""
+if [ -n "$MANIFEST" ] && [ -r "$MANIFEST" ]; then
+  HOSTNAME_VAL="$(awk -F'"' '/"hostname":/ {print $4}' "$MANIFEST")"
+  MDNS_HOST="$(awk -F'"' '/"mdns":/ {print $4}' "$MANIFEST")"
+  if [ -z "$MDNS_HOST" ] && [ -n "$HOSTNAME_VAL" ]; then
+    MDNS_HOST="${HOSTNAME_VAL}.local"
   fi
 fi
 
-# --- TIER 1: mDNS / Zeroconf ---
-if [ -z "$RESOLVED_IP" ] && [ -n "$MANIFEST" ]; then
-  MDNS_HOST="$(awk -F'"' '/"mdns":/ {print $4}' "$MANIFEST")"
-  if [ -z "$MDNS_HOST" ]; then
-    HOSTNAME_VAL="$(awk -F'"' '/"hostname":/ {print $4}' "$MANIFEST")"
-    if [ -n "$HOSTNAME_VAL" ]; then
-      MDNS_HOST="${HOSTNAME_VAL}.local"
+# --- TIER 1: Dynamic mDNS / Zeroconf (Authoritative Dynamic Discovery) ---
+if [ -z "$RESOLVED_IP" ] && [ -n "$MDNS_HOST" ]; then
+  MDNS_IP=""
+  if command -v timeout >/dev/null; then
+    if command -v avahi-resolve >/dev/null; then
+      a_out=""
+      if a_out="$(timeout 1.5 avahi-resolve -n "$MDNS_HOST" 2>&1)"; then
+        MDNS_IP="$(echo "$a_out" | awk '{print $2}' | head -n1)"
+      fi
     fi
-  fi
-
-  if [ -n "$MDNS_HOST" ]; then
-    MDNS_IP=""
-    if getent ahostsv4 "$MDNS_HOST" >/dev/null; then
-      MDNS_IP="$(getent ahostsv4 "$MDNS_HOST" | awk '{print $1}' | head -n1)"
-    elif command -v avahi-resolve >/dev/null; then
+    if [ -z "$MDNS_IP" ]; then
+      g_out=""
+      if g_out="$(timeout 1.5 getent ahostsv4 "$MDNS_HOST" 2>&1)"; then
+        MDNS_IP="$(echo "$g_out" | awk '{print $1}' | head -n1)"
+      fi
+    fi
+  else
+    if command -v avahi-resolve >/dev/null; then
       a_out=""
       if a_out="$(avahi-resolve -n "$MDNS_HOST" 2>&1)"; then
         MDNS_IP="$(echo "$a_out" | awk '{print $2}' | head -n1)"
       fi
     fi
-    if [ -n "$MDNS_IP" ] && is_host_alive "$MDNS_IP"; then
-      RESOLVED_IP="$MDNS_IP"
+    if [ -z "$MDNS_IP" ]; then
+      g_out=""
+      if g_out="$(getent ahostsv4 "$MDNS_HOST" 2>&1)"; then
+        MDNS_IP="$(echo "$g_out" | awk '{print $1}' | head -n1)"
+      fi
+    fi
+  fi
+
+  if [ -n "$MDNS_IP" ] && is_host_alive "$MDNS_IP"; then
+    RESOLVED_IP="$MDNS_IP"
+    if [ -r "$LEASE_FILE" ]; then
+      cached_check="$(tr -d '[:space:]' < "$LEASE_FILE")"
+      if [ -n "$cached_check" ] && [ "$cached_check" != "$MDNS_IP" ]; then
+        knot_log_info "Dynamic mDNS update: $TARGET_NODE shifted from cached $cached_check to $MDNS_IP." >&2
+      fi
     fi
   fi
 fi
 
-# --- TIER 2: IP Hint from Manifest ---
+# --- TIER 2: Lease Cache with Peer Identity Cross-Validation ---
+if [ -z "$RESOLVED_IP" ] && [ -r "$LEASE_FILE" ]; then
+  CACHED_IP="$(tr -d '[:space:]' < "$LEASE_FILE")"
+  if [ -n "$CACHED_IP" ] && is_host_alive "$CACHED_IP"; then
+    is_conflict=0
+    rev_name=""
+    if command -v timeout >/dev/null; then
+      rev_out=""
+      if rev_out="$(timeout 1 getent hosts "$CACHED_IP" 2>&1)"; then
+        rev_name="$(echo "$rev_out" | awk '{print $2}' | head -n1)"
+      fi
+    else
+      rev_out=""
+      if rev_out="$(getent hosts "$CACHED_IP" 2>&1)"; then
+        rev_name="$(echo "$rev_out" | awk '{print $2}' | head -n1)"
+      fi
+    fi
+
+    if [ -n "$rev_name" ] && [ -n "$HOSTNAME_VAL" ]; then
+      rev_short="${rev_name%%.*}"
+      exp_short="${HOSTNAME_VAL%%.*}"
+      if [ "$rev_short" != "$exp_short" ] && [ "$rev_name" != "$exp_short.local" ] && [ "$rev_name" != "$HOSTNAME_VAL" ]; then
+        is_conflict=1
+        knot_log_warn "Cached lease for $TARGET_NODE ($CACHED_IP) points to conflicting host '$rev_name'. Invalidating stale lease."
+        rm -f "$LEASE_FILE"
+      fi
+    fi
+
+    if [ "$is_conflict" -eq 0 ]; then
+      RESOLVED_IP="$CACHED_IP"
+    fi
+  fi
+fi
+
+# --- TIER 3: IP Hint from Manifest (with Peer Identity Cross-Validation) ---
 if [ -z "$RESOLVED_IP" ] && [ -n "$MANIFEST" ]; then
   IP_HINT="$(awk -F'"' '/"ip_hint":/ {print $4}' "$MANIFEST")"
   if [ -n "$IP_HINT" ] && is_host_alive "$IP_HINT"; then
-    RESOLVED_IP="$IP_HINT"
+    is_hint_conflict=0
+    rev_hint_name=""
+    if command -v timeout >/dev/null; then
+      rev_hint_out=""
+      if rev_hint_out="$(timeout 1 getent hosts "$IP_HINT" 2>&1)"; then
+        rev_hint_name="$(echo "$rev_hint_out" | awk '{print $2}' | head -n1)"
+      fi
+    else
+      rev_hint_out=""
+      if rev_hint_out="$(getent hosts "$IP_HINT" 2>&1)"; then
+        rev_hint_name="$(echo "$rev_hint_out" | awk '{print $2}' | head -n1)"
+      fi
+    fi
+
+    if [ -n "$rev_hint_name" ] && [ -n "$HOSTNAME_VAL" ]; then
+      rev_hint_short="${rev_hint_name%%.*}"
+      exp_short="${HOSTNAME_VAL%%.*}"
+      if [ "$rev_hint_short" != "$exp_short" ] && [ "$rev_hint_name" != "$exp_short.local" ] && [ "$rev_hint_name" != "$HOSTNAME_VAL" ]; then
+        is_hint_conflict=1
+        knot_log_warn "Manifest ip_hint for $TARGET_NODE ($IP_HINT) points to conflicting host '$rev_hint_name'. Skipping."
+      fi
+    fi
+
+    if [ "$is_hint_conflict" -eq 0 ]; then
+      RESOLVED_IP="$IP_HINT"
+    fi
   fi
 fi
 
