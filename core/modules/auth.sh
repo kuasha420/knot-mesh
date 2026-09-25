@@ -349,7 +349,43 @@ auth_login() {
     return 1
   fi
 
-  # Stash existing upstream CLI token symlink/file so agy triggers a fresh OAuth prompt
+  # 1. Pause knot-agent.service if active to prevent background credential sync races
+  local agent_was_active=0
+  if command -v systemctl >/dev/null; then
+    local act_out="" act_rc=0
+    act_out="$(systemctl --user is-active knot-agent.service 2>&1)" || act_rc=$?
+    if [ $act_rc -eq 0 ]; then
+      agent_was_active=1
+      local stop_out="" stop_rc=0
+      stop_out="$(systemctl --user stop knot-agent.service 2>&1)" || stop_rc=$?
+      if [ $stop_rc -ne 0 ]; then
+        knot_log_warn "Notice: Could not temporarily pause knot-agent ($stop_rc): $stop_out"
+      fi
+    fi
+  fi
+
+  # 2. Stash SecretService secret if present and unlocked so agy does not restore primary identity
+  local stashed_secret=""
+  if [ -z "${KNOT_TEST_AUTH_DIR:-}" ] && command -v secret-tool >/dev/null; then
+    local lock_rc=0
+    auth_test_lock 0 || lock_rc=$?
+    if [ $lock_rc -eq 0 ]; then
+      local st_search_out="" st_search_rc=0
+      st_search_out="$(secret-tool search service gemini 2>&1)" || st_search_rc=$?
+      if [ $st_search_rc -eq 0 ]; then
+        stashed_secret="$(echo "$st_search_out" | awk -F'secret = ' '/^secret = / {print $2}' | head -n1)"
+        if [ -n "$stashed_secret" ]; then
+          local clr_out="" clr_rc=0
+          clr_out="$(secret-tool clear service gemini username antigravity 2>&1)" || clr_rc=$?
+          if [ $clr_rc -ne 0 ]; then
+            knot_log_warn "Notice: secret-tool clear failed ($clr_rc): $clr_out"
+          fi
+        fi
+      fi
+    fi
+  fi
+
+  # 3. Stash existing upstream CLI token symlink/file so agy triggers a fresh OAuth prompt
   local upstream_token="$UPSTREAM_CLI_TOKEN_FILE"
   local upstream_bak="${upstream_token}.knot_login_bak"
   local stashed=0
@@ -361,10 +397,25 @@ auth_login() {
 
   local login_success=0
   _cleanup_login() {
-    if [ "$login_success" -eq 0 ] && [ "$stashed" -eq 1 ] && [ -e "$upstream_bak" ]; then
-      mv -f "$upstream_bak" "$upstream_token"
-    elif [ "$login_success" -eq 1 ] && [ -e "$upstream_bak" ]; then
-      rm -f "$upstream_bak"
+    if [ "$login_success" -eq 0 ]; then
+      # Login was cancelled or failed - restore stashed secret and token
+      if [ -n "$stashed_secret" ] && command -v secret-tool >/dev/null; then
+        local rst_st_err="" rst_st_rc=0
+        rst_st_err="$(printf "%s" "$stashed_secret" | secret-tool store --label="Password for 'antigravity' on 'gemini'" service gemini username antigravity 2>&1)" || rst_st_rc=$?
+      fi
+      if [ "$stashed" -eq 1 ] && [ -e "$upstream_bak" ]; then
+        mv -f "$upstream_bak" "$upstream_token"
+      fi
+    elif [ "$login_success" -eq 1 ]; then
+      if [ -e "$upstream_bak" ]; then
+        rm -f "$upstream_bak"
+      fi
+    fi
+
+    # Restart knot-agent if it was previously active
+    if [ "$agent_was_active" -eq 1 ] && command -v systemctl >/dev/null; then
+      local start_out="" start_rc=0
+      start_out="$(systemctl --user start knot-agent.service 2>&1)" || start_rc=$?
     fi
   }
   trap _cleanup_login EXIT INT TERM
@@ -377,9 +428,9 @@ auth_login() {
 
   local agy_rc=0
   if [ $no_browser -eq 1 ]; then
-    DBUS_SESSION_BUS_ADDRESS="" BROWSER=/bin/true "$agy_bin" || agy_rc=$?
+    BROWSER=/bin/true "$agy_bin" || agy_rc=$?
   else
-    DBUS_SESSION_BUS_ADDRESS="" "$agy_bin" || agy_rc=$?
+    "$agy_bin" || agy_rc=$?
   fi
   if [ $agy_rc -ne 0 ]; then
     knot_log_warn "Notice: agy exited with status $agy_rc"
@@ -408,6 +459,12 @@ auth_login() {
   trap - EXIT INT TERM
   if [ -e "$upstream_bak" ]; then
     rm -f "$upstream_bak"
+  fi
+
+  # Restart knot-agent now that new token is staged
+  if [ "$agent_was_active" -eq 1 ] && command -v systemctl >/dev/null; then
+    local start_out="" start_rc=0
+    start_out="$(systemctl --user start knot-agent.service 2>&1)" || start_rc=$?
   fi
 
   # Extract email / user metadata if possible

@@ -332,12 +332,28 @@ _account_info_token_sig: str = ""
 
 def sync_oauth_token_file() -> dict | None:
     """
-    Synchronizes and parses OAuth token from Secret Service / KWallet or local cache.
+    Synchronizes and parses OAuth token from active profile token file or Secret Service fallback.
+    Respects sandboxed profiles and avoids clobbering existing active symlinks.
     Returns the parsed dict if available.
     """
     primary_token = os.path.expanduser("~/.gemini/antigravity-cli/antigravity-oauth-token")
 
-    # Check Secret Service for updated token if wallet is unlocked
+    # 1. Prioritize active sandboxed profile or existing local token file
+    token_candidates = [
+        primary_token,
+        os.path.expanduser("~/.gemini/jetski-standalone-oauth-token"),
+    ]
+    for tf in token_candidates:
+        if os.path.exists(tf) and os.path.getsize(tf) > 50:
+            try:
+                with open(tf, "r") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict) and ("token" in data or "refresh_token" in data or "access_token" in data):
+                        return data
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [agent] Handled exception reading {tf}: {_err}\n")
+
+    # 2. Fallback to Secret Service if local token file does not exist
     if is_kwallet_unlocked():
         try:
             sp = subprocess.run(["secret-tool", "search", "service", "gemini"], capture_output=True, text=True, timeout=3)
@@ -347,31 +363,13 @@ def sync_oauth_token_file() -> dict | None:
                     if "refresh_token" in secret_json or "access_token" in secret_json:
                         parsed = json.loads(secret_json)
                         os.makedirs(os.path.dirname(primary_token), exist_ok=True)
-                        try:
-                            with open(primary_token, "r") as existing_f:
-                                existing_content = existing_f.read().strip()
-                        except Exception:
-                            existing_content = ""
-                        if existing_content != secret_json:
-                            with open(primary_token, "w") as tf:
-                                tf.write(secret_json + "\n")
-                            os.chmod(primary_token, 0o600)
+                        with open(primary_token, "w") as tf:
+                            tf.write(secret_json + "\n")
+                        os.chmod(primary_token, 0o600)
                         return parsed
         except Exception as _err:
             sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
-    # Fallback to local token files
-    token_candidates = [
-        primary_token,
-        os.path.expanduser("~/.gemini/jetski-standalone-oauth-token"),
-    ]
-    for tf in token_candidates:
-        if os.path.exists(tf) and os.path.getsize(tf) > 50:
-            try:
-                with open(tf, "r") as f:
-                    return json.load(f)
-            except Exception as _err:
-                sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
     return None
 
 
