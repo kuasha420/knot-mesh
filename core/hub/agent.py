@@ -755,16 +755,16 @@ class AgentWorker:
                 if acc and acc.get("email"):
                     old_email = (self.account_info or {}).get("email", "")
                     new_email = acc.get("email", "")
-                    if old_email and new_email and old_email != new_email:
-                        print(f"[*] Antigravity account switched on {self.node_id}: {old_email} -> {new_email}")
-                        self.account_info = acc
-                        self.quota_info = {"account": acc, "fetched_at": int(time.time())}
-                        self.last_quota_fetch = 0  # Force immediate quota refresh for new account
-                        threading.Thread(target=self._refresh_quota_bg, daemon=True).start()
-                    elif not self.account_info:
+                    if old_email != new_email:
+                        print(f"[*] Antigravity account updated on {self.node_id}: {old_email or 'none'} -> {new_email}")
                         self.account_info = acc
                         if not self.quota_info:
                             self.quota_info = {"account": acc, "fetched_at": int(time.time())}
+                        else:
+                            self.quota_info["account"] = acc
+                        if old_email:
+                            self.last_quota_fetch = 0  # Force immediate quota refresh for new account
+                            threading.Thread(target=self._refresh_quota_bg, daemon=True).start()
 
             # Only query quota if authenticated and interval has elapsed
             if self.agy_auth == "AUTHENTICATED" and (now - self.last_quota_fetch > 300):
