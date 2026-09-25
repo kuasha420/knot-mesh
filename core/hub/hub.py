@@ -2404,13 +2404,16 @@ class Database:
                 try:
                     existing_qd = json.loads(row[0])
                     if isinstance(existing_qd, dict):
-                        # Merge reset timestamps if missing in incoming quota
-                        for rk in ["gemini_5h_reset", "gemini_weekly_reset", "third_party_5h_reset", "third_party_weekly_reset"]:
-                            if rk in existing_qd and (rk not in quota or not quota[rk]):
-                                quota[rk] = existing_qd[rk]
-                        for fk in ["gemini_5h_fraction", "gemini_weekly_fraction", "third_party_5h_fraction", "third_party_weekly_fraction"]:
-                            if fk in existing_qd and (fk not in quota or quota[fk] is None):
-                                quota[fk] = existing_qd[fk]
+                        existing_email = existing_qd.get("account", {}).get("email")
+                        incoming_email = quota.get("account", {}).get("email")
+                        # Only merge previous reset timestamps/fractions if the account is identical
+                        if existing_email and incoming_email and existing_email == incoming_email:
+                            for rk in ["gemini_5h_reset", "gemini_weekly_reset", "third_party_5h_reset", "third_party_weekly_reset"]:
+                                if rk in existing_qd and (rk not in quota or not quota[rk]):
+                                    quota[rk] = existing_qd[rk]
+                            for fk in ["gemini_5h_fraction", "gemini_weekly_fraction", "third_party_5h_fraction", "third_party_weekly_fraction"]:
+                                if fk in existing_qd and (fk not in quota or quota[fk] is None):
+                                    quota[fk] = existing_qd[fk]
                 except Exception as _qe:
                     logger.debug("Failed merging existing quota_data: %s", _qe)
 
@@ -2432,10 +2435,10 @@ class Database:
                     last_heartbeat = excluded.last_heartbeat,
                     agy_version = excluded.agy_version,
                     agy_auth = excluded.agy_auth,
-                    quota_5h_gemini = COALESCE(excluded.quota_5h_gemini, nodes.quota_5h_gemini),
-                    quota_weekly_gemini = COALESCE(excluded.quota_weekly_gemini, nodes.quota_weekly_gemini),
-                    quota_5h_3p = COALESCE(excluded.quota_5h_3p, nodes.quota_5h_3p),
-                    quota_weekly_3p = COALESCE(excluded.quota_weekly_3p, nodes.quota_weekly_3p),
+                    quota_5h_gemini = CASE WHEN excluded.quota_updated_at IS NOT NULL THEN excluded.quota_5h_gemini ELSE nodes.quota_5h_gemini END,
+                    quota_weekly_gemini = CASE WHEN excluded.quota_updated_at IS NOT NULL THEN excluded.quota_weekly_gemini ELSE nodes.quota_weekly_gemini END,
+                    quota_5h_3p = CASE WHEN excluded.quota_updated_at IS NOT NULL THEN excluded.quota_5h_3p ELSE nodes.quota_5h_3p END,
+                    quota_weekly_3p = CASE WHEN excluded.quota_updated_at IS NOT NULL THEN excluded.quota_weekly_3p ELSE nodes.quota_weekly_3p END,
                     quota_data = COALESCE(excluded.quota_data, nodes.quota_data),
                     quota_updated_at = COALESCE(excluded.quota_updated_at, nodes.quota_updated_at),
                     power_state = COALESCE(excluded.power_state, nodes.power_state),
@@ -2977,11 +2980,11 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                     "groups": {
                         "gemini": {
                             "five_hour": {
-                                "current": n.get("quota_5h_gemini") if n.get("quota_5h_gemini") is not None else 1.0,
-                                "limit": 1.0,
-                                "pct": int((n.get("quota_5h_gemini") if n.get("quota_5h_gemini") is not None else 1.0) * 100),
-                                "status": "OK" if (n.get("quota_5h_gemini") or 1.0) > 0.3 else "LOW",
-                                "next_reset_in": q_data.get("gemini_5h_reset_in") or format_reset_countdown(q_data.get("gemini_5h_reset"))
+                                "current": n.get("quota_5h_gemini"),
+                                "limit": 1.0 if n.get("quota_5h_gemini") is not None else None,
+                                "pct": int(n.get("quota_5h_gemini") * 100) if n.get("quota_5h_gemini") is not None else None,
+                                "status": ("OK" if n.get("quota_5h_gemini") > 0.3 else "LOW") if n.get("quota_5h_gemini") is not None else "N/A",
+                                "next_reset_in": (q_data.get("gemini_5h_reset_in") or format_reset_countdown(q_data.get("gemini_5h_reset"))) if n.get("quota_5h_gemini") is not None else "-"
                             },
                             "weekly": {
                                 "current": n.get("quota_weekly_gemini") if n.get("quota_weekly_gemini") is not None else 1.0,

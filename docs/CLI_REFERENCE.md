@@ -390,6 +390,16 @@ Posts status checkpoints, alerts, or final reports to the mission registry.
 knot council reply <run_id> [--node <id>] [--status <25%|50%|75%|ALERT|FINAL|PROGRESS>] [--body "<text>"]
 ```
 
+#### `knot council board`
+Launches the live zero-token Swarm Council Message Board terminal viewer, streaming active mission threads and peer check-ins in real time.
+
+```bash
+knot council board                 # Auto-detect terminal width and render live viewer
+knot council board --compact       # Force handheld compact view (Steam Deck / ROG Ally <= 80 cols)
+knot council board --wide          # Force wide split-pane view (> 100 cols)
+knot council board --render-once   # Render a single snapshot of the message board and exit
+```
+
 ---
 
 ### `knot swarm`
@@ -407,25 +417,57 @@ knot swarm exec <node> <cmd...>    # Run commands across swarm nodes
 ---
 
 ### `knot quota`
-Direct alias for `knot swarm quota`. Displays real-time 5-hour and weekly Google AI Pro/Ultra model quota consumption, active reset countdowns, and graphical progress bars across the mesh.
+Direct alias for `knot swarm quota`. Displays real-time 5-hour and weekly Google AI Pro/Ultra and Antigravity model quota consumption, active reset countdowns, and graphical progress bars across the mesh.
 
 ```bash
-knot quota                         # Display quota matrix for all online nodes
-knot quota <node_id>               # Display quota for a specific node
+knot quota                         # Display formatted quota matrix for all online nodes
+knot quota <node_id>               # Display quota matrix for a specific node
+knot quota live                    # Launch the live zero-token terminal visualizer (auto-detects width)
+knot quota live --compact          # Force handheld compact card layout (Steam Deck / ROG Ally <= 80 cols)
+knot quota live --wide             # Force wide tabular layout (> 100 cols)
+knot quota live --render-once      # Render a single snapshot of the quota visualizer and exit
 ```
+
+- **Account Tier Awareness**:
+  - Automatically identifies **Google AI Pro** (active 5-hour rolling limit + weekly limit).
+  - Automatically identifies **Antigravity Starter Quota** (weekly limit only, gracefully formatting 5-hour limits as `[ WEEKLY ONLY ]   N/A` without false 100% progress bars).
 
 ---
 
 ### `knot auth`
-Manages Antigravity Google OAuth authentication, token synchronization from KWallet and FreeDesktop Secret Service, and graphical login terminal launching across mesh nodes.
+Manages multi-tenant Antigravity Google OAuth sandboxing under `~/.config/knot/auth/`, headless login flows, token synchronization from FreeDesktop Secret Service / KWallet, atomic profile switching, and zero-leakage node isolation.
 
 ```bash
-knot auth [node_id]                # Interactive SSH login on a specific node
-knot auth local                    # Interactive login on local workstation
-knot auth sync                     # Synchronize tokens from KWallet/Secret Service locally
-knot auth sync --all               # Fleet-wide token synchronization across all active nodes
-knot auth <node_id> --gui          # Launch graphical Konsole directly on target node's display
+# Profile Inspection
+knot auth status                   # Show active profile, email, plan tier, token expiry, and keyring state
+knot auth status --all             # Fleet-wide authentication status sweep across all strands
+knot auth status --json            # Output local auth status as JSON
+knot auth list                     # List all locally registered authentication profiles
+knot auth list --all               # Fleet-wide profile list sweep across all strands
+
+# Profile Management
+knot auth login <alias> [--no-browser] # Enroll new profile sandbox (uses PKCE; cuts off keyring collision)
+knot auth switch <alias>          # Atomically switch active profile via symlink and update Secret Service
+knot auth remove <alias>          # Delete an inactive profile sandbox (protected against active profile)
+knot auth import <alias> [file]   # Import an existing oauth-token.json into a hardened sandbox (0700/0600)
+knot auth test-lock               # Non-blocking probe of Secret Service / KWallet lock state
+
+# Token Synchronization & Remote Dispatch
+knot auth sync                    # Synchronize tokens from Secret Service / KWallet into active sandbox
+knot auth sync --all              # Fleet-wide token synchronization across all active nodes
+knot auth <node_id> --gui         # Launch graphical Konsole directly on target node's display
+
+# Targeted Node Dispatch (Zero boilerplate)
+knot auth <node_id> <action> [args...]  # e.g., knot auth rog-ally switch secondary
+knot auth <action> -n <node_id>         # e.g., knot auth status -n laptop
+knot auth <action> --node <node_id>     # e.g., knot auth list --node steamdeck
 ```
+
+- **Security & Sandboxing Invariants**:
+  - **Zero Network Credential Leakage**: Tokens and credentials remain strictly node-local. Remote dispatches execute via SSH subshells on the target node; credentials are never transmitted over the wire.
+  - **Hardened Permissions**: Profile directories are enforced at `0700` and `oauth-token.json` files at `0600`.
+  - **Atomic Symlink Switching**: Upstream CLI tools resolve active credentials via atomic symlink swaps, preventing intermediate read errors during account changes.
+
 
 ---
 

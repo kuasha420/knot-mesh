@@ -255,6 +255,9 @@ auth_status() {
       email="$(jq -r '.email // empty' "$meta_file")"
       tier="$(jq -r '.tier // empty' "$meta_file")"
     fi
+    if [ -z "$tier" ] || [ "$tier" = "null" ] || [ "$tier" = "-" ]; then
+      tier="$(auth_resolve_tier)"
+    fi
 
     if [ -f "$token_file" ] && command -v jq >/dev/null; then
       local jq_chk="" jq_rc=0
@@ -470,7 +473,8 @@ auth_login() {
   # Extract email / user metadata if possible
   local email="unknown"
   email="$(auth_resolve_email "$token_dest")"
-  local tier="Google AI Pro"
+  local tier=""
+  tier="$(auth_resolve_tier)"
 
   local now_iso
   now_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -518,6 +522,29 @@ auth_resolve_email() {
   echo "$email"
 }
 
+# Resolve account tier (Google AI Pro vs Antigravity Starter Quota) from usage API or agy
+auth_resolve_tier() {
+  local agy_bin
+  agy_bin="$(command -v agy || echo "$HOME/.local/bin/agy")"
+  if [ -x "$agy_bin" ]; then
+    local usage_json="" u_rc=0
+    usage_json="$("$agy_bin" -p /usage --output-format json 2>&1)" || u_rc=$?
+    if [ $u_rc -eq 0 ] && [ -n "$usage_json" ]; then
+      if echo "$usage_json" | grep -q '"window":"5h"'; then
+        echo "Google AI Pro"
+        return 0
+      elif echo "$usage_json" | grep -q 'gemini-5h'; then
+        echo "Google AI Pro"
+        return 0
+      elif echo "$usage_json" | grep -q 'gemini-weekly'; then
+        echo "Antigravity Starter Quota"
+        return 0
+      fi
+    fi
+  fi
+  echo "Google AI Pro"
+}
+
 # Ingest an existing token file directly into a sandboxed profile
 auth_import() {
   local alias="${1:-}"
@@ -562,7 +589,8 @@ auth_import() {
 
   local email="unknown"
   email="$(auth_resolve_email "$token_dest")"
-  local tier="Google AI Pro"
+  local tier=""
+  tier="$(auth_resolve_tier)"
   local now_iso
   now_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   local meta_file="$profile_dir/metadata.json"

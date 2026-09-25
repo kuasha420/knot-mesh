@@ -78,7 +78,7 @@ The autonomous multi-agent intelligence layer orchestrating distributed AI agent
 - **Lean Stateless MCP Gateway**: Minimalist, zero-external-dependency Model Context Protocol server (`core/mcp/gateway.py`) exposing the 4 canonical mesh tools (`knot_node_status`, `knot_quota_matrix`, `knot_exec_command`, `knot_swarm_topology`).
 - **Decentralized CRDT Memory Palace**: In-process SQLite-backed vector search and shared knowledge vault across node clusters (`core/memory/`).
 - **Swarm Council Plane**: Out-of-band collaborative deliberation across autonomous CLI agents with zero startup token overhead and Kitty confluence multiplexing (`knot council`).
-- **Antigravity Subscription Integration**: Automated quota matrix monitoring, Google OAuth credential synchronization, and cross-node headless agent execution.
+- **Antigravity Subscription & Multi-Tenant Sandboxing**: Local credential sandboxing (`knot auth`), zero network credential transmission, instantaneous atomic profile switching, dynamic tier awareness (Google AI Pro vs Antigravity Starter Quota), and live zero-token HUD visualizers (`knot quota live`, `knot council board`).
 
 ---
 

@@ -214,21 +214,32 @@ def main():
         g_5h_reset = qdata.get("gemini_5h_reset", "")
         g_wk_reset = qdata.get("gemini_weekly_reset", "")
 
-        bar_5h = render_bar(g_5h, is_offline=is_offline)
+        has_5h = qdata.get("has_5h_limit", True) if qdata else True
+        if not has_5h or g_5h is None:
+            bar_5h = f"\033[90m[{'WEEKLY ONLY':^14}]\033[0m   \033[90mN/A\033[0m"
+            rst_5h = "-"
+        else:
+            bar_5h = render_bar(g_5h, is_offline=is_offline)
+            rst_5h = fmt_reset(g_5h_reset)
+
         bar_wk = render_bar(g_wk, is_offline=is_offline)
-        rst_5h = fmt_reset(g_5h_reset)
         rst_wk = fmt_reset(g_wk_reset)
         print(f"  {'Gemini (Flash/Pro)':<18} {bar_5h}  {bar_wk}  {rst_5h:<18} {rst_wk:<18}")
 
         # Claude & 3P row
-        p_5h = n.get("quota_5h_3p", 1.0) if qdata else None
+        p_5h = n.get("quota_5h_3p") if qdata else None
         p_wk = n.get("quota_weekly_3p", 1.0) if qdata else None
         p_5h_reset = qdata.get("third_party_5h_reset", "")
         p_wk_reset = qdata.get("third_party_weekly_reset", "")
 
-        bar_p5h = render_bar(p_5h, is_offline=is_offline)
+        if not has_5h or p_5h is None:
+            bar_p5h = f"\033[90m[{'WEEKLY ONLY':^14}]\033[0m   \033[90mN/A\033[0m"
+            rst_p5h = "-"
+        else:
+            bar_p5h = render_bar(p_5h, is_offline=is_offline)
+            rst_p5h = fmt_reset(p_5h_reset)
+
         bar_pwk = render_bar(p_wk, is_offline=is_offline)
-        rst_p5h = fmt_reset(p_5h_reset)
         rst_pwk = fmt_reset(p_wk_reset)
         print(f"  {'Claude & GPT':<18} {bar_p5h}  {bar_pwk}  {rst_p5h:<18} {rst_pwk:<18}")
         print("")

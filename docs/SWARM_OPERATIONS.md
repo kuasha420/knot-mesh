@@ -162,6 +162,23 @@ knot swarm test laptop            # Probe latency and telemetry to laptop
 knot swarm auth --all             # Verify OAuth credentials across entire fleet
 ```
 
+### 4. Multi-Tenant Profile Sandboxing & Fleet Account Switching (`knot auth`)
+Knot Mesh implements local profile sandboxing under `~/.config/knot/auth/` (Issue #60), enabling multiple Google accounts (e.g. `primary` and `secondary`) per node with instantaneous atomic switching:
+
+- **Isolated Keyring & Token Sandboxes**: Each profile (`~/.config/knot/auth/profiles/<alias>/`) maintains its own `oauth-token.json` (`0600`) and metadata (`0700`).
+- **Atomic Switching**: `knot auth switch <alias>` atomically repoints the upstream CLI symlink, updating FreeDesktop Secret Service / KWallet without intermediate read race conditions.
+- **Node-Targeted Dispatch**: Switch profiles remotely across the fleet without SSH boilerplate:
+  ```bash
+  knot auth rog-ally switch secondary
+  knot auth laptop switch primary
+  knot auth status --all
+  ```
+- **Zero Network Credential Leakage**: Invariant strictly enforced: OAuth tokens and refresh credentials **never** traverse the network. Remote operations execute exclusively via node-local subshells.
+- **Account Tier Support**: Dynamic quota resolution distinguishes between **Google AI Pro** (5h rolling + weekly limit) and **Antigravity Starter Quota** (weekly limit only), ensuring accurate telemetry without phantom limits.
+- **Zero-Token Live Viewers**:
+  - `knot quota live [--compact|--wide]`: Live visualizer for model quota headroom across all nodes.
+  - `knot council board [--compact|--wide]`: Real-time streaming mission and peer message board.
+
 ---
 
 ## Fleet Operations & Maintenance

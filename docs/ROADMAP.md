@@ -24,10 +24,17 @@ The roadmap is structured across three distinct horizons of fidelity:
 | **#41** | **Decentralized Memory Palace & Lean MCP Gateway**<br>• Local embedded SQLite with CRDT Hybrid Logical Clock schema.<br>• In-process vector cosine similarity indexing.<br>• Dual-pool memory architecture (node scratch vs swarm shared).<br>• Pruned MCP gateway to 4 canonical mesh tools (`knot_node_status`, `knot_quota_matrix`, `knot_exec_command`, `knot_swarm_topology`).<br>• Hardware node-role system prompt profiles. | `laptop` (Lead)<br>`desktop` (Peer) | **COMPLETED** | Verified via `tests/test_memory_palace.py` (20/20 tests passed). |
 | **#55** | **Swarm Council Harness Hardening**<br>• `knot council steer` remote socket injection.<br>• Out-of-band collaboration via GitHub Discussions and Mesh DB.<br>• Scale-aware Kitty Confluence cockpit with zero-token start (<1s).<br>• Antigravity `PreInvocation` hook (`council_hook.py`) with Turn 1 scoping. | `desktop` (Lead)<br>`laptop` (Peer) | **COMPLETED** | Verified via `tests/test_swarm_council.sh` and `test_council_steer.sh`. |
 | **PSL** | **PSL Rule 1 & Rule 2 Enforcement**<br>• Zero error swallowing across production code and test suites.<br>• Purged all `2>/dev/null`, `&>/dev/null`, `|| true`, and `|| :`.<br>• Universal PSL integrity suite with 5 automated audits. | `desktop` (Lead)<br>`laptop` (Peer) | **COMPLETED** | Verified via `tests/test_psl_integrity.sh` (0 defects found). |
+| **#60** | **Multi-Tenant Local Profile Sandboxing**<br>• Headless multi-account sandboxing under `~/.config/knot/auth/`.<br>• Atomic symlink switching between profiles without intermediate read errors.<br>• Non-blocking Secret Service / KWallet lock probe.<br>• Zero network credential leakage invariant.<br>• Fleet-wide node targeting (`knot auth <node_id> <action>`, `--all`). | `desktop` (Lead)<br>`rog-ally` (Peer) | **COMPLETED** | Verified via `tests/test_knot_auth.sh` (11/11 tests passed). |
+| **Fleet** | **100% Dual-Profile Fleet Rollout & Starter Quota Telemetry**<br>• Complete dual-account enrollment across all 4 strands (8 total profiles).<br>• Dynamic Antigravity Starter Quota detection and weekly-only telemetry.<br>• Elimination of cross-account quota timestamp merging bugs (BUG-022, BUG-023).<br>• Zero-token live visualizers (`knot quota live`, `knot council board`). | `desktop` (Lead)<br>`steamdeck` (Peer) | **COMPLETED** | Verified live across all 4 strands and `tests/test_live_viewers.py`. |
 
 ---
 
 ## 3. Horizon 2 (Intermediate: Medium Resolution) — Platform Maturation & Contracts
+
+* **KDE Connect D-Bus Clipboard Pairing State Harmonization (Next QA Priority)**:
+  - Deep verification and test suite hardening of cross-device clipboard synchronization over KDE Connect and Deskflow.
+  - Automated pairing state discovery, trust verification, and DBus Klipper integration without manual operator fallback.
+  - Robust handling of cross-strand credential and token transfer workflows.
 
 * **Knot Kommand Kafe (Tauri v2 / Handheld GUI)**:
   - Rust Tauri v2 desktop shell with ultra-low memory footprint (<50MB RAM).

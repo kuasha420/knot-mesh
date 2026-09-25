@@ -326,6 +326,34 @@ def test_limit_visualizer_rendering():
     assert "AC Power" in wide
 
 
+def test_limit_visualizer_starter_quota_weekly_only():
+    """Verify that nodes with Starter Quota (no 5h limit) render [WEEKLY ONLY] / N/A without crash or phantom bars."""
+    mock_agg = MagicMock(spec=QuotaDataAggregator)
+    mock_agg.using_hub = True
+    starter_node = {
+        "id": "steamdeck",
+        "hostname": "steamdeck-eos",
+        "status": "ONLINE",
+        "selected_model": "gemini-3.8-flash-high",
+        "quota_5h_gemini": None,
+        "quota_weekly_gemini": 1.0,
+        "quota_data": {
+            "has_5h_limit": False,
+            "gemini_weekly_reset_in": "in 6d 23h",
+            "account": {"email": "starter@knot.mesh", "subscription": "Antigravity Starter Quota"},
+        },
+    }
+    mock_agg.fetch_all.return_value = ([starter_node], {})
+    renderer = LimitVisualizerRenderer(mock_agg)
+
+    compact = renderer.render_snapshot(width=80, compact=True)
+    assert "[ WEEKLY ONLY ]" in compact
+    assert "N/A" in compact
+
+    wide = renderer.render_snapshot(width=120, wide=True)
+    assert "[WEEKLY ONLY]" in wide
+
+
 # ==============================================================================
 # 3. CLI Smoke & Zero-Token Audits
 # ==============================================================================

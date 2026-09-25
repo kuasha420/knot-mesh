@@ -328,6 +328,7 @@ def is_kwallet_unlocked() -> bool:
 _account_info_cache: dict = {}
 _account_info_cached_at: float = 0.0
 _account_info_token_sig: str = ""
+_account_subscription_tier: str = ""
 
 
 def sync_oauth_token_file() -> dict | None:
@@ -401,7 +402,7 @@ def fetch_account_info() -> dict:
     Cached in-memory for 1 hour to prevent API throttling, but automatically invalidates
     immediately when a new account OAuth token is detected. Zero token cost.
     """
-    global _account_info_cache, _account_info_cached_at, _account_info_token_sig
+    global _account_info_cache, _account_info_cached_at, _account_info_token_sig, _account_subscription_tier
     now = time.time()
     tdata = sync_oauth_token_file()
     if not tdata:
@@ -412,13 +413,19 @@ def fetch_account_info() -> dict:
     refresh_token = token_obj.get("refresh_token", "")
     token_expiry = token_obj.get("expiry", "")
     auth_method = tdata.get("auth_method", "consumer")
-    subscription = "Google AI Pro" if auth_method == "consumer" else "Google Workspace"
+    subscription = _account_subscription_tier or ("Google AI Pro" if auth_method == "consumer" else "Google Workspace")
 
     token_sig = hashlib.sha256((refresh_token or access_token or "").encode("utf-8")).hexdigest()
+
+    # Invalidate cached tier if token changed
+    if _account_info_token_sig and _account_info_token_sig != token_sig:
+        _account_subscription_tier = ""
 
     # Return cache if valid (< 1 hr) AND token hasn't changed
     if _account_info_cache and (now - _account_info_cached_at < 3600) and (_account_info_token_sig == token_sig) and _account_info_cache.get("email"):
         _account_info_cache["token_expiry"] = token_expiry
+        if _account_subscription_tier:
+            _account_info_cache["subscription"] = _account_subscription_tier
         return _account_info_cache
 
     result = {
@@ -541,18 +548,15 @@ def fetch_model_quota() -> dict | None:
         data = json.loads(json_line)
         groups = data.get("command", {}).get("data", {}).get("groups", [])
 
-        result = {
-            "gemini_5h_fraction": 1.0,
-            "gemini_5h_reset": "",
-            "gemini_weekly_fraction": 1.0,
-            "gemini_weekly_reset": "",
-            "third_party_5h_fraction": 1.0,
-            "third_party_5h_reset": "",
-            "third_party_weekly_fraction": 1.0,
-            "third_party_weekly_reset": "",
-            "account": fetch_account_info(),
-            "fetched_at": int(time.time())
-        }
+        has_5h_bucket = False
+        gemini_5h_val = None
+        gemini_5h_reset = ""
+        gemini_weekly_val = 1.0
+        gemini_weekly_reset = ""
+        tp_5h_val = None
+        tp_5h_reset = ""
+        tp_weekly_val = 1.0
+        tp_weekly_reset = ""
 
         for group in groups:
             gname = group.get("name", "").lower()
@@ -565,18 +569,44 @@ def fetch_model_quota() -> dict | None:
 
                 if "gemini" in gname:
                     if window == "5h" or "5h" in bid:
-                        result["gemini_5h_fraction"] = frac
-                        result["gemini_5h_reset"] = reset
+                        has_5h_bucket = True
+                        gemini_5h_val = frac
+                        gemini_5h_reset = reset
                     elif window == "weekly" or "weekly" in bid:
-                        result["gemini_weekly_fraction"] = frac
-                        result["gemini_weekly_reset"] = reset
+                        gemini_weekly_val = frac
+                        gemini_weekly_reset = reset
                 else:
                     if window == "5h" or "5h" in bid:
-                        result["third_party_5h_fraction"] = frac
-                        result["third_party_5h_reset"] = reset
+                        has_5h_bucket = True
+                        tp_5h_val = frac
+                        tp_5h_reset = reset
                     elif window == "weekly" or "weekly" in bid:
-                        result["third_party_weekly_fraction"] = frac
-                        result["third_party_weekly_reset"] = reset
+                        tp_weekly_val = frac
+                        tp_weekly_reset = reset
+
+        tier = "Google AI Pro" if has_5h_bucket else "Antigravity Starter Quota"
+        global _account_subscription_tier
+        _account_subscription_tier = tier
+        if _account_info_cache:
+            _account_info_cache["subscription"] = tier
+
+        acc_info = fetch_account_info()
+        if acc_info:
+            acc_info["subscription"] = tier
+
+        result = {
+            "has_5h_limit": has_5h_bucket,
+            "gemini_5h_fraction": gemini_5h_val,
+            "gemini_5h_reset": gemini_5h_reset,
+            "gemini_weekly_fraction": gemini_weekly_val,
+            "gemini_weekly_reset": gemini_weekly_reset,
+            "third_party_5h_fraction": tp_5h_val,
+            "third_party_5h_reset": tp_5h_reset,
+            "third_party_weekly_fraction": tp_weekly_val,
+            "third_party_weekly_reset": tp_weekly_reset,
+            "account": acc_info,
+            "fetched_at": int(time.time())
+        }
 
         return result
     except Exception as e:
@@ -723,11 +753,16 @@ class AgentWorker:
                 self.account_info = fetch_account_info()
                 q = fetch_model_quota()
                 if q:
-                    q["account"] = self.account_info
+                    if q.get("account"):
+                        self.account_info = q["account"]
+                    else:
+                        q["account"] = self.account_info
                     self.quota_info = q
-                    g5 = round(q.get("gemini_5h_fraction", 1.0) * 100)
+                    g5_val = q.get("gemini_5h_fraction")
+                    g5_str = f"{round(g5_val * 100)}%" if g5_val is not None else "N/A (Weekly Only)"
                     gw = round(q.get("gemini_weekly_fraction", 1.0) * 100)
-                    print(f"[*] Quota telemetry updated: Gemini 5h={g5}%, Weekly={gw}% (Account: {self.account_info.get('email', 'unknown')})")
+                    tier_str = (self.account_info or {}).get("subscription", "unknown")
+                    print(f"[*] Quota telemetry updated: Gemini 5h={g5_str}, Weekly={gw}% (Account: {self.account_info.get('email', 'unknown')}, Tier: {tier_str})")
                 elif self.account_info:
                     if not self.quota_info:
                         self.quota_info = {"account": self.account_info, "fetched_at": int(time.time())}

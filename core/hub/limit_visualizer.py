@@ -307,12 +307,12 @@ class LimitVisualizerRenderer:
                         sys.stderr.write(f"[DEBUG] Failed to parse quota_data JSON for {nid}: {e}\n")
                     qdata = {}
 
-            g_5h = n.get("quota_5h_gemini", 1.0)
+            g_5h = n.get("quota_5h_gemini")
             g_wk = n.get("quota_weekly_gemini", 1.0)
             rst_5h_str = qdata.get("gemini_5h_reset_in") or qdata.get("gemini_5h_reset", "Ready")
             rst_wk_str = qdata.get("gemini_weekly_reset_in") or qdata.get("gemini_weekly_reset", "Ready")
 
-            bar_5h = render_progress_bar(g_5h, is_offline=is_offline, width=bar_width)
+            has_5h = qdata.get("has_5h_limit", True) and (g_5h is not None)
             bar_wk = render_progress_bar(g_wk, is_offline=is_offline, width=bar_width)
             pwr_info = power.get(nid) if isinstance(power, dict) else None
             pwr_str = format_power_string(pwr_info, is_offline=is_offline)
@@ -321,7 +321,11 @@ class LimitVisualizerRenderer:
             border_len = max(10, w - 2)
             lines.append(f"{C_CYAN}┌── {icon} {C_BOLD}@{nid}{C_RESET} {C_DIM}({role_desc}){C_RESET} ── {status_str} {C_CYAN}{'─' * max(2, border_len - len(nid) - len(role_desc) - 20)}┐{C_RESET}")
             lines.append(f"{C_CYAN}│{C_RESET} Model: {C_BCYAN}{model_name}{C_RESET} • Auth: {C_BGREEN}Valid{C_RESET} • Power: {pwr_str}")
-            lines.append(f"{C_CYAN}│{C_RESET} 5-Hour Limit: {bar_5h}  {C_DIM}Reset: {rst_5h_str}{C_RESET}")
+            if not has_5h:
+                lines.append(f"{C_CYAN}│{C_RESET} 5-Hour Limit: {C_DIM}[ WEEKLY ONLY ]  N/A{C_RESET}")
+            else:
+                bar_5h = render_progress_bar(g_5h, is_offline=is_offline, width=bar_width)
+                lines.append(f"{C_CYAN}│{C_RESET} 5-Hour Limit: {bar_5h}  {C_DIM}Reset: {rst_5h_str}{C_RESET}")
             lines.append(f"{C_CYAN}│{C_RESET} Weekly Limit: {bar_wk}  {C_DIM}Reset: {rst_wk_str}{C_RESET}")
             lines.append(f"{C_CYAN}└──{'─' * border_len}┘{C_RESET}")
 
@@ -366,12 +370,18 @@ class LimitVisualizerRenderer:
                         sys.stderr.write(f"[DEBUG] Failed to parse quota_data JSON for {nid}: {e}\n")
                     qdata = {}
 
-            g_5h = n.get("quota_5h_gemini", 1.0)
+            g_5h = n.get("quota_5h_gemini")
             g_wk = n.get("quota_weekly_gemini", 1.0)
             rst_5h = qdata.get("gemini_5h_reset_in") or qdata.get("gemini_5h_reset", "Ready")
             rst_wk = qdata.get("gemini_weekly_reset_in") or qdata.get("gemini_weekly_reset", "Ready")
 
-            bar_5h = render_progress_bar(g_5h, is_offline=is_offline, width=8)
+            has_5h = qdata.get("has_5h_limit", True) and (g_5h is not None)
+            if not has_5h:
+                cell_5h = f"{C_DIM}[WEEKLY ONLY]{C_RESET}"
+            else:
+                bar_5h = render_progress_bar(g_5h, is_offline=is_offline, width=8)
+                cell_5h = f"{bar_5h} {rst_5h[:6]}"
+
             bar_wk = render_progress_bar(g_wk, is_offline=is_offline, width=8)
 
             pwr_info = power.get(nid) if isinstance(power, dict) else None
@@ -381,7 +391,7 @@ class LimitVisualizerRenderer:
                 f"{icon} @{nid}",
                 role_desc[:21],
                 model_name[:19],
-                f"{bar_5h} {rst_5h[:6]}",
+                cell_5h,
                 f"{bar_wk} {rst_wk[:6]}",
                 pwr_str
             ))
