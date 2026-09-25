@@ -663,6 +663,20 @@ antigravity_swarm_test() {
 # Display model quotas across the mesh
 antigravity_swarm_quota() {
   local target="${1:-all}"
+  local hub_url=""
+  if [ -n "${KNOT_HUB_URL:-}" ]; then
+    hub_url="$KNOT_HUB_URL"
+  elif command -v hub_resolve_url >/dev/null; then
+    local res_hub=""
+    if res_hub="$(hub_resolve_url 2>&1)"; then
+      hub_url="$res_hub"
+    fi
+  fi
+  if [ -z "$hub_url" ]; then
+    hub_url="https://127.0.0.1:4242"
+  fi
+  export KNOT_HUB_URL="$hub_url"
+
   if [ "$target" = "watch" ] || [ "$target" = "live" ] || [ "$target" = "--live" ] || [ "$target" = "--watch" ]; then
     if [ $# -gt 0 ]; then
       shift
@@ -670,15 +684,9 @@ antigravity_swarm_quota() {
     exec python3 "$KNOT_ROOT/core/hub/limit_visualizer.py" "$@"
   fi
 
-  local hub_url=""
-  if [ -n "${KNOT_HUB_URL:-}" ]; then
-    hub_url="$KNOT_HUB_URL"
-  else
-    hub_url="https://127.0.0.1:4242"
-  fi
-
   python3 "$KNOT_ROOT/core/hub/quota_view.py" "$target" "$hub_url"
 }
+
 
 antigravity_get_my_node() {
   local my_host

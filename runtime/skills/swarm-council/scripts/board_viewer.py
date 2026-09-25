@@ -77,13 +77,15 @@ def try_hub_request(path: str, hub_url: str = DEFAULT_HUB_URL, timeout: float = 
                 if os.environ.get("KNOT_DEBUG"):
                     sys.stderr.write(f"[DEBUG] Failed to load Hub CA cert ({hub_ca}): {e}\n")
 
-        if not ca_loaded:
-            allow_insecure = (
-                os.environ.get("KNOT_INSECURE_TLS", "").lower() in ("1", "true", "yes")
-                or os.environ.get("KNOT_SKIP_TLS_VERIFY", "").lower() in ("1", "true", "yes")
-                or any(h in hub_url for h in ("127.0.0.1", "localhost", "::1"))
-            )
-            if allow_insecure:
+        allow_insecure = (
+            os.environ.get("KNOT_INSECURE_TLS", "").lower() in ("1", "true", "yes")
+            or os.environ.get("KNOT_SKIP_TLS_VERIFY", "").lower() in ("1", "true", "yes")
+        )
+        if allow_insecure:
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+        elif not ca_loaded:
+            if any(h in hub_url for h in ("127.0.0.1", "localhost", "::1")):
                 ctx.check_hostname = False
                 ctx.verify_mode = ssl.CERT_NONE
 

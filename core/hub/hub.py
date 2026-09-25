@@ -3042,6 +3042,17 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             last_count = int(query.get("last_count", [0])[0])
             self._send_json(self.db.get_council_delta(tid, last_count=last_count))
 
+        elif path.startswith("/council/threads/") and path.endswith("/messages"):
+            tid = path.replace("/council/threads/", "").replace("/messages", "").strip()
+            conn = self.db.get_connection()
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, thread_id, run_id, node_id, status, body, created_at FROM council_messages WHERE thread_id = ? OR run_id = ? ORDER BY created_at ASC",
+                (tid, tid)
+            )
+            rows = [dict(r) for r in cur.fetchall()]
+            self._send_json(rows)
+
         elif path.startswith("/council/threads/"):
             tid = path.replace("/council/threads/", "").strip()
             self._send_json(self.db.get_council_thread(tid))

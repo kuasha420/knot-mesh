@@ -18,6 +18,7 @@ source "$KNOT_ROOT/core/modules/autologin.sh"
 source "$KNOT_ROOT/core/modules/kdeconnect.sh"
 source "$KNOT_ROOT/core/modules/doctor.sh"
 source "$KNOT_ROOT/core/modules/antigravity.sh"
+source "$KNOT_ROOT/core/modules/auth.sh"
 source "$KNOT_ROOT/core/modules/hub.sh"
 source "$KNOT_ROOT/core/modules/memory.sh"
 source "$KNOT_ROOT/core/modules/shutdown.sh"
@@ -1734,7 +1735,7 @@ case "${1:-}" in
     ;;
   auth)
     shift
-    cmd_swarm auth "$@"
+    cmd_auth "$@"
     ;;
   hub)
     shift
@@ -1813,7 +1814,7 @@ case "${1:-}" in
     echo "  knot council <start|resume|status|reply|list|attach|reconcile|copy|clean|kill> Out-of-band multi-agent swarm coordination"
     echo "  knot swarm [status|quota|test|exec|auth] Manage Antigravity AI agents across the mesh"
     echo "  knot quota [node|--all]       Show real-time 5h & weekly model quota limits"
-    echo "  knot auth [node] [--gui]      Log in / re-authenticate Antigravity CLI on a node"
+    echo "  knot auth <login|list|status|switch|remove|test-lock> Manage local profiles and authentication"
     echo "  knot memory [store|recall|map|promote|relate|test] Manage Cognitive Memory Palace"
     echo "  knot hub <start|stop|restart|status|logs> Manage Blackboard Hub daemon"
     echo "  knot agent <start|stop|restart|status|logs> Manage Worker Agent daemon"

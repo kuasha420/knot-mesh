@@ -942,5 +942,12 @@ council_heal() {
 }
 
 council_board() {
+  if [ -z "${KNOT_HUB_URL:-}" ]; then
+    local resolved_hub=""
+    if resolved_hub="$(hub_resolve_url 2>&1)"; then
+      export KNOT_HUB_URL="$resolved_hub"
+    fi
+  fi
   exec python3 "$KNOT_ROOT/runtime/skills/swarm-council/scripts/board_viewer.py" "$@"
 }
+
