@@ -380,7 +380,7 @@ cmd_status() {
 cmd_exec() {
   local tty_opts=()
   if [ "${1:-}" = "-t" ] || [ "${1:-}" = "-tt" ]; then
-    tty_opts=(-t)
+    tty_opts=("$1")
     shift
   fi
   local target="${1:-}"
@@ -430,7 +430,7 @@ cmd_exec() {
       else
         target_hub_url="${KNOT_HUB_URL:-https://${anchor_host}:${hub_port}}"
       fi
-      local remote_cmd="export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:\$PATH\"; export KNOT_NODE_ID=\"$id\"; export KNOT_HUB_URL=\"$target_hub_url\"; $anchor_env $council_env $cmd"
+      local remote_cmd="export TERM=\"\${TERM:-xterm-256color}\"; export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:\$PATH\"; export KNOT_NODE_ID=\"$id\"; export KNOT_HUB_URL=\"$target_hub_url\"; $anchor_env $council_env $cmd"
 
       local e_out=""
       if [ "$id" = "$my_node_id" ] || [ "$host" = "$my_host" ]; then
@@ -477,7 +477,7 @@ cmd_exec() {
     else
       target_hub_url="${KNOT_HUB_URL:-https://${anchor_host}:${hub_port}}"
     fi
-    local remote_cmd="export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:\$PATH\"; export KNOT_NODE_ID=\"$target_nid\"; export KNOT_HUB_URL=\"$target_hub_url\"; $anchor_env $council_env $cmd"
+    local remote_cmd="export TERM=\"\${TERM:-xterm-256color}\"; export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:\$PATH\"; export KNOT_NODE_ID=\"$target_nid\"; export KNOT_HUB_URL=\"$target_hub_url\"; $anchor_env $council_env $cmd"
 
     if [ "$is_local" -eq 1 ]; then
       bash -c "$remote_cmd"

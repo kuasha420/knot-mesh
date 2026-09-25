@@ -736,17 +736,36 @@ auth_exec_node() {
     return $?
   fi
 
-  local remote_cmd="knot auth $action"
+  local gui_mode=0
+  local clean_args=()
   for a in "${args[@]}"; do
+    if [ "$a" = "--gui" ]; then
+      gui_mode=1
+    else
+      clean_args+=("$a")
+    fi
+  done
+
+  local remote_cmd="knot auth $action"
+  for a in "${clean_args[@]}"; do
     remote_cmd="$remote_cmd $(printf "%q" "$a")"
   done
 
   if [ "$action" = "login" ]; then
+    if [ "$gui_mode" -eq 1 ]; then
+      knot_log_info "Opening interactive Konsole on '$target' display for Antigravity login..."
+      local uid="1000"
+      if [ "$target" = "steamdeck" ]; then uid="1001"; fi
+      local log_file="/tmp/knot_konsole_auth.log"
+      ssh "$target" "WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 XDG_RUNTIME_DIR=/run/user/$uid nohup konsole --title 'KNOT AUTH: $target' -e $remote_cmd > '$log_file' 2>&1 &"
+      knot_log_ok "Konsole opened on $target screen (logging to $log_file). Follow the prompt on $target to log in."
+      return 0
+    fi
     # Login is interactive and requires TTY allocation
     if command -v cmd_exec >/dev/null; then
       cmd_exec -tt "$target" "$remote_cmd"
     else
-      ssh -tt "$target" "$remote_cmd"
+      ssh -tt "$target" "export TERM=\"\${TERM:-xterm-256color}\"; $remote_cmd"
     fi
   else
     if command -v cmd_exec >/dev/null; then
