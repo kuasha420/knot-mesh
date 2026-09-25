@@ -172,7 +172,21 @@ antigravity_sync_credentials() {
 
 # Check if KWallet or Secret Service is unlocked on local node
 antigravity_is_kwallet_unlocked() {
-  # Check KDE KWallet DBus interface (Plasma 6 / 5)
+  # 1. Check Secret Service collection Locked property first (modern Plasma 6 / ksecretd / GNOME Keyring)
+  local locked="" lock_out="" rc_lock=0
+  lock_out="$(busctl --user get-property org.freedesktop.secrets /org/freedesktop/secrets/aliases/default org.freedesktop.Secret.Collection Locked 2>&1)" || rc_lock=$?
+  if [ $rc_lock -eq 0 ]; then
+    locked="$lock_out"
+    if echo "$locked" | grep -q "false"; then
+      return 0
+    elif echo "$locked" | grep -q "true"; then
+      return 1
+    fi
+  else
+    knot_log_warn "Notice: Secret Service collection status check failed (exit code $rc_lock): $lock_out"
+  fi
+
+  # 2. Check KDE KWallet DBus interface (Plasma 6 / 5)
   for svc in org.kde.kwalletd6 org.kde.kwalletd5; do
     local mod="${svc##*.}"
     local en_out="" en_rc=0
@@ -192,7 +206,9 @@ antigravity_is_kwallet_unlocked() {
         local open_out="" open_rc=0
         open_out="$(busctl --user call "$svc" "/modules/$mod" org.kde.KWallet isOpen s "$wallet" 2>&1)" || open_rc=$?
         if [ $open_rc -eq 0 ]; then
-          if echo "$open_out" | grep -q "false"; then
+          if echo "$open_out" | grep -q "true"; then
+            return 0
+          elif echo "$open_out" | grep -q "false"; then
             return 1
           fi
         else
@@ -204,17 +220,6 @@ antigravity_is_kwallet_unlocked() {
     fi
   done
 
-  # Check Secret Service collection Locked property
-  local locked="" lock_out="" rc_lock=0
-  lock_out="$(busctl --user get-property org.freedesktop.secrets /org/freedesktop/secrets/aliases/default org.freedesktop.Secret.Collection Locked 2>&1)" || rc_lock=$?
-  if [ $rc_lock -eq 0 ]; then
-    locked="$lock_out"
-    if echo "$locked" | grep -q "true"; then
-      return 1
-    fi
-  else
-    knot_log_warn "Notice: Secret Service collection status check failed (exit code $rc_lock): $lock_out"
-  fi
   return 0
 }
 

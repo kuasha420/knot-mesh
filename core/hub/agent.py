@@ -262,7 +262,22 @@ def is_kwallet_unlocked() -> bool:
     Returns True if unlocked, or if KWallet is not enabled/installed.
     Returns False if KWallet/Secret Service is present and confirmed locked.
     """
-    # 1. Check KDE KWallet DBus interface (Plasma 6 kwalletd6 and Plasma 5 kwalletd5)
+    # 1. Check FreeDesktop Secret Service default collection Locked property (e.g. ksecretd on Plasma 6, GNOME Keyring)
+    try:
+        p_sec = subprocess.run(
+            ["busctl", "--user", "get-property", "org.freedesktop.secrets",
+             "/org/freedesktop/secrets/aliases/default", "org.freedesktop.Secret.Collection", "Locked"],
+            capture_output=True, text=True, timeout=1.5
+        )
+        if p_sec.returncode == 0:
+            if "false" in p_sec.stdout:
+                return True
+            if "true" in p_sec.stdout:
+                return False
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
+
+    # 2. Check KDE KWallet DBus interface (Plasma 6 kwalletd6 and Plasma 5 kwalletd5)
     for service, path in [("org.kde.kwalletd6", "/modules/kwalletd6"), ("org.kde.kwalletd5", "/modules/kwalletd5")]:
         try:
             p_enabled = subprocess.run(
@@ -284,27 +299,12 @@ def is_kwallet_unlocked() -> bool:
                     capture_output=True, text=True, timeout=1.5
                 )
                 if p_open.returncode == 0:
-                    if "false" in p_open.stdout:
-                        return False
                     if "true" in p_open.stdout:
                         return True
+                    if "false" in p_open.stdout:
+                        return False
         except Exception as _err:
             sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
-
-    # 2. Check FreeDesktop Secret Service default collection Locked property
-    try:
-        p_sec = subprocess.run(
-            ["busctl", "--user", "get-property", "org.freedesktop.secrets",
-             "/org/freedesktop/secrets/aliases/default", "org.freedesktop.Secret.Collection", "Locked"],
-            capture_output=True, text=True, timeout=1.5
-        )
-        if p_sec.returncode == 0:
-            if "true" in p_sec.stdout:
-                return False
-            if "false" in p_sec.stdout:
-                return True
-    except Exception as _err:
-        sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
     # 3. Probe secret-tool search as fallback
     try:
