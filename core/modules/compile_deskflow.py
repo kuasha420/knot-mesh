@@ -125,9 +125,16 @@ def compile_deskflow(topology_file: str, nodes_dir: str, mode: str = "unlocked")
                 continue
             specs = spec if isinstance(spec, list) else [spec]
             for s in specs:
-                target_node = s.get("node")
-                span = s.get("span", [0, 100])
-                target_span = s.get("target_span", [0, 100])
+                if isinstance(s, str):
+                    target_node = s
+                    span = [0, 100]
+                    target_span = [0, 100]
+                elif isinstance(s, dict):
+                    target_node = s.get("node")
+                    span = s.get("span", [0, 100])
+                    target_span = s.get("target_span", [0, 100])
+                else:
+                    continue
                 _add_link(node_id, norm_d, target_node, span, target_span)
 
     # 2. From links list
