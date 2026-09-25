@@ -90,7 +90,7 @@ def resolve_local_node_id(nodes=None):
         if not nodes or detected_nid in nodes or cur_host in nodes or cur_host_short in nodes:
             return detected_nid
 
-    # 5. Nodes list match
+    # 5. Nodes list match against local host
     if nodes:
         if cur_host and cur_host in nodes:
             return cur_host
@@ -98,7 +98,7 @@ def resolve_local_node_id(nodes=None):
             return cur_host_short
         return nodes[0]
 
-    return detected_nid or cur_host_short or cur_host or "localhost"
+    return cur_host_short or cur_host or "localhost"
 
 
 if __name__ == "__main__":
