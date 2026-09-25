@@ -19,7 +19,7 @@ if [ -z "$RUN_ID" ]; then
 fi
 
 SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-KNOT_ROOT="$(cd -P "$SCRIPT_DIR/../../.." && pwd -P)"
+KNOT_ROOT="${KNOT_ROOT:-$(cd -P "$SCRIPT_DIR/../../../.." && pwd -P)}"
 KNOT_BIN=""
 if [ -x "$KNOT_ROOT/bin/knot" ]; then
   KNOT_BIN="$KNOT_ROOT/bin/knot"

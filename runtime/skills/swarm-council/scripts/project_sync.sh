@@ -5,7 +5,7 @@ set -euo pipefail
 # Discovers Antigravity project, extracts declared folders, and verifies fleet mirrors
 
 SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-export KNOT_ROOT="$(cd -P "$SCRIPT_DIR/../../.." && pwd -P)"
+export KNOT_ROOT="${KNOT_ROOT:-$(cd -P "$SCRIPT_DIR/../../../.." && pwd -P)}"
 
 python3 - "$@" << 'PYEOF'
 import os, sys, json, glob, subprocess, argparse
@@ -23,7 +23,7 @@ explicit_dir = args.dir
 home = os.path.expanduser("~")
 cwd = os.path.realpath(explicit_dir) if explicit_dir else os.path.realpath(os.getcwd())
 projects_dir = os.path.join(home, ".gemini/config/projects")
-knot_root = os.path.realpath(os.environ.get("KNOT_ROOT", os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))))
+knot_root = os.path.realpath(os.environ.get("KNOT_ROOT", os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))))
 
 matched_project = None
 matched_folders = []

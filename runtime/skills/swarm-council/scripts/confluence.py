@@ -16,7 +16,7 @@ import subprocess
 import sys
 
 script_dir = os.path.dirname(os.path.realpath(__file__))
-knot_root = os.path.realpath(os.path.join(script_dir, "../../.."))
+knot_root = os.path.realpath(os.environ.get("KNOT_ROOT", os.path.join(script_dir, "../../../..")))
 if knot_root not in sys.path:
     sys.path.insert(0, knot_root)
 if script_dir not in sys.path:
@@ -284,7 +284,7 @@ def main():
     args = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.realpath(__file__))
-    knot_root = os.path.realpath(os.path.join(script_dir, "../../.."))
+    knot_root = os.path.realpath(os.environ.get("KNOT_ROOT", os.path.join(script_dir, "../../../..")))
     missions_dir = os.path.expanduser(f"~/.config/knot/missions/{args.run_id}")
 
     if args.nodes:

@@ -422,7 +422,7 @@ def main():
     args = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.realpath(__file__))
-    knot_root = os.path.realpath(os.path.join(script_dir, "../../.."))
+    knot_root = os.path.realpath(os.environ.get("KNOT_ROOT", os.path.join(script_dir, "../../../..")))
     project_dir = args.project_dir or os.getcwd()
 
     # Load prompt

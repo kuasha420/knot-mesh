@@ -103,6 +103,14 @@ if [ ! -f "$desktop_pane" ] || ! grep -q "sleep 5 || break" "$desktop_pane"; the
   echo "FAILED (Missing persistent reconnection supervisor loop in $desktop_pane)"
   exit 1
 fi
+if grep -q "runtime/runtime" "$desktop_pane"; then
+  echo "FAILED (Found duplicated runtime/runtime path in $desktop_pane)"
+  exit 1
+fi
+if grep -E "launch --cwd=.*/runtime " "$session_file"; then
+  echo "FAILED (Session launch cwd points to runtime subdirectory instead of repo root)"
+  exit 1
+fi
 rm -rf "$HOME/.config/knot/missions/$test_run_id"
 echo "PASSED"
 
