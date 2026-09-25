@@ -227,10 +227,9 @@ sync_active_swarm() {
 is_local_anchor() {
   local s_id="$1"
   local my_host=""
-  if [ -r /etc/hostname ]; then
-    my_host="$(tr -d '[:space:]' < /etc/hostname)"
-  elif command -v hostname >/dev/null; then
-    my_host="$(hostname)"
+  my_host="$(uname -n)"
+  if [ -r /proc/sys/kernel/hostname ]; then
+    my_host="$(tr -d '[:space:]' < /proc/sys/kernel/hostname)"
   fi
 
   local swarm_conf=""

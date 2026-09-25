@@ -502,12 +502,9 @@ if ! has_rd; then
   fi
 fi
 
-MY_HOST=""
-if command -v uname >/dev/null; then
-  MY_HOST="$(uname -n)"
-fi
-if [ -z "$MY_HOST" ] && command -v hostname >/dev/null; then
-  MY_HOST="$(hostname)"
+MY_HOST="$(uname -n)"
+if [ -r /proc/sys/kernel/hostname ]; then
+  MY_HOST="$(tr -d '[:space:]' < /proc/sys/kernel/hostname)"
 fi
 
 CONF_DIR="$HOME/.config/Deskflow"

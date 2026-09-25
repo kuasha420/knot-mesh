@@ -155,13 +155,14 @@ knot_detect_network_interfaces() {
 
 knot_detect_hostname() {
   local h=""
-  if command -v uname >/dev/null; then
+  if [ -r /proc/sys/kernel/hostname ]; then
+    h="$(tr -d '[:space:]' < /proc/sys/kernel/hostname)"
+  fi
+  if [ -z "$h" ] && command -v uname >/dev/null; then
     h="$(uname -n)"
-  elif command -v python3 >/dev/null; then
-    local py_h=""
-    if py_h="$(python3 -c "import socket; print(socket.gethostname())" 2>&1)"; then
-      h="$py_h"
-    fi
+  fi
+  if [ -z "$h" ] && [ -r /etc/hostname ]; then
+    h="$(tr -d '[:space:]' < /etc/hostname)"
   fi
   if [ -z "$h" ] && command -v hostnamectl >/dev/null; then
     local out=""
@@ -169,8 +170,11 @@ knot_detect_hostname() {
       h="$out"
     fi
   fi
-  if [ -z "$h" ] && [ -r /etc/hostname ]; then
-    h="$(tr -d '[:space:]' < /etc/hostname)"
+  if [ -z "$h" ] && command -v python3 >/dev/null; then
+    local py_h=""
+    if py_h="$(python3 -c "import socket; print(socket.gethostname())" 2>&1)"; then
+      h="$py_h"
+    fi
   fi
   if [ -z "$h" ] && command -v hostname >/dev/null; then
     h="$(hostname)"

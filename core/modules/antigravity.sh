@@ -390,6 +390,54 @@ antigravity_onboard() {
   fi
 }
 
+# Query Hub node telemetry or heartbeat cache
+antigravity_get_hub_telemetry() {
+  local target_id="$1"
+  local target_host="$2"
+  local user_home
+  user_home="$(knot_detect_user_home)"
+  local hub_db="$user_home/.config/knot/hub.db"
+
+  if [ -r "$hub_db" ] && command -v sqlite3 >/dev/null; then
+    local db_out=""
+    if db_out="$(sqlite3 -separator '|' "$hub_db" "SELECT agy_version, agy_auth, status, last_heartbeat FROM nodes WHERE id = '$target_id' OR hostname = '$target_host' ORDER BY last_heartbeat DESC LIMIT 1;" 2>&1)"; then
+      if [ -n "$db_out" ]; then
+        echo "$db_out"
+        return 0
+      fi
+    fi
+  fi
+
+  local hub_url="${KNOT_HUB_URL:-https://127.0.0.1:4242}"
+  local rest_out=""
+  if rest_out="$(python3 -c "
+import urllib.request, ssl, json, sys
+try:
+    ctx = ssl._create_unverified_context()
+    req = urllib.request.Request('$hub_url/nodes', headers={'Accept': 'application/json'})
+    with urllib.request.urlopen(req, timeout=1.5, context=ctx) as r:
+        nodes = json.loads(r.read().decode('utf-8'))
+        for n in nodes:
+            if n.get('id') == '$target_id' or n.get('hostname') == '$target_host':
+                v = n.get('agy_version') or ''
+                a = n.get('agy_auth') or ''
+                s = n.get('status') or ''
+                h = n.get('last_heartbeat') or 0
+                print(f'{v}|{a}|{s}|{h}')
+                sys.exit(0)
+except Exception as e:
+    sys.stderr.write(f'Notice: Hub probe failed: {e}\n')
+sys.exit(1)
+" 2>&1)"; then
+    if [ -n "$rest_out" ]; then
+      echo "$rest_out"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
 # Show swarm status across all registered mesh nodes
 antigravity_swarm_status() {
   echo -e "${C_BOLD}--- Knot Antigravity Swarm Status ---${C_RESET}"
@@ -424,71 +472,112 @@ antigravity_swarm_status() {
       if [[ " ${seen_nodes[*]:-} " =~ " ${id} " ]]; then continue; fi
       seen_nodes+=("$id")
 
-    local ver="missing" auth_status="UNKNOWN" latency="-"
-    local test_out="" rc=0
+      local ver="missing" auth_status="UNKNOWN" latency="-"
+      local test_out="" rc=0
 
-    if [ "$host" = "$my_host" ]; then
-      if antigravity_detect_cli; then
-        local v_out=""
-        if v_out="$(antigravity_get_version 2>&1)"; then
-          ver="$v_out"
+      # 1. Fetch Hub telemetry / heartbeat cache upfront
+      local telem_ver="" telem_auth="" telem_status="" telem_ts=0
+      local telem=""
+      if telem="$(antigravity_get_hub_telemetry "$id" "$host" 2>&1)"; then
+        if [ -n "$telem" ]; then
+          IFS='|' read -r telem_ver telem_auth telem_status telem_ts <<< "$telem"
         fi
-        if ! antigravity_is_kwallet_unlocked && ! antigravity_has_oauth_token_file; then
-          auth_status="${C_YELLOW}KWALLET LOCKED${C_RESET}"
-        else
-          test_out="$(antigravity_exec_node "local" "ping" 2>&1)" || rc=$?
-          if [ $rc -eq 0 ] && echo "$test_out" | grep -q '"status":[[:space:]]*"SUCCESS"'; then
-            auth_status="${C_GREEN}AUTHENTICATED${C_RESET}"
-            local dur
-            dur="$(echo "$test_out" | grep -o '"duration_seconds":[0-9.]*' | cut -d: -f2 | awk '{printf "%.2fs", $1}')"
-            if [ -n "$dur" ]; then latency="$dur"; fi
-          elif echo "$test_out" | grep -qiE 'RESOURCE_EXHAUSTED|"error_code":[[:space:]]*429|code[[:space:]]*429|quota[[:space:]]*exhausted|rate[[:space:]]*limit'; then
-            auth_status="${C_YELLOW}QUOTA EXHAUSTED (429)${C_RESET}"
-          elif [ $rc -eq 124 ]; then
-            auth_status="${C_YELLOW}PROBE TIMED OUT${C_RESET}"
-          else
-            auth_status="${C_RED}NOT LOGGED IN${C_RESET}"
-          fi
-        fi
-      else
-        ver="${C_RED}NOT INSTALLED${C_RESET}"
-        auth_status="${C_RED}UNAVAILABLE${C_RESET}"
       fi
-    else
-      # Query remote node via knot exec with explicit 15s timeout
-      local remote_probe=""
-      remote_probe="$(timeout 15 knot exec "$id" "systemd-run --user --pipe --setenv=\"PATH=\$HOME/.local/bin:\$HOME/.local/share/knot/shims:/usr/local/bin:/usr/bin:/bin\" --setenv=BROWSER=/bin/true --setenv=DE=generic --setenv=XDG_CURRENT_DESKTOP=\"\" --setenv=KDE_FULL_SESSION=\"\" --setenv=KDE_SESSION_VERSION=\"\" agy -p 'ping' --output-format json" 2>&1)" || rc=$?
-      if [ $rc -eq 0 ] && echo "$remote_probe" | grep -q '"status":[[:space:]]*"SUCCESS"'; then
-        auth_status="${C_GREEN}AUTHENTICATED${C_RESET}"
-        local dur
-        dur="$(echo "$remote_probe" | grep -o '"duration_seconds":[0-9.]*' | cut -d: -f2 | awk '{printf "%.2fs", $1}')"
-        if [ -n "$dur" ]; then latency="$dur"; fi
 
-        local remote_ver="" rv_rc=0
-        remote_ver="$(timeout 15 knot exec "$id" "PATH=\"\$HOME/.local/bin:\$PATH\" agy --version" 2>&1 | head -n1 | awk '{print $NF}')" || rv_rc=$?
-        if [ $rv_rc -eq 0 ] && [ -n "$remote_ver" ]; then
-          ver="$remote_ver"
+      # 2. Upfront CLI Version detection
+      if [ "$host" = "$my_host" ]; then
+        if antigravity_detect_cli; then
+          local v_out=""
+          if v_out="$(antigravity_get_version 2>&1)"; then
+            ver="$v_out"
+          fi
         else
-          ver="installed"
-        fi
-      else
-        if [ $rc -eq 124 ]; then
-          auth_status="${C_YELLOW}KEYRING LOCKED / TIMED OUT${C_RESET}"
-        elif echo "$remote_probe" | grep -qiE 'RESOURCE_EXHAUSTED|"error_code":[[:space:]]*429|code[[:space:]]*429|quota[[:space:]]*exhausted|rate[[:space:]]*limit'; then
-          auth_status="${C_YELLOW}QUOTA EXHAUSTED (429)${C_RESET}"
-        elif echo "$remote_probe" | grep -q "command not found"; then
           ver="${C_RED}NOT INSTALLED${C_RESET}"
           auth_status="${C_RED}UNAVAILABLE${C_RESET}"
-        elif echo "$remote_probe" | grep -qi "authentication required"; then
-          ver="installed"
-          auth_status="${C_YELLOW}NOT LOGGED IN${C_RESET}"
+        fi
+      else
+        local remote_ver="" rv_rc=0
+        if remote_ver="$(timeout 5 "$KNOT_ROOT/bin/knot" exec "$id" "export PATH=\"\$HOME/.local/bin:\$HOME/.local/share/knot/shims:/usr/local/bin:/usr/bin:/bin:\$PATH\"; agy --version" 2>&1)"; then
+          local parsed_ver
+          parsed_ver="$(echo "$remote_ver" | tr -d '\r' | tail -n1 | awk '{print $NF}')"
+          if [ -n "$parsed_ver" ] && [[ "$parsed_ver" =~ ^[0-9] ]]; then
+            ver="$parsed_ver"
+          elif [ -n "$parsed_ver" ]; then
+            ver="$parsed_ver"
+          elif [ -n "$telem_ver" ] && [ "$telem_ver" != "unknown" ]; then
+            ver="$telem_ver"
+          else
+            ver="installed"
+          fi
         else
-          auth_status="${C_RED}UNREACHABLE${C_RESET}"
+          rv_rc=$?
+          if echo "$remote_ver" | grep -qi "command not found"; then
+            ver="${C_RED}NOT INSTALLED${C_RESET}"
+            auth_status="${C_RED}UNAVAILABLE${C_RESET}"
+          elif [ -n "$telem_ver" ] && [ "$telem_ver" != "unknown" ] && [ "$telem_ver" != "not_found" ]; then
+            ver="$telem_ver"
+          elif [ $rv_rc -eq 124 ]; then
+            ver="timeout"
+            auth_status="${C_YELLOW}SSH TIMED OUT${C_RESET}"
+          else
+            ver="unreachable"
+            auth_status="${C_RED}UNREACHABLE${C_RESET}"
+          fi
         fi
       fi
-    fi
 
-    printf "%-12s %-16s %-12b %-25b %-12s\n" "$id" "$host" "$ver" "$auth_status" "$latency"
+      # 3. Auth status evaluation
+      if [ "$auth_status" = "UNKNOWN" ]; then
+        if [ "$host" = "$my_host" ]; then
+          if ! antigravity_is_kwallet_unlocked && ! antigravity_has_oauth_token_file; then
+            auth_status="${C_YELLOW}KWALLET LOCKED${C_RESET}"
+          elif [ "$telem_auth" = "AUTHENTICATED" ]; then
+            auth_status="${C_GREEN}AUTHENTICATED${C_RESET}"
+            latency="<10ms (hub)"
+          else
+            test_out="$(timeout 15 antigravity_exec_node "local" "ping" 2>&1)" || rc=$?
+            if [ $rc -eq 0 ] && echo "$test_out" | grep -q '"status":[[:space:]]*"SUCCESS"'; then
+              auth_status="${C_GREEN}AUTHENTICATED${C_RESET}"
+              local dur
+              dur="$(echo "$test_out" | grep -o '"duration_seconds":[0-9.]*' | cut -d: -f2 | awk '{printf "%.2fs", $1}')"
+              if [ -n "$dur" ]; then latency="$dur"; fi
+            elif echo "$test_out" | grep -qiE 'RESOURCE_EXHAUSTED|"error_code":[[:space:]]*429|code[[:space:]]*429|quota[[:space:]]*exhausted|rate[[:space:]]*limit'; then
+              auth_status="${C_YELLOW}QUOTA EXHAUSTED (429)${C_RESET}"
+            elif [ $rc -eq 124 ]; then
+              auth_status="${C_YELLOW}PROBE TIMED OUT${C_RESET}"
+            else
+              auth_status="${C_RED}NOT LOGGED IN${C_RESET}"
+            fi
+          fi
+        else
+          # Remote node
+          if [ "$telem_auth" = "AUTHENTICATED" ]; then
+            auth_status="${C_GREEN}AUTHENTICATED${C_RESET}"
+            latency="<10ms (hub)"
+          else
+            local remote_probe="" rp_rc=0
+            remote_probe="$(timeout 20 "$KNOT_ROOT/bin/knot" exec "$id" "systemd-run --user --pipe --setenv=\"PATH=\$HOME/.local/bin:\$HOME/.local/share/knot/shims:/usr/local/bin:/usr/bin:/bin\" --setenv=BROWSER=/bin/true --setenv=DE=generic --setenv=XDG_CURRENT_DESKTOP=\"\" --setenv=KDE_FULL_SESSION=\"\" --setenv=KDE_SESSION_VERSION=\"\" agy -p 'ping' --output-format json" 2>&1)" || rp_rc=$?
+            if [ $rp_rc -eq 0 ] && echo "$remote_probe" | grep -q '"status":[[:space:]]*"SUCCESS"'; then
+              auth_status="${C_GREEN}AUTHENTICATED${C_RESET}"
+              local dur
+              dur="$(echo "$remote_probe" | grep -o '"duration_seconds":[0-9.]*' | cut -d: -f2 | awk '{printf "%.2fs", $1}')"
+              if [ -n "$dur" ]; then latency="$dur"; fi
+            elif echo "$remote_probe" | grep -qiE 'kwallet|keyring|secret service|org.freedesktop.secrets|locked'; then
+              auth_status="${C_YELLOW}KEYRING LOCKED${C_RESET}"
+            elif [ $rp_rc -eq 124 ]; then
+              auth_status="${C_YELLOW}PROBE TIMED OUT${C_RESET}"
+            elif echo "$remote_probe" | grep -qiE 'RESOURCE_EXHAUSTED|"error_code":[[:space:]]*429|code[[:space:]]*429|quota[[:space:]]*exhausted|rate[[:space:]]*limit'; then
+              auth_status="${C_YELLOW}QUOTA EXHAUSTED (429)${C_RESET}"
+            elif echo "$remote_probe" | grep -qiE 'authentication required|not logged in|unauthenticated'; then
+              auth_status="${C_YELLOW}NOT LOGGED IN${C_RESET}"
+            else
+              auth_status="${C_RED}AUTH FAILED${C_RESET}"
+            fi
+          fi
+        fi
+      fi
+
+      printf "%-12s %-16s %-12b %-25b %-12s\n" "$id" "$host" "$ver" "$auth_status" "$latency"
     done
   done
 }

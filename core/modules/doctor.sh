@@ -497,17 +497,43 @@ doctor_check_local() {
 # Diagnostic Check: Mesh Orchestrator
 # ------------------------------------------------------------------------------
 doctor_diagnose() {
-  local target="${1:-all}"
+  local target=""
   local repair_requested=0
 
-  if [ "${2:-}" = "--repair" ] || [ "${1:-}" = "--repair" ]; then
-    repair_requested=1
-    if [ "$target" = "--repair" ]; then target="all"; fi
-  fi
+  for arg in "$@"; do
+    case "$arg" in
+      -h|--help|help)
+        echo "Usage: knot doctor [node|--all|local] [--repair]"
+        echo ""
+        echo "Diagnose mesh, KVM, screen, and portal health across the Knot mesh."
+        echo ""
+        echo "Options:"
+        echo "  local          Run diagnostics on the local node only"
+        echo "  --all, all     Run diagnostics across all nodes in the active swarm (default)"
+        echo "  <node>         Run diagnostics on a specific node by name or ID"
+        echo "  --repair       Automatically initiate repair if any issues are detected"
+        echo "  -h, --help     Show this help message"
+        return 0
+        ;;
+      --repair)
+        repair_requested=1
+        ;;
+      *)
+        if [ -z "$target" ]; then target="$arg"; fi
+        ;;
+    esac
+  done
+  [ -z "$target" ] && target="all"
 
   if [ "$target" = "local" ]; then
-    doctor_check_local
-    return $?
+    local rc=0
+    doctor_check_local || rc=$?
+    if [ $rc -ne 0 ] && [ $repair_requested -eq 1 ]; then
+      echo -e "${C_CYAN}Auto-repair flag set. Initiating automated repair on local node...${C_RESET}\n"
+      doctor_repair "local"
+      return $?
+    fi
+    return $rc
   fi
 
   echo -e "${C_BOLD}=========================================${C_RESET}"
@@ -880,8 +906,29 @@ doctor_repair_local() {
 # Auto-Repair Engine: Mesh Orchestrator
 # ------------------------------------------------------------------------------
 doctor_repair() {
-  local target="${1:-all}"
-  if [ "$target" = "--repair" ]; then target="all"; fi
+  local target=""
+  for arg in "$@"; do
+    case "$arg" in
+      -h|--help|help)
+        echo "Usage: knot repair [node|--all|local]"
+        echo ""
+        echo "Auto-repair KVM dropout, portal connections, and mesh state."
+        echo ""
+        echo "Options:"
+        echo "  local          Repair Knot components locally on this node"
+        echo "  --all, all     Repair components across all nodes in the active swarm (default)"
+        echo "  <node>         Repair a specific target node by name or ID"
+        echo "  -h, --help     Show this help message"
+        return 0
+        ;;
+      --repair)
+        ;;
+      *)
+        if [ -z "$target" ]; then target="$arg"; fi
+        ;;
+    esac
+  done
+  [ -z "$target" ] && target="all"
 
   echo -e "${C_BOLD}=========================================${C_RESET}"
   echo -e "${C_BOLD}          Knot Mesh Auto-Repair          ${C_RESET}"

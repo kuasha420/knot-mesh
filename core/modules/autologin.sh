@@ -86,12 +86,75 @@ autologin_detect_dm() {
   local dm_name="unknown"
   if [ -L /etc/systemd/system/display-manager.service ]; then
     dm_name="$(basename "$(readlink -f /etc/systemd/system/display-manager.service)" .service)"
-  elif systemctl is-enabled plasmalogin.service >/dev/null; then
+  elif command -v systemctl >/dev/null && systemctl is-enabled plasmalogin.service >/dev/null; then
     dm_name="plasmalogin"
-  elif systemctl is-enabled sddm.service >/dev/null; then
+  elif command -v systemctl >/dev/null && systemctl is-enabled sddm.service >/dev/null; then
     dm_name="sddm"
   fi
   echo "$dm_name"
+}
+
+autologin_ensure_dm() {
+  if ! command -v systemctl >/dev/null; then
+    knot_log_info "systemctl not available; skipping display manager configuration."
+    return 0
+  fi
+
+  local current_dm
+  current_dm="$(autologin_detect_dm)"
+  if [ "$current_dm" = "plasmalogin" ]; then
+    knot_log_ok "Display manager is already plasmalogin.service (enabled)."
+    return 0
+  fi
+
+  # Check if plasmalogin unit file exists
+  local pl_avail=0
+  local unit_list=""
+  if unit_list="$(systemctl list-unit-files plasmalogin.service 2>&1)"; then
+    if echo "$unit_list" | grep -q "plasmalogin.service"; then
+      pl_avail=1
+    fi
+  fi
+
+  if [ $pl_avail -eq 1 ]; then
+    local has_root=0
+    if [ "$(id -u)" -eq 0 ]; then
+      has_root=1
+    elif command -v sudo >/dev/null && sudo -n true 2>&1; then
+      has_root=1
+    fi
+
+    if [ $has_root -eq 1 ]; then
+      knot_log_info "Migrating display manager to plasmalogin.service..."
+      local sudo_cmd=()
+      if [ "$(id -u)" -ne 0 ]; then
+        sudo_cmd=(sudo -n)
+      fi
+
+      if [ "$current_dm" != "unknown" ]; then
+        knot_log_info "Disabling current display manager: ${current_dm}.service"
+        local dis_err=""
+        if ! dis_err="$("${sudo_cmd[@]}" systemctl disable "${current_dm}.service" 2>&1)"; then
+          knot_log_warn "Notice: Could not disable ${current_dm}.service: $dis_err"
+        fi
+      fi
+      knot_log_info "Enabling plasmalogin.service..."
+      local en_err=""
+      if ! en_err="$("${sudo_cmd[@]}" systemctl enable plasmalogin.service 2>&1)"; then
+        knot_log_err "Failed to enable plasmalogin.service: $en_err"
+        return 1
+      fi
+      knot_log_ok "plasmalogin.service successfully enabled."
+      return 0
+    else
+      knot_log_warn "Display manager is '$current_dm'. plasmalogin.service is available but root privileges are not non-interactively available."
+      knot_log_info "Run 'knot autologin migrate-dm' with sudo privileges to switch display manager."
+      return 0
+    fi
+  else
+    knot_log_info "Display manager is '$current_dm' (plasmalogin.service not present on system)."
+    return 0
+  fi
 }
 
 autologin_status() {
@@ -547,13 +610,15 @@ autologin_reconcile_all() {
 # Configure KWallet to use a blank password for unattended autologin without GUI popups
 autologin_fix_kwallet() {
   local target="${1:-local}"
-  if [ "$target" != "local" ] && [ "$target" != "$(hostname)" ]; then
+  local my_host
+  my_host="$(knot_detect_hostname)"
+  if [ "$target" != "local" ] && [ "$target" != "$my_host" ]; then
     knot_log_info "Dispatching KWallet configuration to '$target'..."
     "$KNOT_ROOT/bin/knot" exec "$target" "knot autologin fix-kwallet local"
     return $?
   fi
 
-  knot_log_info "Opening KDE Wallet Password Manager on $(hostname)..."
+  knot_log_info "Opening KDE Wallet Password Manager on $my_host..."
   knot_log_info "To eliminate all login prompts under autologin:"
   knot_log_info "  1. In the opened dialog/KWalletManager, select 'Change Password...'"
   knot_log_info "  2. Enter your current password."
