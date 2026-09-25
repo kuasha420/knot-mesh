@@ -218,6 +218,24 @@ antigravity_is_kwallet_unlocked() {
   return 0
 }
 
+# Check if an OAuth token file exists on disk with a valid token payload
+antigravity_has_oauth_token_file() {
+  local token_file="$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
+  local fallback_token="$HOME/.gemini/jetski-standalone-oauth-token"
+  local jq_out=""
+  if [ -s "$token_file" ]; then
+    if jq_out="$(jq -e '.token.access_token or .token.refresh_token' "$token_file" 2>&1)"; then
+      return 0
+    fi
+  fi
+  if [ -s "$fallback_token" ]; then
+    if jq_out="$(jq -e '.token.access_token or .token.refresh_token' "$fallback_token" 2>&1)"; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
 # Fast verification of token/auth state on local node
 antigravity_check_auth_local() {
   local agy_path
@@ -233,8 +251,7 @@ antigravity_check_auth_local() {
     fi
   fi
 
-  local token_file="$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
-  if [ -s "$token_file" ] && jq -e '.token.access_token or .token.refresh_token' "$token_file" >/dev/null; then
+  if antigravity_has_oauth_token_file; then
     return 0
   fi
 
@@ -411,7 +428,7 @@ antigravity_swarm_status() {
         if v_out="$(antigravity_get_version 2>&1)"; then
           ver="$v_out"
         fi
-        if ! antigravity_is_kwallet_unlocked; then
+        if ! antigravity_is_kwallet_unlocked && ! antigravity_has_oauth_token_file; then
           auth_status="${C_YELLOW}KWALLET LOCKED${C_RESET}"
         else
           test_out="$(antigravity_exec_node "local" "ping" 2>&1)" || rc=$?

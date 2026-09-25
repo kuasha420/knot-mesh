@@ -375,6 +375,28 @@ def sync_oauth_token_file() -> dict | None:
     return None
 
 
+def has_oauth_token_file() -> bool:
+    """
+    Checks if an OAuth token file exists on disk with a valid token payload.
+    Allows headless operations on autologin nodes even if KWallet is locked.
+    """
+    token_candidates = [
+        os.path.expanduser("~/.gemini/antigravity-cli/antigravity-oauth-token"),
+        os.path.expanduser("~/.gemini/jetski-standalone-oauth-token"),
+    ]
+    for tf in token_candidates:
+        if os.path.exists(tf) and os.path.getsize(tf) > 50:
+            try:
+                with open(tf, "r") as f:
+                    d = json.load(f)
+                    tok = d.get("token", {}) if isinstance(d, dict) else {}
+                    if tok.get("access_token") or tok.get("refresh_token"):
+                        return True
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
+    return False
+
+
 def fetch_account_info() -> dict:
     """
     Fetches Google account identity (email, name, picture) and subscription tier.
@@ -496,8 +518,8 @@ def fetch_model_quota() -> dict | None:
     if not is_online():
         return None
 
-    if not is_kwallet_unlocked():
-        print("[knot-agent] KWallet is locked on autologin node; skipping headless quota probe")
+    if not is_kwallet_unlocked() and not has_oauth_token_file():
+        print("[knot-agent] KWallet is locked on autologin node and no token file found; skipping headless quota probe")
         return None
 
     agy_bin = find_agy_binary()
@@ -694,8 +716,8 @@ class AgentWorker:
         with self._quota_lock:
             if self.agy_auth != "AUTHENTICATED":
                 return
-            if not is_kwallet_unlocked():
-                print("[knot-agent] KWallet is locked on autologin node; skipping headless quota probe")
+            if not is_kwallet_unlocked() and not has_oauth_token_file():
+                print("[knot-agent] KWallet is locked on autologin node and no token file found; skipping headless quota probe")
                 self.last_quota_fetch = time.time()
                 return
             self.last_quota_fetch = time.time()
@@ -919,8 +941,8 @@ class AgentWorker:
         if not is_online():
             return "ERROR", "Network or DNS offline on this node. Task deferred.", "", 0.0, 0
 
-        if not is_kwallet_unlocked():
-            print("[knot-agent] KWallet is locked on autologin node; skipping headless agy execution")
+        if not is_kwallet_unlocked() and not has_oauth_token_file():
+            print("[knot-agent] KWallet is locked on autologin node and no token file found; skipping headless agy execution")
             return "ERROR", "KWallet is locked on autologin node. Please unlock KWallet to execute tasks.", "", 0.0, 0
 
         knot_dir = (
@@ -1169,7 +1191,7 @@ class AgentWorker:
             try:
                 url = f"{self.hub.hub_url}/chat/messages?conv_id=all&limit=20"
                 req = urllib.request.Request(url, headers={"Accept": "application/json"})
-                with urllib.request.urlopen(req, timeout=5.0) as resp:
+                with urllib.request.urlopen(req, timeout=5.0, context=self.hub.ssl_ctx) as resp:
                     messages = json.loads(resp.read().decode("utf-8"))
                     for m in messages:
                         m_ts = m.get("created_at", 0)

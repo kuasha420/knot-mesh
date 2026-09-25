@@ -2385,12 +2385,36 @@ class Database:
         cap_json = json.dumps(capabilities)
         conn = self.get_connection()
 
-        q_5h_gem = quota.get("gemini_5h_fraction") if quota else None
-        q_wk_gem = quota.get("gemini_weekly_fraction") if quota else None
-        q_5h_3p = quota.get("third_party_5h_fraction") if quota else None
-        q_wk_3p = quota.get("third_party_weekly_fraction") if quota else None
+        has_quota_metrics = bool(quota and any(k in quota for k in (
+            "gemini_5h_fraction", "gemini_weekly_fraction",
+            "third_party_5h_fraction", "third_party_weekly_fraction"
+        )))
+        q_5h_gem = quota.get("gemini_5h_fraction") if (quota and has_quota_metrics) else None
+        q_wk_gem = quota.get("gemini_weekly_fraction") if (quota and has_quota_metrics) else None
+        q_5h_3p = quota.get("third_party_5h_fraction") if (quota and has_quota_metrics) else None
+        q_wk_3p = quota.get("third_party_weekly_fraction") if (quota and has_quota_metrics) else None
+        q_ts = now if has_quota_metrics else None
+
+        if quota:
+            # Preserve existing reset timestamps and fractions when receiving account-only heartbeats
+            cur = conn.cursor()
+            cur.execute("SELECT quota_data, quota_updated_at FROM nodes WHERE id = ?", (node_id,))
+            row = cur.fetchone()
+            if row and row[0]:
+                try:
+                    existing_qd = json.loads(row[0])
+                    if isinstance(existing_qd, dict):
+                        # Merge reset timestamps if missing in incoming quota
+                        for rk in ["gemini_5h_reset", "gemini_weekly_reset", "third_party_5h_reset", "third_party_weekly_reset"]:
+                            if rk in existing_qd and (rk not in quota or not quota[rk]):
+                                quota[rk] = existing_qd[rk]
+                        for fk in ["gemini_5h_fraction", "gemini_weekly_fraction", "third_party_5h_fraction", "third_party_weekly_fraction"]:
+                            if fk in existing_qd and (fk not in quota or quota[fk] is None):
+                                quota[fk] = existing_qd[fk]
+                except Exception as _qe:
+                    logger.debug("Failed merging existing quota_data: %s", _qe)
+
         q_data = json.dumps(quota) if quota else None
-        q_ts = now if quota else None
         p_data = json.dumps(power) if power else None
 
         with conn:
