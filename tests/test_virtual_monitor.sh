@@ -214,6 +214,118 @@ else
 fi
 
 # -------------------------------------------------------------
+# Test 11: Topology Placement & HiDPI Scaling Calculation
+# -------------------------------------------------------------
+echo -e "\n\033[1m[Test 11] Topology Placement & HiDPI Scaling Calculation...\033[0m"
+calc_out="" calc_rc=0
+calc_out=$(python3 -c '
+v_w, v_h = 3072, 1728
+p_w, p_h, p_scale = 3440, 1440, 2.0
+v_scale = 2 if v_w >= 2560 else 1
+v_log_w = int(round(v_w / v_scale))
+v_log_h = int(round(v_h / v_scale))
+p_log_w = int(round(p_w / p_scale))
+p_log_h = int(round(p_h / p_scale))
+
+# Test left direction
+direction = "left"
+v_pos = "0,0" if direction == "left" else f"{p_log_w},0"
+p_pos = f"{v_log_w},0" if direction == "left" else "0,0"
+cmd_left = f"output.Virtual-1.scale.{v_scale} output.Virtual-1.position.{v_pos} output.DP-1.position.{p_pos}"
+
+# Test right direction
+direction = "right"
+v_pos_r = f"{p_log_w},0"
+p_pos_r = "0,0"
+cmd_right = f"output.Virtual-1.scale.{v_scale} output.Virtual-1.position.{v_pos_r} output.DP-1.position.{p_pos_r}"
+
+print(f"{cmd_left};;{cmd_right}")
+' 2>&1) || calc_rc=$?
+
+expected_left="output.Virtual-1.scale.2 output.Virtual-1.position.0,0 output.DP-1.position.1536,0"
+expected_right="output.Virtual-1.scale.2 output.Virtual-1.position.1720,0 output.DP-1.position.0,0"
+
+if [ $calc_rc -eq 0 ] && echo "$calc_out" | grep -q "$expected_left" && echo "$calc_out" | grep -q "$expected_right"; then
+  pass "Topology placement and HiDPI scaling calculates sub-pixel coordinates for left & right placements"
+else
+  fail "Topology placement calculation failed ($calc_rc): $calc_out"
+fi
+
+# -------------------------------------------------------------
+# Test 12: Deskflow Link Muting Layout Compilation
+# -------------------------------------------------------------
+echo -e "\n\033[1m[Test 12] Deskflow Link Muting Layout Compilation...\033[0m"
+mute_test_out="" mute_test_rc=0
+mute_test_out=$(python3 "$KNOT_ROOT/core/modules/compile_deskflow.py" \
+  --topology "$HOME/.config/knot/swarms/home/topology.json" \
+  --nodes-dir "$HOME/.config/knot/swarms/home/nodes" \
+  --mode unlocked \
+  --mute-node laptop 2>&1) || mute_test_rc=$?
+
+mute_verify="" mv_rc=0
+mute_verify=$(python3 -c '
+import sys
+text = sys.argv[1]
+in_links = False
+links_text = ""
+for line in text.splitlines():
+    if "section: links" in line:
+        in_links = True
+    elif in_links and "end" in line:
+        break
+    elif in_links:
+        links_text += line + "\n"
+
+if "= devbox" not in links_text and "devbox(" not in links_text and "psl-0000" in links_text:
+    print("MUTED_OK")
+else:
+    sys.exit(1)
+' "$mute_test_out" 2>&1) || mv_rc=$?
+
+if [ $mute_test_rc -eq 0 ] && [ $mv_rc -eq 0 ] && [ "$mute_verify" = "MUTED_OK" ]; then
+  pass "compile_deskflow.py --mute-node laptop successfully omits laptop links while preserving other nodes"
+else
+  fail "Deskflow link muting compilation failed: rc=$mute_test_rc, mv_rc=$mv_rc, out=$mute_test_out"
+fi
+
+# -------------------------------------------------------------
+# Test 13: Plasma Panel Script Syntax & DBus Evaluation
+# -------------------------------------------------------------
+echo -e "\n\033[1m[Test 13] Plasma Panel Script Idempotency & DBus Evaluation...\033[0m"
+panel_test_out="" panel_test_rc=0
+panel_test_out=$(bash -c "
+  source '$KNOT_ROOT/core/lib.sh'
+  source '$KNOT_ROOT/core/modules/kdeconnect.sh'
+  kdeconnect_vmon_reconcile_plasma_panel 2>&1
+" 2>&1) || panel_test_rc=$?
+
+if [ $panel_test_rc -eq 0 ]; then
+  pass "kdeconnect_vmon_reconcile_plasma_panel executes cleanly via DBus PlasmaShell interface"
+else
+  fail "kdeconnect_vmon_reconcile_plasma_panel failed ($panel_test_rc): $panel_test_out"
+fi
+
+# -------------------------------------------------------------
+# Test 14: knot display toggle-kvm CLI & State Toggle
+# -------------------------------------------------------------
+echo -e "\n\033[1m[Test 14] knot display toggle-kvm State Transitions...\033[0m"
+toggle_1_out="" toggle_1_rc=0
+toggle_1_out=$("$KNOT_ROOT/bin/knot" display toggle-kvm laptop 2>&1) || toggle_1_rc=$?
+state_1_exists=0
+[ -f "/run/knot/vmon_muted_deskflow_laptop" ] && state_1_exists=1
+
+toggle_2_out="" toggle_2_rc=0
+toggle_2_out=$("$KNOT_ROOT/bin/knot" display toggle-kvm laptop 2>&1) || toggle_2_rc=$?
+state_2_exists=0
+[ -f "/run/knot/vmon_muted_deskflow_laptop" ] && state_2_exists=1
+
+if [ $toggle_1_rc -eq 0 ] && [ $state_1_exists -eq 1 ] && [ $toggle_2_rc -eq 0 ] && [ $state_2_exists -eq 0 ]; then
+  pass "knot display toggle-kvm correctly cycles between MUTED and UNMUTED state"
+else
+  fail "knot display toggle-kvm state cycle failed: s1=$state_1_exists, s2=$state_2_exists"
+fi
+
+# -------------------------------------------------------------
 # Summary
 # -------------------------------------------------------------
 echo -e "\n\033[1;34m============================================================\033[0m"

@@ -37,17 +37,78 @@ deskflow_compile_server_config() {
     nodes_dir="$KNOT_ROOT/templates/nodes"
   fi
 
+  local mute_args=()
+  for mf in "/run/knot/vmon_muted_deskflow_"* "$home/.local/state/knot/vmon_muted_deskflow_"*; do
+    [ -e "$mf" ] || continue
+    local m_node
+    m_node="$(basename "$mf" | sed 's/^vmon_muted_deskflow_//')"
+    if [ -n "$m_node" ]; then
+      mute_args+=(--mute-node "$m_node")
+    fi
+  done
+  if [ -n "${2:-}" ]; then
+    mute_args+=(--mute-node "$2")
+  fi
+
   if [ -n "$topo_file" ] && [ -n "$nodes_dir" ] && [ -x "$KNOT_ROOT/core/modules/compile_deskflow.py" ]; then
     python3 "$KNOT_ROOT/core/modules/compile_deskflow.py" \
       --topology "$topo_file" \
       --nodes-dir "$nodes_dir" \
       --mode "$mode" \
+      "${mute_args[@]}" \
       --output "$cfg_dir/deskflow-server.conf"
     return 0
   fi
 
   knot_log_err "Could not find topology.json or nodes directory to compile Deskflow layout"
   return 1
+}
+
+deskflow_mute_node() {
+  local node_id="${1:-}"
+  [ -z "$node_id" ] && return 0
+  mkdir -p /run/knot
+  touch "/run/knot/vmon_muted_deskflow_${node_id}"
+  deskflow_compile_server_config "$(deskflow_get_lock)"
+  if command -v systemctl >/dev/null; then
+    if systemctl --user is-active --quiet knot-deskflow.service; then
+      systemctl --user restart knot-deskflow
+    fi
+  fi
+  return 0
+}
+
+deskflow_unmute_node() {
+  local node_id="${1:-}"
+  [ -z "$node_id" ] && return 0
+  local home
+  home="$(knot_detect_user_home)"
+  rm -f "/run/knot/vmon_muted_deskflow_${node_id}" "$home/.local/state/knot/vmon_muted_deskflow_${node_id}"
+  deskflow_compile_server_config "$(deskflow_get_lock)"
+  if command -v systemctl >/dev/null; then
+    if systemctl --user is-active --quiet knot-deskflow.service; then
+      systemctl --user restart knot-deskflow
+    fi
+  fi
+  return 0
+}
+
+deskflow_toggle_mute_node() {
+  local node_id="${1:-}"
+  if [ -z "$node_id" ]; then
+    knot_log_err "Usage: knot display toggle-kvm <node_id>"
+    return 1
+  fi
+  local home
+  home="$(knot_detect_user_home)"
+  if [ -f "/run/knot/vmon_muted_deskflow_${node_id}" ] || [ -f "$home/.local/state/knot/vmon_muted_deskflow_${node_id}" ]; then
+    deskflow_unmute_node "$node_id"
+    knot_log_ok "Deskflow KVM crossover to '$node_id' UNMUTED (cursor can now cross into strand local session)"
+  else
+    deskflow_mute_node "$node_id"
+    knot_log_ok "Deskflow KVM crossover to '$node_id' MUTED (cursor handled natively by KWin virtual display)"
+  fi
+  return 0
 }
 
 deskflow_write_server_conf() {

@@ -114,17 +114,17 @@ firewall_verify_vmon() {
   engines="$(knot_detect_firewalls)"
   local ok=0
 
-  knot_log_info "Verifying Virtual Monitor firewall rules (ports 5900-5910 TCP) for subnet $subnet..."
+  knot_log_info "Verifying Virtual Monitor firewall rules (ports 5900-5950 TCP) for subnet $subnet..."
 
   if [[ "$engines" =~ "ufw" ]]; then
     local ufw_out="" ufw_rc=0
     ufw_out="$(sudo ufw status verbose 2>&1)" || ufw_rc=$?
     if [ $ufw_rc -eq 0 ]; then
-      if echo "$ufw_out" | grep -q "5900:5910/tcp"; then
-        knot_log_ok "UFW: Virtual Monitor ports 5900:5910/tcp are allowed."
+      if echo "$ufw_out" | grep -q "5900:5950/tcp"; then
+        knot_log_ok "UFW: Virtual Monitor ports 5900:5950/tcp are allowed."
       else
         knot_log_warn "UFW: Missing Virtual Monitor rules for subnet $subnet; inserting..."
-        sudo ufw insert 8 allow from "$subnet" to any port 5900:5910 proto tcp comment 'knot-vmon'
+        sudo ufw insert 8 allow from "$subnet" to any port 5900:5950 proto tcp comment 'knot-vmon'
         sudo ufw reload >/dev/null
         knot_log_ok "UFW rules applied for Virtual Monitor."
       fi
@@ -136,12 +136,12 @@ firewall_verify_vmon() {
 
   if [[ "$engines" =~ "firewalld" ]]; then
     local fw_port_out="" fw_rc=0
-    fw_port_out="$(sudo firewall-cmd --zone=public --query-port=5900-5910/tcp 2>&1)" || fw_rc=$?
+    fw_port_out="$(sudo firewall-cmd --zone=public --query-port=5900-5950/tcp 2>&1)" || fw_rc=$?
     if [ $fw_rc -eq 0 ] && [ "$fw_port_out" = "yes" ]; then
-      knot_log_ok "firewalld: Virtual Monitor ports 5900-5910/tcp are active in public zone."
+      knot_log_ok "firewalld: Virtual Monitor ports 5900-5950/tcp are active in public zone."
     else
-      knot_log_warn "firewalld: Enabling Virtual Monitor ports 5900-5910/tcp..."
-      sudo firewall-cmd --permanent --zone=public --add-port=5900-5910/tcp >/dev/null
+      knot_log_warn "firewalld: Enabling Virtual Monitor ports 5900-5950/tcp..."
+      sudo firewall-cmd --permanent --zone=public --add-port=5900-5950/tcp >/dev/null
       sudo firewall-cmd --reload >/dev/null
       knot_log_ok "firewalld rules applied for Virtual Monitor."
     fi

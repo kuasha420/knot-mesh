@@ -307,5 +307,28 @@ class TestCompileDeskflow(unittest.TestCase):
         self.assertIn("down(50,100) = deck-eos(0,100)", conf)
         self.assertIn("up(0,100) = arch-desktop(50,100)", conf)
 
+    def test_mute_node(self):
+        topo = {
+            "anchor": "desktop",
+            "screens": ["desktop", "laptop", "steamdeck"],
+            "layout": {
+                "desktop": {
+                    "left": {"node": "laptop", "span": [25, 100], "target_span": [0, 85]},
+                    "down": {"node": "steamdeck", "span": [50, 100], "target_span": [0, 100]}
+                }
+            }
+        }
+        topo_path = self.tmp_path / "topology_mute.json"
+        with open(topo_path, "w") as f:
+            json.dump(topo, f, indent=2)
+
+        # Mute laptop
+        conf = compile_deskflow.compile_deskflow(str(topo_path), str(self.nodes_dir), mode="unlocked", mute_nodes=["laptop"])
+        self.assertNotIn("arch-laptop(0,85)", conf)
+        self.assertNotIn("arch-desktop(25,100)", conf)
+        # steamdeck must still be linked
+        self.assertIn("down(50,100) = deck-eos(0,100)", conf)
+        self.assertIn("up(0,100) = arch-desktop(50,100)", conf)
+
 if __name__ == "__main__":
     unittest.main()

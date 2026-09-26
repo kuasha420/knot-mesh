@@ -27,7 +27,7 @@ OPP_MAP = {
     "down": "up"
 }
 
-def compile_deskflow(topology_file: str, nodes_dir: str, mode: str = "unlocked") -> str:
+def compile_deskflow(topology_file: str, nodes_dir: str, mode: str = "unlocked", mute_nodes: List[str] = None) -> str:
     if not os.path.isfile(topology_file):
         raise FileNotFoundError(f"Topology file not found: {topology_file}")
 
@@ -192,10 +192,15 @@ def compile_deskflow(topology_file: str, nodes_dir: str, mode: str = "unlocked")
     lines.append("end\n")
 
     # 3. Section: links
+    mute_set = set(mute_nodes) if mute_nodes else set()
     lines.append("section: links")
     for hname in screen_hostnames:
         nid = host_to_id.get(hname, hname)
         lines.append(f"\t{hname}:")
+
+        # If this node is muted, omit all its outbound links
+        if nid in mute_set or hname in mute_set:
+            continue
 
         # If this is the anchor and mode is locked, omit outbound links to confine cursor
         is_anchor = (nid == anchor or hname == anchor or hname == id_to_host.get(anchor))
@@ -208,6 +213,9 @@ def compile_deskflow(topology_file: str, nodes_dir: str, mode: str = "unlocked")
                 target_node = spec["target"]
                 target_host = id_to_host.get(target_node, target_node)
                 if target_host not in screen_hostnames:
+                    continue
+                # If target is muted, omit link to it
+                if target_node in mute_set or target_host in mute_set:
                     continue
                 span = spec.get("span", [0, 100])
                 target_span = spec.get("target_span", [0, 100])
@@ -234,6 +242,7 @@ def main():
     parser.add_argument("--nodes-dir", required=True, help="Path to nodes manifests directory")
     parser.add_argument("--mode", choices=["unlocked", "locked"], default="unlocked", help="KVM cursor confinement mode")
     parser.add_argument("--locked", type=str, choices=["true", "false", "True", "False"], default=None, help="KVM cursor confinement locked boolean")
+    parser.add_argument("--mute-node", action="append", default=[], help="Node IDs or hostnames to mute/omit links for")
     parser.add_argument("--output", help="Output file path (default: stdout)")
 
     args = parser.parse_args()
@@ -243,7 +252,7 @@ def main():
         mode = "locked" if args.locked.lower() == "true" else "unlocked"
 
     try:
-        conf = compile_deskflow(args.topology, args.nodes_dir, mode=mode)
+        conf = compile_deskflow(args.topology, args.nodes_dir, mode=mode, mute_nodes=args.mute_node)
         if args.output:
             os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
             with open(args.output, "w") as f:

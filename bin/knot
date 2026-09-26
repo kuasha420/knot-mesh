@@ -901,8 +901,11 @@ cmd_display() {
     status)
       kdeconnect_vmon_status "$@"
       ;;
+    toggle-kvm|kvm-toggle|toggle)
+      deskflow_toggle_mute_node "$@"
+      ;;
     *)
-      echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]>"
+      echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|toggle-kvm [<node>]>"
       exit 1
       ;;
   esac
