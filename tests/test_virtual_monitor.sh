@@ -227,26 +227,36 @@ v_log_h = int(round(v_h / v_scale))
 p_log_w = int(round(p_w / p_scale))
 p_log_h = int(round(p_h / p_scale))
 
+diff_h = v_log_h - p_log_h
+
 # Test left direction
 direction = "left"
-v_pos = "0,0" if direction == "left" else f"{p_log_w},0"
-p_pos = f"{v_log_w},0" if direction == "left" else "0,0"
+if diff_h >= 0:
+    v_pos = "0,0"
+    p_pos = f"{v_log_w},{diff_h}"
+else:
+    v_pos = f"0,{-diff_h}"
+    p_pos = f"{v_log_w},0"
 cmd_left = f"output.Virtual-1.scale.{v_scale} output.Virtual-1.position.{v_pos} output.DP-1.position.{p_pos}"
 
 # Test right direction
 direction = "right"
-v_pos_r = f"{p_log_w},0"
-p_pos_r = "0,0"
+if diff_h >= 0:
+    p_pos_r = f"0,{diff_h}"
+    v_pos_r = f"{p_log_w},0"
+else:
+    p_pos_r = "0,0"
+    v_pos_r = f"{p_log_w},{-diff_h}"
 cmd_right = f"output.Virtual-1.scale.{v_scale} output.Virtual-1.position.{v_pos_r} output.DP-1.position.{p_pos_r}"
 
 print(f"{cmd_left};;{cmd_right}")
 ' 2>&1) || calc_rc=$?
 
-expected_left="output.Virtual-1.scale.2 output.Virtual-1.position.0,0 output.DP-1.position.1536,0"
-expected_right="output.Virtual-1.scale.2 output.Virtual-1.position.1720,0 output.DP-1.position.0,0"
+expected_left="output.Virtual-1.scale.2 output.Virtual-1.position.0,0 output.DP-1.position.1536,144"
+expected_right="output.Virtual-1.scale.2 output.Virtual-1.position.1720,0 output.DP-1.position.0,144"
 
 if [ $calc_rc -eq 0 ] && echo "$calc_out" | grep -q "$expected_left" && echo "$calc_out" | grep -q "$expected_right"; then
-  pass "Topology placement and HiDPI scaling calculates sub-pixel coordinates for left & right placements"
+  pass "Topology placement and HiDPI scaling calculates sub-pixel coordinates for left & right placements (bottom-aligned)"
 else
   fail "Topology placement calculation failed ($calc_rc): $calc_out"
 fi
@@ -309,6 +319,7 @@ fi
 # Test 14: knot display toggle-kvm CLI & State Toggle
 # -------------------------------------------------------------
 echo -e "\n\033[1m[Test 14] knot display toggle-kvm State Transitions...\033[0m"
+rm -f /run/knot/vmon_muted_deskflow_laptop "$HOME/.local/state/knot/vmon_muted_deskflow_laptop"
 toggle_1_out="" toggle_1_rc=0
 toggle_1_out=$("$KNOT_ROOT/bin/knot" display toggle-kvm laptop 2>&1) || toggle_1_rc=$?
 state_1_exists=0
@@ -323,6 +334,60 @@ if [ $toggle_1_rc -eq 0 ] && [ $state_1_exists -eq 1 ] && [ $toggle_2_rc -eq 0 ]
   pass "knot display toggle-kvm correctly cycles between MUTED and UNMUTED state"
 else
   fail "knot display toggle-kvm state cycle failed: s1=$state_1_exists, s2=$state_2_exists"
+fi
+
+# -------------------------------------------------------------
+# Test 15: knot-stripd Mute-Aware Dynamic Edge Visibility
+# -------------------------------------------------------------
+echo -e "\n\033[1m[Test 15] knot-stripd Mute-Aware Edge State Propagation...\033[0m"
+stripd_test_out="" stripd_test_rc=0
+stripd_test_out=$(python3 -c '
+import os, sys
+sys.path.insert(0, "'"$KNOT_ROOT"'")
+from PyQt6.QtCore import QCoreApplication
+app = QCoreApplication([])
+
+# Import KnotEdgeController from bin/knot-stripd
+import importlib.machinery, importlib.util
+loader = importlib.machinery.SourceFileLoader("knot_stripd", "'"$KNOT_ROOT"'/bin/knot-stripd")
+spec = importlib.util.spec_from_loader("knot_stripd", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+
+ctrl = mod.KnotEdgeController("laptop", "left", "#00f0ff", [0, 100], {"laptop", "devbox"}, {"192.168.68.145"})
+ctrl.set_connected(True)
+ctrl.set_locked(False)
+assert not ctrl.muted, "Default muted should be False"
+
+# Emulate check_lock_state muting
+ctrl.set_muted(True)
+assert ctrl.muted, "Controller must reflect muted=True"
+
+ctrl.set_muted(False)
+assert not ctrl.muted, "Controller must reflect unmuted=False"
+print("STRIPD_MUTE_OK")
+' 2>&1) || stripd_test_rc=$?
+
+if [ $stripd_test_rc -eq 0 ] && echo "$stripd_test_out" | grep -q "STRIPD_MUTE_OK"; then
+  pass "knot-stripd KnotEdgeController correctly binds and emits muted state"
+else
+  fail "knot-stripd mute awareness failed ($stripd_test_rc): $stripd_test_out"
+fi
+
+# -------------------------------------------------------------
+# Test 16: knot-vmon-keepalive Daemon Integrity
+# -------------------------------------------------------------
+echo -e "\n\033[1m[Test 16] knot-vmon-keepalive Daemon Integrity...\033[0m"
+if [ -x "$KNOT_ROOT/bin/knot-vmon-keepalive" ]; then
+  ka_syntax_rc=0
+  python3 -m py_compile "$KNOT_ROOT/bin/knot-vmon-keepalive" 2>&1 || ka_syntax_rc=$?
+  if [ $ka_syntax_rc -eq 0 ]; then
+    pass "knot-vmon-keepalive binary exists, is executable, and compiles cleanly"
+  else
+    fail "knot-vmon-keepalive compilation error: $ka_syntax_rc"
+  fi
+else
+  fail "knot-vmon-keepalive binary is missing or not executable"
 fi
 
 # -------------------------------------------------------------

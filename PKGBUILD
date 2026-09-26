@@ -71,6 +71,7 @@ package() {
     ln -sf "/usr/lib/knot-mesh/bin/knot-hub" "${pkgdir}/usr/bin/knot-hub"
     ln -sf "/usr/lib/knot-mesh/bin/knot-autounlock" "${pkgdir}/usr/bin/knot-autounlock"
     ln -sf "/usr/lib/knot-mesh/bin/knot-stripd" "${pkgdir}/usr/bin/knot-stripd"
+    ln -sf "/usr/lib/knot-mesh/bin/knot-vmon-keepalive" "${pkgdir}/usr/bin/knot-vmon-keepalive"
 
     # Install license if present
     if [ -f "LICENSE" ]; then

@@ -277,7 +277,7 @@ TOPO_EOF
   local user_unit_dir="${HOME}/.config/systemd/user"
   mkdir -p "$user_bin" "$user_unit_dir"
 
-  for b in knot knot-installer knot-autounlock knot-agent knot-hub knot-stripd; do
+  for b in knot knot-installer knot-autounlock knot-agent knot-hub knot-stripd knot-vmon-keepalive; do
     if [ -f "$KNOT_ROOT/bin/$b" ]; then
       ln -sf "$KNOT_ROOT/bin/$b" "$user_bin/$b"
     fi
@@ -744,7 +744,7 @@ JOIN_HELP
   local user_unit_dir="${HOME}/.config/systemd/user"
   mkdir -p "$user_bin" "$user_unit_dir"
 
-  for b in knot knot-installer knot-autounlock knot-agent knot-stripd; do
+  for b in knot knot-installer knot-autounlock knot-agent knot-stripd knot-vmon-keepalive; do
     if [ -f "$KNOT_ROOT/bin/$b" ]; then
       ln -sf "$KNOT_ROOT/bin/$b" "$user_bin/$b"
     fi

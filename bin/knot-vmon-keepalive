@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""
+Knot Wayland Virtual Monitor Keepalive & Unlock Daemon (knot-vmon-keepalive)
+Maintains session unlock state, simulates user activity to prevent DPMS sleep,
+and holds a ScreenSaver DBus inhibition lock while KRDC is streaming the virtual display.
+"""
+
+import os
+import sys
+import time
+import signal
+import subprocess
+
+# Ensure Wayland and desktop environment context
+if "WAYLAND_DISPLAY" not in os.environ:
+    os.environ["WAYLAND_DISPLAY"] = "wayland-0"
+if "XDG_CURRENT_DESKTOP" not in os.environ:
+    os.environ["XDG_CURRENT_DESKTOP"] = "KDE"
+
+qdbus = "/usr/bin/qdbus6" if os.path.exists("/usr/bin/qdbus6") else "qdbus"
+cookie = ""
+
+
+def cleanup_and_exit(signum=None, frame=None):
+    global cookie
+    if cookie:
+        try:
+            subprocess.run(
+                [qdbus, "org.freedesktop.ScreenSaver", "/ScreenSaver", "org.freedesktop.ScreenSaver.UnInhibit", cookie],
+                capture_output=True,
+                timeout=2,
+            )
+        except Exception as e:
+            sys.stderr.write(f"[knot-vmon-keepalive] ScreenSaver UnInhibit notice: {e}\n")
+    pid_file = f"/run/user/{os.getuid()}/knot-vmon-keepalive.pid"
+    if os.path.exists(pid_file):
+        try:
+            os.remove(pid_file)
+        except Exception as e:
+            sys.stderr.write(f"[knot-vmon-keepalive] Notice: Removing pid file ({e})\n")
+    sys.exit(0)
+
+
+def unlock_active_sessions():
+    """Unlock any locked user display sessions without requiring polkit admin privileges."""
+    try:
+        res = subprocess.run(["loginctl", "list-sessions", "--no-legend"], capture_output=True, text=True)
+        if res.returncode == 0:
+            for line in res.stdout.strip().splitlines():
+                parts = line.split()
+                if parts:
+                    sid = parts[0]
+                    subprocess.run(["loginctl", "unlock-session", sid], capture_output=True)
+    except Exception as e:
+        sys.stderr.write(f"[knot-vmon-keepalive] Session unlock notice: {e}\n")
+
+
+signal.signal(signal.SIGTERM, cleanup_and_exit)
+signal.signal(signal.SIGINT, cleanup_and_exit)
+
+# Terminate any previously running instance via PID file
+pid_file = f"/run/user/{os.getuid()}/knot-vmon-keepalive.pid"
+if os.path.exists(pid_file):
+    try:
+        with open(pid_file, "r") as pf:
+            old_pid = int(pf.read().strip())
+        if old_pid != os.getpid():
+            os.kill(old_pid, signal.SIGTERM)
+            time.sleep(0.3)
+    except Exception as e:
+        sys.stderr.write(f"[knot-vmon-keepalive] Notice: Terminating stale instance ({e})\n")
+
+try:
+    with open(pid_file, "w") as pf:
+        pf.write(str(os.getpid()))
+except Exception as e:
+    sys.stderr.write(f"[knot-vmon-keepalive] Notice: Writing pid file ({e})\n")
+
+# 1. Immediately unlock session upon daemon startup
+unlock_active_sessions()
+
+# 2. Acquire ScreenSaver inhibition cookie
+try:
+    res = subprocess.run(
+        [
+            qdbus,
+            "org.freedesktop.ScreenSaver",
+            "/ScreenSaver",
+            "org.freedesktop.ScreenSaver.Inhibit",
+            "Knot-VMon",
+            "Active Virtual Display Stream",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=3,
+    )
+    if res.returncode == 0 and res.stdout.strip().isdigit():
+        cookie = res.stdout.strip()
+        sys.stderr.write(f"[knot-vmon-keepalive] Acquired ScreenSaver inhibit cookie: {cookie}\n")
+except Exception as e:
+    sys.stderr.write(f"[knot-vmon-keepalive] ScreenSaver Inhibit notice: {e}\n")
+
+# 3. Grace period (up to 60s) waiting for KRDC client process to launch
+krdc_started = False
+for _ in range(30):
+    chk = subprocess.run(["pgrep", "-f", "krdc"], capture_output=True)
+    if chk.returncode == 0:
+        krdc_started = True
+        break
+    try:
+        unlock_active_sessions()
+        subprocess.run(
+            [qdbus, "org.freedesktop.ScreenSaver", "/ScreenSaver", "org.freedesktop.ScreenSaver.SimulateUserActivity"],
+            capture_output=True,
+            timeout=2,
+        )
+    except Exception as e:
+        sys.stderr.write(f"[knot-vmon-keepalive] Grace period activity notice: {e}\n")
+    time.sleep(2)
+
+if not krdc_started:
+    sys.stderr.write("[knot-vmon-keepalive] KRDC did not launch within grace period; exiting.\n")
+    cleanup_and_exit()
+
+# 4. Main monitoring loop while KRDC is active
+missing_cycles = 0
+while True:
+    chk = subprocess.run(["pgrep", "-f", "krdc"], capture_output=True)
+    if chk.returncode != 0:
+        missing_cycles += 1
+        if missing_cycles >= 4:
+            sys.stderr.write("[knot-vmon-keepalive] KRDC terminated; exiting keepalive.\n")
+            break
+    else:
+        missing_cycles = 0
+
+    try:
+        unlock_active_sessions()
+        subprocess.run(
+            [qdbus, "org.freedesktop.ScreenSaver", "/ScreenSaver", "org.freedesktop.ScreenSaver.SimulateUserActivity"],
+            capture_output=True,
+            timeout=2,
+        )
+    except Exception as e:
+        sys.stderr.write(f"[knot-vmon-keepalive] Activity simulation notice: {e}\n")
+
+    time.sleep(3)
+
+cleanup_and_exit()

@@ -69,7 +69,7 @@ Window {
         id: stripItem
         anchors.fill: parent
         property int thickness: 5
-        opacity: (!controller.locked && controller.connected) ? 0.45 : 0.0
+        opacity: (!controller.locked && !controller.muted && controller.connected) ? 0.45 : 0.0
 
         Behavior on opacity {
             NumberAnimation { duration: 250; easing.type: Easing.InOutQuad }
@@ -121,7 +121,7 @@ Window {
                 NumberAnimation {
                     target: stripItem
                     property: "opacity"
-                    to: (!controller.locked && controller.connected) ? 0.45 : 0.0
+                    to: (!controller.locked && !controller.muted && controller.connected) ? 0.45 : 0.0
                     duration: 320
                     easing.type: Easing.OutCubic
                 }
@@ -148,6 +148,7 @@ Window {
 class KnotEdgeController(QObject):
     connectedChanged = pyqtSignal(bool)
     lockedChanged = pyqtSignal(bool)
+    mutedChanged = pyqtSignal(bool)
     crossoverTriggered = pyqtSignal()
 
     def __init__(self, node_id: str, edge: str, color: str, span: List[int], identifiers: Set[str], ips: Set[str], parent=None):
@@ -160,6 +161,7 @@ class KnotEdgeController(QObject):
         self.ips = {x.strip() for x in ips if x}
         self._connected = False
         self._locked = False
+        self._muted = False
 
     @pyqtProperty(str, constant=True)
     def nodeId(self) -> str:
@@ -177,6 +179,10 @@ class KnotEdgeController(QObject):
     def locked(self) -> bool:
         return self._locked
 
+    @pyqtProperty(bool, notify=mutedChanged)
+    def muted(self) -> bool:
+        return self._muted
+
     def set_connected(self, state: bool):
         if self._connected != state:
             self._connected = state
@@ -186,6 +192,11 @@ class KnotEdgeController(QObject):
         if self._locked != state:
             self._locked = state
             self.lockedChanged.emit(state)
+
+    def set_muted(self, state: bool):
+        if self._muted != state:
+            self._muted = state
+            self.mutedChanged.emit(state)
 
     def trigger_crossover(self):
         self.crossoverTriggered.emit()
@@ -375,6 +386,10 @@ class KnotStripDaemon(QObject):
 
         for ctrl in self.controllers:
             ctrl.set_locked(is_locked)
+            mute_run = f"/run/knot/vmon_muted_deskflow_{ctrl.node_id}"
+            mute_state = os.path.expanduser(f"~/.local/state/knot/vmon_muted_deskflow_{ctrl.node_id}")
+            is_muted = os.path.exists(mute_run) or os.path.exists(mute_state)
+            ctrl.set_muted(is_muted)
 
     def check_connections_via_ss(self):
         try:

@@ -1362,6 +1362,17 @@ kdeconnect_vmon_seed_client_trust() {
         ssh_dest="${target_user}@${rip}"
       fi
 
+      # 1. Stream knot-vmon-keepalive daemon to remote strand
+      if [ -f "$KNOT_ROOT/bin/knot-vmon-keepalive" ]; then
+        local ka_out="" ka_rc=0
+        ka_out="$(ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -p "$target_port" "$ssh_dest" \
+          "mkdir -p ~/.local/bin && cat > ~/.local/bin/knot-vmon-keepalive && chmod 755 ~/.local/bin/knot-vmon-keepalive" \
+          < "$KNOT_ROOT/bin/knot-vmon-keepalive" 2>&1)" || ka_rc=$?
+        if [ $ka_rc -ne 0 ]; then
+          knot_log_warn "Notice: Seeding knot-vmon-keepalive returned non-zero ($ka_rc): $ka_out"
+        fi
+      fi
+
       local remote_cmd="mkdir -p ~/.config/freerdp/server ~/.local/share/applications && \
 cat > ~/.config/freerdp/server/${my_ip}.pem && \
 for p in {5900..5950}; do ln -sf ${my_ip}.pem ~/.config/freerdp/server/${my_ip}_\${p}.pem; done && \
@@ -1387,7 +1398,8 @@ if command -v kwriteconfig6 >/dev/null; then
     for h in \"rdp://${my_ip}:\${p}\" \"rdp://user@${my_ip}:\${p}\"; do
       kwriteconfig6 --file krdcrc --group hostpreferences --group \"\$h\" --key scaleToSize true
       kwriteconfig6 --file krdcrc --group hostpreferences --group \"\$h\" --key fullscreenScale true
-      kwriteconfig6 --file krdcrc --group hostpreferences --group \"\$h\" --key showLocalCursor true
+      kwriteconfig6 --file krdcrc --group hostpreferences --group \"\$h\" --key windowedScale true
+      kwriteconfig6 --file krdcrc --group hostpreferences --group \"\$h\" --key showLocalCursor false
     done
   done
   curr_rules=\"\$(kreadconfig6 --file kwinrulesrc --group General --key rules 2>&1)\" || curr_rules=\"\"
@@ -1543,12 +1555,23 @@ v_log_h = int(round(v_h / v_scale))
 p_log_w = int(round(p_w / p_scale))
 p_log_h = int(round(p_h / p_scale))
 
+# Bottom-align displays to ensure continuous taskbar and boundary alignment
+diff_h = v_log_h - p_log_h
+
 if direction == "left":
-    v_pos = "0,0"
-    p_pos = f"{v_log_w},0"
+    if diff_h >= 0:
+        v_pos = "0,0"
+        p_pos = f"{v_log_w},{diff_h}"
+    else:
+        v_pos = f"0,{-diff_h}"
+        p_pos = f"{v_log_w},0"
 elif direction == "right":
-    p_pos = "0,0"
-    v_pos = f"{p_log_w},0"
+    if diff_h >= 0:
+        p_pos = f"0,{diff_h}"
+        v_pos = f"{p_log_w},0"
+    else:
+        p_pos = "0,0"
+        v_pos = f"{p_log_w},{-diff_h}"
 elif direction == "up":
     v_pos = "0,0"
     p_pos = f"0,{v_log_h}"
@@ -1556,8 +1579,12 @@ elif direction == "down":
     p_pos = "0,0"
     v_pos = f"0,{p_log_h}"
 else:
-    v_pos = "0,0"
-    p_pos = f"{v_log_w},0"
+    if diff_h >= 0:
+        v_pos = "0,0"
+        p_pos = f"{v_log_w},{diff_h}"
+    else:
+        v_pos = f"0,{-diff_h}"
+        p_pos = f"{v_log_w},0"
 
 print(f"output.{vmon_name}.scale.{v_scale} output.{vmon_name}.position.{v_pos} output.{primary_name}.position.{p_pos} output.{primary_name}.priority.1|{v_scale}|{v_pos}|{p_pos}|{v_log_w}|{v_log_h}")
 ' "$vmon_name" "$vmon_w" "$vmon_h" "$primary_name" "$primary_w" "$primary_h" "$primary_scale" "$direction" 2>&1)"
@@ -1746,6 +1773,21 @@ kdeconnect_vmon_start() {
 
   if [ -n "$target_node" ]; then
     kdeconnect_vmon_seed_client_trust "$target_node" "$target_port" "$target_user"
+    # Launch remote keepalive daemon to ensure strand session remains unlocked and active
+    local rip="" r_rc=0
+    rip="$("$KNOT_ROOT/bin/knot" resolve "$target_node" "$target_port" 2>&1)" || r_rc=$?
+    if [ $r_rc -eq 0 ] && [ -n "$rip" ]; then
+      local ssh_dest="$target_node"
+      if [ -n "${target_user:-}" ] && [ -n "$rip" ]; then
+        ssh_dest="${target_user}@${rip}"
+      fi
+      local k_rc=0
+      ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -p "$target_port" "$ssh_dest" \
+        "mkdir -p ~/.local/state/knot && nohup python3 ~/.local/bin/knot-vmon-keepalive </dev/null > ~/.local/state/knot/vmon-keepalive.log 2>&1 &" || k_rc=$?
+      if [ $k_rc -ne 0 ]; then
+        knot_log_warn "Notice: Spawning knot-vmon-keepalive on '$target_node' returned non-zero: $k_rc"
+      fi
+    fi
   fi
 
   # 5. Resolve target device ID
@@ -1947,7 +1989,8 @@ kdeconnect_vmon_stop() {
       local my_ip
       my_ip="$(knot_detect_lan_ip)"
       local k_rc=0
-      ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=accept-new -p "$target_port" "$ssh_dest" "pkill -f 'krdc.*rdp://.*${my_ip}' 2>&1" || k_rc=$?
+      ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=accept-new -p "$target_port" "$ssh_dest" \
+        "pid_file=\"/run/user/\$(id -u)/knot-vmon-keepalive.pid\"; if [ -f \"\$pid_file\" ]; then k_pid=\$(cat \"\$pid_file\"); kill \"\$k_pid\" 2>&1 || k_rc=\$?; rm -f \"\$pid_file\"; fi; pkill -f 'krdc.*rdp://.*${my_ip}' 2>&1 || k_rc=\$?" || k_rc=$?
     fi
   fi
 
