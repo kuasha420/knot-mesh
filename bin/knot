@@ -641,7 +641,20 @@ cmd_kvm() {
 }
 
 cmd_doctor() {
-  doctor_diagnose "$@"
+  local is_repair=0
+  local repair_args=()
+  for arg in "$@"; do
+    if [ "$arg" = "--repair" ]; then
+      is_repair=1
+    else
+      repair_args+=("$arg")
+    fi
+  done
+  if [ $is_repair -eq 1 ]; then
+    doctor_repair "${repair_args[@]:-}"
+  else
+    doctor_diagnose "$@"
+  fi
 }
 
 cmd_repair() {

@@ -1208,7 +1208,7 @@ doctor_repair() {
         anchor_healthy=0
         knot_log_info "Initiating repair on Anchor desktop ($anchor_host)..."
         local rep_out=""
-        if rep_out="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$anchor_id" "export PATH=\"\$HOME/.local/bin:\$PATH\"; knot doctor --repair local" 2>&1)"; then
+        if rep_out="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$anchor_id" "bash -c 'export PATH=\"\$HOME/.local/bin:\$PATH\"; knot repair local'" 2>&1)"; then
           knot_log_ok "Anchor repaired."
         else
           knot_log_warn "Failed to repair Anchor: $rep_out"
@@ -1258,7 +1258,7 @@ doctor_repair() {
       else
         knot_log_info "Initiating repair on Strand $id ($host)..."
         local s_rep=""
-        if s_rep="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$id" "export PATH=\"\$HOME/.local/bin:\$PATH\"; knot doctor --repair local" 2>&1)"; then
+        if s_rep="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$id" "bash -c 'export PATH=\"\$HOME/.local/bin:\$PATH\"; knot repair local'" 2>&1)"; then
           knot_log_ok "Strand $id repair completed."
         else
           knot_log_warn "Notice: Strand $id could not be contacted directly via SSH: $s_rep"
@@ -1269,7 +1269,7 @@ ctx = ssl.create_default_context()
 ctx.check_hostname = False
 ctx.verify_mode = ssl.CERT_NONE
 data = json.dumps({
-    "prompt": "export PATH=\"$HOME/.local/bin:$PATH\"; knot doctor --repair local",
+    "prompt": "bash -c '\''export PATH=\"$HOME/.local/bin:$PATH\"; knot repair local'\''",
     "target": "'"$id"'",
     "priority": "system_maintenance"
 }).encode()
