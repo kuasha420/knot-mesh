@@ -831,6 +831,7 @@ doctor_repair_local() {
     anchor_id="${ANCHOR_ID:-desktop}"
     anchor_host="${ANCHOR_HOST:-desktop}"
   fi
+  local is_anchor=0
   if [ "$my_host" = "$anchor_host" ] || [ "$my_host" = "$anchor_id" ]; then
     is_anchor=1
   fi
