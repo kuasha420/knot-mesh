@@ -1172,3 +1172,288 @@ kdeconnect_reconcile() {
   knot_log_ok "KDE Connect mesh reconciliation completed."
   return 0
 }
+
+kdeconnect_resolve_device_id() {
+  local target="$1"
+  local qdbus_cmd=""
+  if ! qdbus_cmd="$(kdeconnect_get_qdbus_cmd)"; then
+    knot_log_err "qdbus/qdbus6 command not found"
+    return 1
+  fi
+
+  local dev_list=""
+  if dev_list="$("$qdbus_cmd" org.kde.kdeconnect /modules/kdeconnect org.kde.kdeconnect.daemon.devices true true 2>&1)"; then
+    for dev in $dev_list; do
+      local dname=""
+      if dname="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$dev" org.kde.kdeconnect.device.name 2>&1)"; then
+        if [ "$dev" = "$target" ] || [ "$dname" = "$target" ]; then
+          echo "$dev"
+          return 0
+        fi
+      fi
+    done
+  fi
+
+  # Fallback to SSH probe if target is a reachable hostname / swarm node ID
+  local ssh_id=""
+  if ssh_id="$(ssh -o BatchMode=yes -o ConnectTimeout=2 "$target" "kdeconnect-cli --my-id" 2>&1)"; then
+    ssh_id="$(echo "$ssh_id" | tr -d '[:space:]')"
+    if [ -n "$ssh_id" ]; then
+      echo "$ssh_id"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+kdeconnect_vmon_status() {
+  local target="${1:-}"
+  local qdbus_cmd=""
+  if ! qdbus_cmd="$(kdeconnect_get_qdbus_cmd)"; then
+    knot_log_err "qdbus/qdbus6 command not found"
+    return 1
+  fi
+
+  echo -e "\n${C_BOLD}=== KDE Connect Wayland Virtual Monitor Status ===${C_RESET}"
+  local has_krdpserver=0
+  if command -v krdpserver >/dev/null; then
+    has_krdpserver=1
+    echo -e "Host Engine (krdp / krdpserver) : ${C_GREEN}INSTALLED${C_RESET}"
+  else
+    echo -e "Host Engine (krdp / krdpserver) : ${C_YELLOW}MISSING${C_RESET} (Required to host virtual screens)"
+  fi
+
+  local has_krdc=0
+  if command -v krdc >/dev/null; then
+    has_krdc=1
+    echo -e "Client Engine (krdc / freerdp)  : ${C_GREEN}INSTALLED${C_RESET}"
+  else
+    echo -e "Client Engine (krdc / freerdp)  : ${C_YELLOW}MISSING${C_RESET} (Required to render remote streams)"
+  fi
+
+  echo ""
+  printf "%-14s %-34s %-12s %-14s %-20s\n" "PEER" "DEVICE ID" "VMON READY" "STREAM ACTIVE" "LAST ERROR"
+  printf "%-14s %-34s %-12s %-14s %-20s\n" "----" "---------" "----------" "-------------" "----------"
+
+  local dev_list=""
+  if ! dev_list="$("$qdbus_cmd" org.kde.kdeconnect /modules/kdeconnect org.kde.kdeconnect.daemon.devices true true 2>&1)"; then
+    knot_log_err "Failed to query KDE Connect devices: $dev_list"
+    return 1
+  fi
+
+  local target_id=""
+  if [ -n "$target" ]; then
+    if ! target_id="$(kdeconnect_resolve_device_id "$target" 2>&1)"; then
+      target_id=""
+    fi
+  fi
+
+  local count=0
+  for dev in $dev_list; do
+    if [ -n "$target_id" ] && [ "$dev" != "$target_id" ]; then
+      continue
+    fi
+
+    local dname=""
+    if ! dname="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$dev" org.kde.kdeconnect.device.name 2>&1)"; then
+      dname="(unknown)"
+    fi
+
+    local avail="false"
+    local a_out=""
+    if a_out="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$dev/virtualmonitor" org.kde.kdeconnect.device.virtualmonitor.isVirtualMonitorAvailable 2>&1)"; then
+      avail="$a_out"
+    fi
+
+    local active="false"
+    local act_out=""
+    if act_out="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$dev/virtualmonitor" org.kde.kdeconnect.device.virtualmonitor.active 2>&1)"; then
+      active="$act_out"
+    fi
+
+    local last_err=""
+    local err_out=""
+    if err_out="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$dev/virtualmonitor" org.kde.kdeconnect.device.virtualmonitor.lastError 2>&1)"; then
+      last_err="$(echo "$err_out" | tr '\n' ' ' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    fi
+    [ -z "$last_err" ] && last_err="-"
+
+    local avail_fmt="${C_RED}NO${C_RESET}"
+    if [ "$avail" = "true" ]; then
+      avail_fmt="${C_GREEN}READY${C_RESET}"
+    fi
+
+    local active_fmt="${C_DIM}INACTIVE${C_RESET}"
+    if [ "$active" = "true" ]; then
+      active_fmt="${C_GREEN}${C_BOLD}ACTIVE${C_RESET}"
+    fi
+
+    printf "%-14s %-34s %-21b %-23b %-20s\n" "$dname" "$dev" "$avail_fmt" "$active_fmt" "$last_err"
+    count=$((count + 1))
+  done
+
+  if [ $count -eq 0 ]; then
+    echo "No matching KDE Connect peers found."
+  fi
+  echo ""
+  return 0
+}
+
+kdeconnect_vmon_start() {
+  local target="${1:-}"
+  if [ -z "$target" ]; then
+    knot_log_err "Usage: knot kdeconnect vmon start <node_id|device_id>"
+    return 1
+  fi
+
+  local qdbus_cmd=""
+  if ! qdbus_cmd="$(kdeconnect_get_qdbus_cmd)"; then
+    knot_log_err "qdbus/qdbus6 command not found"
+    return 1
+  fi
+
+  # 1. Verify local host prerequisites
+  if ! command -v krdpserver >/dev/null; then
+    knot_log_err "Local host lacks 'krdpserver' (from package 'krdp'). Run 'sudo pacman -S krdp' or 'knot repair local'."
+    return 1
+  fi
+
+  # 2. Verify firewall rules for ports 5900-5910/tcp
+  local fw_mod="$KNOT_ROOT/core/modules/firewall.sh"
+  if [ -f "$fw_mod" ]; then
+    # shellcheck source=../../core/modules/firewall.sh
+    source "$fw_mod"
+    firewall_verify_vmon
+  fi
+
+  # 3. Resolve target device ID
+  local target_id=""
+  if ! target_id="$(kdeconnect_resolve_device_id "$target" 2>&1)"; then
+    knot_log_err "Could not resolve target '$target' to a paired KDE Connect device ID."
+    return 1
+  fi
+
+  local dev_name=""
+  if ! dev_name="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$target_id" org.kde.kdeconnect.device.name 2>&1)"; then
+    dev_name="$target"
+  fi
+
+  knot_log_info "Initiating Wayland Virtual Monitor stream to '$dev_name' ($target_id)..."
+
+  # 4. Check readiness on remote device
+  local avail="false"
+  local a_out=""
+  if a_out="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$target_id/virtualmonitor" org.kde.kdeconnect.device.virtualmonitor.isVirtualMonitorAvailable 2>&1)"; then
+    avail="$a_out"
+  fi
+
+  if [ "$avail" != "true" ]; then
+    local err_msg=""
+    if ! err_msg="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$target_id/virtualmonitor" org.kde.kdeconnect.device.virtualmonitor.lastError 2>&1)"; then
+      err_msg=""
+    fi
+    knot_log_err "Target '$dev_name' is not ready for Virtual Monitor: ${err_msg:-Remote client missing RDP client or krdc}"
+    return 1
+  fi
+
+  # 5. Request Virtual Monitor
+  local req_out="" req_rc=0
+  req_out="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$target_id/virtualmonitor" org.kde.kdeconnect.device.virtualmonitor.requestVirtualMonitor 2>&1)" || req_rc=$?
+
+  if [ $req_rc -ne 0 ]; then
+    knot_log_err "Failed to invoke requestVirtualMonitor on DBus: $req_out"
+    return 1
+  fi
+
+  if [ "$req_out" != "true" ]; then
+    local err_msg=""
+    if ! err_msg="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$target_id/virtualmonitor" org.kde.kdeconnect.device.virtualmonitor.lastError 2>&1)"; then
+      err_msg=""
+    fi
+    knot_log_err "Virtual Monitor request was rejected by KDE Connect: ${err_msg:-Unknown error}"
+    return 1
+  fi
+
+  # 6. Verify stream activation
+  local is_active=0
+  for _ in {1..10}; do
+    sleep 0.5
+    local act_chk=""
+    if act_chk="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$target_id/virtualmonitor" org.kde.kdeconnect.device.virtualmonitor.active 2>&1)"; then
+      if [ "$act_chk" = "true" ]; then
+        is_active=1
+        break
+      fi
+    fi
+  done
+
+  if [ $is_active -eq 1 ]; then
+    knot_log_ok "Wayland Virtual Monitor active! KWin virtual display created and streaming to '$dev_name' via RDP."
+    echo -e "${C_DIM}Run 'knot kdeconnect vmon stop $target' to teardown the virtual monitor stream.${C_RESET}"
+    return 0
+  else
+    local err_msg=""
+    if ! err_msg="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$target_id/virtualmonitor" org.kde.kdeconnect.device.virtualmonitor.lastError 2>&1)"; then
+      err_msg=""
+    fi
+    knot_log_warn "Virtual Monitor request dispatched, but active stream state not yet confirmed: ${err_msg:-waiting for client connection}"
+    return 0
+  fi
+}
+
+kdeconnect_vmon_stop() {
+  local target="${1:-}"
+  local qdbus_cmd=""
+  if ! qdbus_cmd="$(kdeconnect_get_qdbus_cmd)"; then
+    knot_log_err "qdbus/qdbus6 command not found"
+    return 1
+  fi
+
+  local dev_list=""
+  if ! dev_list="$("$qdbus_cmd" org.kde.kdeconnect /modules/kdeconnect org.kde.kdeconnect.daemon.devices true true 2>&1)"; then
+    knot_log_err "Failed to query KDE Connect devices: $dev_list"
+    return 1
+  fi
+
+  local target_id=""
+  if [ -n "$target" ]; then
+    if ! target_id="$(kdeconnect_resolve_device_id "$target" 2>&1)"; then
+      knot_log_err "Could not resolve target '$target' to a paired KDE Connect device ID."
+      return 1
+    fi
+  fi
+
+  local stopped_any=0
+  for dev in $dev_list; do
+    if [ -n "$target_id" ] && [ "$dev" != "$target_id" ]; then
+      continue
+    fi
+
+    local dname=""
+    if ! dname="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$dev" org.kde.kdeconnect.device.name 2>&1)"; then
+      dname="$dev"
+    fi
+
+    local active="false"
+    local act_out=""
+    if act_out="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$dev/virtualmonitor" org.kde.kdeconnect.device.virtualmonitor.active 2>&1)"; then
+      active="$act_out"
+    fi
+
+    if [ "$active" = "true" ] || [ -n "$target" ]; then
+      knot_log_info "Stopping Virtual Monitor stream for '$dname' ($dev)..."
+      local stop_out=""
+      if ! stop_out="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$dev/virtualmonitor" org.kde.kdeconnect.device.virtualmonitor.stop 2>&1)"; then
+        knot_log_warn "Notice: stop returned: $stop_out"
+      fi
+      knot_log_ok "Virtual Monitor stopped for '$dname'."
+      stopped_any=1
+    fi
+  done
+
+  if [ $stopped_any -eq 0 ]; then
+    knot_log_info "No active Virtual Monitor streams were found running."
+  fi
+  return 0
+}

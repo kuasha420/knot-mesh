@@ -318,9 +318,14 @@ knot kdeconnect test-clipboard [--all|<node_id>]    # End-to-end automated clipb
 knot kdeconnect prune-stale                         # Detect and unpair obsolete/duplicate device identities
 knot kdeconnect get-clipboard                       # Read local Wayland/Klipper clipboard contents
 knot kdeconnect set-clipboard "<payload>"           # Set local Wayland/Klipper clipboard contents
+knot kdeconnect vmon status [<node_id>]             # Check Virtual Monitor DBus availability & active streams
+knot kdeconnect vmon start <node_id>                # Spawn headless Wayland virtual screen & stream to remote strand via RDP
+knot kdeconnect vmon stop [<node_id>]               # Terminate virtual display stream and restore local display geometry
+knot display extend <node_id>                       # Alias for knot kdeconnect vmon start <node_id>
 ```
 
 - **Core Capabilities**:
+  - **Wayland Virtual Monitor Fabric**: Instantly expands Desktop Anchor's workspace onto docked handhelds (ROG Ally, Steam Deck OLED) or secondary laptops via KWin Wayland headless outputs + `krdpserver` and KRDC. Single-click start/stop with zero manual password or port configuration.
   - **Tier 1 D2D Continuous Self-Healing**: Fully autonomous background reconciliation supervised by `knot-kdeconnect-reconcile.timer` (running every 3 minutes under `graphical-session.target`) and `knot-guard` (triggering on network roaming). Scans active swarm node manifests, auto-accepts pairing requests from verified peers over reciprocal Ed25519 SSH probes, and silently re-pairs dropped connections without operator intervention.
   - **Zero-Interaction Trust Bootstrapping**: Leverages existing Ed25519 SSH mesh credentials as out-of-band trust anchors to automatically accept pairing requests via DBus without manual GUI clicks.
   - **Turnkey Onboarding & 1-Click Repair**: Automatically executes non-blocking reconciliation during `knot onboard` and `knot-installer join`; `knot doctor` detects unbonded swarm peers and `knot repair` self-heals the entire mesh with one click.

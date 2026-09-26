@@ -531,7 +531,70 @@ doctor_check_local() {
     doc_warn "knot-kdeconnect-reconcile.timer is not active (run 'knot repair' to enable)"
     warnings=$((warnings + 1))
   fi
-  # 7. Antigravity Swarm Node Health
+
+  # 7. Wayland Virtual Monitor (D2D Phase 2)
+  echo -e "\n${C_BOLD}[Wayland Virtual Monitor (D2D)]${C_RESET}"
+  if command -v krdpserver >/dev/null; then
+    doc_ok "Host engine installed: krdpserver (krdp)"
+  else
+    doc_warn "Host engine missing: krdpserver (run 'knot repair' or 'sudo pacman -S krdp')"
+    warnings=$((warnings + 1))
+  fi
+
+  if command -v krdc >/dev/null; then
+    doc_ok "Client engine installed: krdc (freerdp)"
+  else
+    doc_warn "Client engine missing: krdc (run 'knot repair' or 'sudo pacman -S krdc freerdp')"
+    warnings=$((warnings + 1))
+  fi
+
+  # Firewall verification for ports 5900-5910/tcp
+  local fw_mod="$KNOT_ROOT/core/modules/firewall.sh"
+  if [ -f "$fw_mod" ]; then
+    # shellcheck source=../../core/modules/firewall.sh
+    source "$fw_mod"
+    local fw_vmon_rc=0
+    local fw_vmon_out=""
+    fw_vmon_out="$(firewall_verify_vmon 2>&1)" || fw_vmon_rc=$?
+    if [ $fw_vmon_rc -eq 0 ]; then
+      doc_ok "Firewall ports 5900:5910/tcp (knot-vmon) verified for subnet"
+    else
+      doc_warn "Firewall ports 5900:5910/tcp check returned ($fw_vmon_rc): $fw_vmon_out"
+      warnings=$((warnings + 1))
+    fi
+  fi
+
+  # DBus Virtual Monitor availability for active peers
+  if [ -n "$qdbus_cmd" ]; then
+    for peer in "${peer_nodes[@]}"; do
+      local p_kde_id=""
+      for dev in "${paired_list[@]}"; do
+        local dn=""
+        if dn="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$dev" org.kde.kdeconnect.device.name 2>&1)"; then
+          if [ "$dn" = "$peer" ] || [ "$dev" = "$peer" ]; then
+            p_kde_id="$dev"
+            break
+          fi
+        fi
+      done
+      if [ -n "$p_kde_id" ]; then
+        local p_vmon="false"
+        if p_vmon="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$p_kde_id/virtualmonitor" org.kde.kdeconnect.device.virtualmonitor.isVirtualMonitorAvailable 2>&1)"; then
+          if [ "$p_vmon" = "true" ]; then
+            doc_ok "Virtual Monitor ready with peer '$peer' ($p_kde_id)"
+            local p_err=""
+            if ! p_err="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$p_kde_id/virtualmonitor" org.kde.kdeconnect.device.virtualmonitor.lastError 2>&1)"; then
+              p_err=""
+            fi
+            doc_warn "Virtual Monitor not ready with peer '$peer': ${p_err:-RDP client/server not ready}"
+            warnings=$((warnings + 1))
+          fi
+        fi
+      fi
+    done
+  fi
+
+  # 8. Antigravity Swarm Node Health
   echo -e "\n${C_BOLD}[Antigravity Swarm Node Health]${C_RESET}"
   if command -v antigravity_detect_cli >/dev/null && antigravity_detect_cli; then
     local agy_ver="unknown"
@@ -997,6 +1060,36 @@ doctor_repair_local() {
         knot_log_ok "Knot Tier 1 D2D KDE Connect reconciler timer active."
       fi
     fi
+  fi
+
+  # 12. Ensure Wayland Virtual Monitor prerequisites (krdp, krdc, freerdp, firewall)
+  if command -v pacman >/dev/null; then
+    local missing_vmon_pkgs=()
+    if ! command -v krdpserver >/dev/null; then missing_vmon_pkgs+=("krdp"); fi
+    if ! command -v krdc >/dev/null; then missing_vmon_pkgs+=("krdc"); fi
+    local pac_chk="" pac_rc=0
+    pac_chk="$(pacman -Qs freerdp 2>&1)" || pac_rc=$?
+    if [ $pac_rc -ne 0 ] || [ -z "$pac_chk" ]; then
+      missing_vmon_pkgs+=("freerdp")
+    fi
+
+    if [ ${#missing_vmon_pkgs[@]} -gt 0 ]; then
+      knot_log_info "Installing missing Virtual Monitor packages: ${missing_vmon_pkgs[*]}..."
+      local p_inst="" p_inst_rc=0
+      if p_inst="$(sudo pacman -S --needed --noconfirm "${missing_vmon_pkgs[@]}" 2>&1)"; then
+        knot_log_ok "Virtual Monitor packages successfully installed."
+      else
+        p_inst_rc=$?
+        knot_log_warn "Notice: Package installation exited with code ($p_inst_rc): $p_inst"
+      fi
+    fi
+  fi
+
+  local fw_mod="$KNOT_ROOT/core/modules/firewall.sh"
+  if [ -f "$fw_mod" ]; then
+    # shellcheck source=../../core/modules/firewall.sh
+    source "$fw_mod"
+    firewall_verify_vmon
   fi
 
   knot_log_ok "Local repair operations completed for $my_host."

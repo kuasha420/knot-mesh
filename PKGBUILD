@@ -23,6 +23,10 @@ optdepends=(
     'libnotify: Desktop notification support for KVM cursor locking'
     'webkit2gtk-4.1: Knot Kommand Kafe Tauri v2 native desktop container'
     'gtk3: Native system tray and Wayland/X11 container support'
+    'kdeconnect: Full-mesh clipboard synchronization and Wayland Virtual Monitor signaling'
+    'krdp: Wayland headless virtual display creation and RDP streaming (host)'
+    'krdc: Wayland remote desktop client for Virtual Monitor rendering (client)'
+    'freerdp: RDP protocol engine for KRDC'
 )
 source=("knot-mesh-${pkgver}.tar.gz::https://github.com/kuasha420/knot-mesh/archive/refs/tags/v1.0.0-rc5.tar.gz")
 sha256sums=('SKIP')

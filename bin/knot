@@ -849,8 +849,48 @@ cmd_kdeconnect() {
     set-clipboard)
       kdeconnect_set_clipboard "$@"
       ;;
+    vmon|virtual-monitor)
+      local vmon_action="${1:-status}"
+      [ $# -gt 0 ] && shift
+      case "$vmon_action" in
+        status)
+          kdeconnect_vmon_status "$@"
+          ;;
+        start)
+          kdeconnect_vmon_start "$@"
+          ;;
+        stop)
+          kdeconnect_vmon_stop "$@"
+          ;;
+        *)
+          echo "Usage: knot kdeconnect vmon <status [<node>]|start <node>|stop [<node>]>"
+          exit 1
+          ;;
+      esac
+      ;;
     *)
-      echo "Usage: knot kdeconnect <status [--all]|sync [--all]|pair [<node_id>|--all]|reconcile|share --target <node> [<payload>]|sync-clipboard [--all|<node>]|test-clipboard [--all|<node>]|prune-stale>"
+      echo "Usage: knot kdeconnect <status [--all]|sync [--all]|pair [<node_id>|--all]|reconcile|vmon <status|start|stop>|share --target <node> [<payload>]|sync-clipboard [--all|<node>]|test-clipboard [--all|<node>]|prune-stale>"
+      ;;
+  esac
+}
+
+cmd_display() {
+  local action="${1:-status}"
+  [ $# -gt 0 ] && shift
+
+  case "$action" in
+    extend)
+      kdeconnect_vmon_start "$@"
+      ;;
+    stop)
+      kdeconnect_vmon_stop "$@"
+      ;;
+    status)
+      kdeconnect_vmon_status "$@"
+      ;;
+    *)
+      echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]>"
+      exit 1
       ;;
   esac
 }
@@ -1767,6 +1807,10 @@ case "${1:-}" in
   kdeconnect)
     shift
     cmd_kdeconnect "$@"
+    ;;
+  display)
+    shift
+    cmd_display "$@"
     ;;
   council)
     shift

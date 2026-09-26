@@ -51,6 +51,7 @@ The foundational infrastructure layer managing physical machines, hardware netwo
 - **Display Management & Auto-Unlock (`knot-autounlock`)**: Unlocking and waking Wayland/KDE display sessions on cursor entry.
 - **Dynamic Crossover Strip Daemon (`knot-stripd`)**: High-visibility border strips along active crossover boundaries with GPU-accelerated physics impulse flare animations.
 - **Full-Mesh Clipboard & Payload Transport (`knot kdeconnect`)**: Asynchronous, zero-latency payload synchronization over KDE Connect, strictly decoupled from Tier 2 cognitive agents and supervised continuously by Tier 1 systemd user timers (`knot-kdeconnect-reconcile.timer`) and NetworkManager roaming guards (`knot-guard`).
+- **Wayland Virtual Monitor Fabric (`knot kdeconnect vmon`, `knot display extend`)**: Dynamic headless display creation via KWin Wayland + `krdpserver` (`krdp`) and hardware-accelerated RDP streaming to remote strands via KRDC (`krdc` + `freerdp`). Enables docked handhelds (Steam Deck OLED, ROG Ally) and laptops to toggle instantly between independent KVM workstations and auxiliary high-density desktop displays.
 - **3-Tier Mesh Network Resolver (`core/resolver.sh`)**: Dynamic resolution hierarchy traversing WireGuard $\to$ mDNS $\to$ LAN physical fallback.
 
 ### Tier 2: Agent-to-Agent (A2A) Cognitive Swarm Layer

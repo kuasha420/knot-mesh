@@ -69,3 +69,15 @@ These rules govern all Wayland service configurations, LayerShell overlay daemon
 - **Fractional Apertures**: When bridging monitors of different sizes or orientations, link only the physically overlapping fractions (e.g. `left(65,100)`, `down(45,85)`), never full 0-100% edges.
 - **Logical Plane Alignment**: Match logical heights across neighboring screens (e.g. 1440p @ 200% scale $\rightarrow$ 720px; 1080p @ 150% scale $\rightarrow$ 720px) to ensure seamless horizontal movement without vertical jumps.
 - **Cursor Sizing**: Standardize cursor visual proportions across nodes (e.g. 48px on 200% 4K/UW, 36px on 150% 1080p, 32px on 125% 800p).
+
+## 7. Wayland Virtual Monitor Fabric (D2D Auxiliary Display Extension)
+- **Host Output Creation**: Host creates dynamic headless Wayland outputs in KWin using `krdpserver` (from package `krdp`) with `--virtual-monitor <WIDTHxHEIGHT@SCALE> --plasma`. KWin tears down the virtual display output automatically when the process terminates.
+- **Client Rendering**: Client renders the RDP stream via `krdc` (from `krdc` + `freerdp`), handling `rdp://` URI schemes passed via `QDesktopServices::openUrl()`.
+- **Signaling & Ephemeral Security**:
+  - Handled entirely over KDE Connect's TLS encrypted DBus interface (`org.kde.kdeconnect.device.virtualmonitor`).
+  - Passwords are auto-generated single-use UUID tokens; zero manual credential entry or persistent shared secrets.
+- **Subnet Port Invariant**: `krdpserver` listens on ports `5900-5910/tcp` (`knot-vmon`). Host firewalls (UFW/firewalld) must scope allow rules strictly to the local mesh subnet (`192.168.68.0/24`).
+- **Deskflow KVM Coexistence**:
+  - **Mode A (Independent KVM Strand)**: Strand runs its local desktop session, and mouse/keyboard transit across screens via Deskflow KVM.
+  - **Mode B (Auxiliary Desktop HUD)**: Strand displays the Anchor's headless virtual display full-screen via KRDC. The Anchor's desktop workspace expands directly onto the handheld or laptop display.
+
