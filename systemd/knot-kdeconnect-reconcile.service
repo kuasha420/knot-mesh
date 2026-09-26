@@ -1,0 +1,11 @@
+[Unit]
+Description=Knot Tier 1 D2D KDE Connect Mesh Reconciler
+PartOf=graphical-session.target
+After=graphical-session.target
+Requisite=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/knot kdeconnect reconcile
+StandardOutput=journal
+StandardError=journal

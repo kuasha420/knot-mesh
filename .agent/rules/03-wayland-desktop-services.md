@@ -44,6 +44,26 @@ These rules govern all Wayland service configurations, LayerShell overlay daemon
   - Eliminate artificial edge pauses and network buffer stalls during screen crossovers.
 - **Payload & Clipboard synchronization belongs to KDE Connect:**
   - All text clipboards, images, and file transfers are managed asynchronously over KDE Connect's full-mesh network without stalling mouse movement.
+- **Zero-Interaction Trust Bootstrapping (`knot kdeconnect pair`):**
+  - Uses existing Ed25519 SSH mesh credentials as out-of-band trust anchors.
+  - Automatically requests and accepts pairings via DBus (`openKdeConnect -d <id> pair` and `acceptPairing`) without manual GUI confirmation prompts.
+  - Automatically detects and prunes obsolete device identities caused by cryptographic key algorithm shifts (e.g. RSA to EC) via `knot kdeconnect prune-stale`.
+- **KDE Plasma 6 Klipper DBus Pipeline:**
+  - Authoritative Wayland clipboard transport uses `org.kde.klipper /klipper org.kde.klipper.klipper.setClipboardContents` and `getClipboardContents`.
+  - Transparent fallback to `wl-copy` / `wl-paste` when Klipper DBus is unreachable.
+  - **Subshell Command Substitution Invariant**: NEVER wrap `wl-copy` directly in a bash command substitution subshell (e.g. `out=$(printf ... | wl-copy 2>&1)`). `wl-copy` forks into the background to serve selection requests and holds inherited file descriptors open, causing bash command substitution to hang indefinitely waiting for EOF. Klipper DBus calls execute synchronously in <10ms without background daemon forking hazards.
+  - Full support for arbitrary large payloads (>21KB), multi-line snippets, and long URLs with query parameters.
+- **Tier 1 D2D Continuous Self-Healing & Systemd Timer Invariant:**
+  - Continuous pairing reconciliation belongs strictly to Tier 1 D2D physical workspace fabric; it must never be embedded in Tier 2 A2A cognitive agents (`knot-agent`).
+  - Reconciler service (`knot-kdeconnect-reconcile.service`) must bind to `graphical-session.target` to access session DBus and compositor state.
+  - Network roaming events trigger immediate background execution via `knot-guard` (`systemctl --user start --no-block knot-kdeconnect-reconcile.service`).
+  - Auto-acceptance of pairing requests must enforce strict active swarm manifest verification and reciprocal Ed25519 SSH connectivity probes. Unrecognized devices on LAN are strictly ignored.
+- **Cross-Strand Piping & Integrated Workflow Hooks:**
+  - Operators and subagents can pipe clipboard payloads directly across nodes: `echo "payload" | knot kdeconnect share --target <node>`.
+  - Fleet-wide broadcast: `knot kdeconnect sync-clipboard [--all]`.
+  - E2E Automated Verification: `knot kdeconnect test-clipboard [--all]`.
+  - Integrated into `knot auth login`: Pre-synchronizes device IP hints and broadcasts OAuth URLs / tokens across all screens immediately upon login.
+  - Integrated into `knot-installer`: `knot-installer invite` automatically broadcasts enrollment tokens to the fleet clipboard; `knot-installer join` automatically detects clipboard tokens when omitted.
 
 ## 6. Multi-DPI Display Geometry Harmonization
 - **Fractional Apertures**: When bridging monitors of different sizes or orientations, link only the physically overlapping fractions (e.g. `left(65,100)`, `down(45,85)`), never full 0-100% edges.

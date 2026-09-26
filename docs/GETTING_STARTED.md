@@ -219,10 +219,17 @@ To test cross-machine execution:
 knot exec --all "hostname; uptime"
 ```
 
-To sync KDE Connect clipboard sharing across all machines:
+To bootstrap and verify KDE Connect clipboard sharing across the entire mesh:
 
 ```bash
-knot kdeconnect sync --all
+# 1. Automated zero-interaction pairing across all strands
+knot kdeconnect pair --all
+
+# 2. Check fleet-wide connection & clipboard status
+knot kdeconnect status --all
+
+# 3. Verify end-to-end clipboard synchronization
+knot kdeconnect test-clipboard --all
 ```
 
 ---

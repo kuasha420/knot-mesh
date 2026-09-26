@@ -283,7 +283,7 @@ TOPO_EOF
     fi
   done
 
-  for svc in knot-hub.service knot-agent.service knot-stripd.service knot-guard.service; do
+  for svc in knot-hub.service knot-agent.service knot-stripd.service knot-guard.service knot-kdeconnect-reconcile.service knot-kdeconnect-reconcile.timer; do
     if [ -f "$KNOT_ROOT/systemd/$svc" ]; then
       ln -sf "$KNOT_ROOT/systemd/$svc" "$user_unit_dir/$svc"
     fi
@@ -299,6 +299,12 @@ TOPO_EOF
       echo -e "  ${C_GREEN}[✓] Knot Guard service enabled.${C_RESET}"
     else
       echo -e "  ${C_YELLOW}[!] Notice: Could not enable knot-guard.service: ${g_out}${C_RESET}"
+    fi
+    local t_out=""
+    if t_out="$(systemctl --user enable --now knot-kdeconnect-reconcile.timer 2>&1)"; then
+      echo -e "  ${C_GREEN}[✓] Tier 1 D2D KDE Connect reconciler timer enabled.${C_RESET}"
+    else
+      echo -e "  ${C_YELLOW}[!] Notice: Could not enable knot-kdeconnect-reconcile.timer: ${t_out}${C_RESET}"
     fi
   fi
 
@@ -453,6 +459,21 @@ except Exception as e:
   echo -e "\n  ${C_DIM}Or if Knot is already installed:${C_RESET}"
   echo -e "    ${C_DIM}knot-installer join ${anchor_ip}:${port} ${token}${C_RESET}"
   echo -e "${C_GREEN}${C_BOLD}======================================================================${C_RESET}"
+
+  # Pre-populate clipboard with join command and broadcast across mesh
+  local join_cmd="curl -kfsSL https://${anchor_ip}:${port}/join/${token} | bash"
+  if [ -f "$KNOT_ROOT/core/modules/kdeconnect.sh" ]; then
+    # shellcheck source=../core/modules/kdeconnect.sh
+    source "$KNOT_ROOT/core/modules/kdeconnect.sh"
+    local clip_err="" clip_rc=0
+    clip_err="$(kdeconnect_set_clipboard "$join_cmd" 2>&1)" || clip_rc=$?
+    if [ $clip_rc -eq 0 ]; then
+      echo -e "  ${C_DIM}(Join command copied to clipboard & broadcast across mesh)${C_RESET}"
+      local sync_err="" sync_rc=0
+      sync_err="$(kdeconnect_sync_clipboard --all 2>&1)" || sync_rc=$?
+    fi
+  fi
+
   echo -e "${C_CYAN}Waiting for Strand rendezvous connection (timeout: ${ttl}s)...${C_RESET}"
 
   # Rendezvous wait call
@@ -549,15 +570,43 @@ cmd_join() {
   local height=""
   local scale=""
 
-  if [ $# -lt 2 ]; then
-    cat << JOIN_HELP
-${C_BOLD}Usage:${C_RESET} knot-installer join <anchor_endpoint> <token> [OPTIONS]
+  local clipboard_token=0
 
-Enroll this device into a Knot Mesh swarm.
+  # Check if endpoint provided and token can be retrieved from clipboard
+  if [ $# -eq 1 ]; then
+    endpoint="$1"
+    shift
+    clipboard_token=1
+  elif [ $# -ge 2 ]; then
+    endpoint="$1"
+    token="$2"
+    shift 2
+  fi
+
+  if [ $clipboard_token -eq 1 ] && [ -z "$token" ]; then
+    if [ -f "$KNOT_ROOT/core/modules/kdeconnect.sh" ]; then
+      # shellcheck source=../core/modules/kdeconnect.sh
+      source "$KNOT_ROOT/core/modules/kdeconnect.sh"
+      local clip_content="" clip_rc=0
+      clip_content="$(kdeconnect_get_clipboard 2>&1)" || clip_rc=$?
+      if [ $clip_rc -eq 0 ] && [ -n "$clip_content" ]; then
+        if [[ "$clip_content" =~ ([0-9]{6}\.[a-f0-9]+) ]]; then
+          token="${BASH_REMATCH[1]}"
+          echo -e "${C_CYAN}[•] Auto-detected pairing token from clipboard: ${C_BOLD}${token}${C_RESET}"
+        fi
+      fi
+    fi
+  fi
+
+  if [ -z "$endpoint" ] || [ -z "$token" ]; then
+    cat << JOIN_HELP
+${C_BOLD}Usage:${C_RESET} knot-installer join <anchor_endpoint> [<token>] [OPTIONS]
+
+Enroll this device into a Knot Mesh swarm. If <token> is omitted, attempts to auto-detect token from clipboard.
 
 ${C_BOLD}Arguments:${C_RESET}
     <anchor_endpoint>    Anchor IP or hostname[:port] (e.g. 192.168.1.50:4242)
-    <token>              Pairing token in format <PIN>.<FINGERPRINT>
+    <token>              Pairing token in format <PIN>.<FINGERPRINT> (optional if in clipboard)
 
 ${C_BOLD}Options:${C_RESET}
     --id <id>            Custom node ID (defaults to local hostname)
@@ -571,10 +620,6 @@ ${C_BOLD}Options:${C_RESET}
 JOIN_HELP
     exit 1
   fi
-
-  endpoint="$1"
-  token="$2"
-  shift 2
 
   local auto_mode=0
   local skip_firewall=0
@@ -781,6 +826,39 @@ JOIN_HELP
     fi
   fi
 
+  # 7. Configure Tier 1 D2D KDE Connect self-healing and initial pairing
+  echo -e "  ${C_CYAN}[•] Deploying Tier 1 D2D KDE Connect reconciler timer...${C_RESET}"
+  if [ -f "$KNOT_ROOT/systemd/knot-kdeconnect-reconcile.service" ]; then
+    ln -sf "$KNOT_ROOT/systemd/knot-kdeconnect-reconcile.service" "$user_unit_dir/knot-kdeconnect-reconcile.service"
+  fi
+  if [ -f "$KNOT_ROOT/systemd/knot-kdeconnect-reconcile.timer" ]; then
+    ln -sf "$KNOT_ROOT/systemd/knot-kdeconnect-reconcile.timer" "$user_unit_dir/knot-kdeconnect-reconcile.timer"
+    if command -v systemctl >/dev/null; then
+      local r_out=""
+      if ! r_out="$(systemctl --user daemon-reload 2>&1)"; then
+        echo -e "  ${C_YELLOW}[!] Notice: systemctl daemon-reload: ${r_out}${C_RESET}"
+      fi
+      local t_out=""
+      if ! t_out="$(systemctl --user enable --now knot-kdeconnect-reconcile.timer 2>&1)"; then
+        echo -e "  ${C_YELLOW}[!] Notice: Could not enable knot-kdeconnect-reconcile.timer: ${t_out}${C_RESET}"
+      else
+        echo -e "  ${C_GREEN}[✓] Knot Tier 1 D2D KDE Connect reconciler timer enabled.${C_RESET}"
+      fi
+    fi
+  fi
+
+  if [ -f "$KNOT_ROOT/core/modules/kdeconnect.sh" ]; then
+    source "$KNOT_ROOT/core/modules/kdeconnect.sh"
+    echo -e "  ${C_CYAN}[•] Initiating turnkey KDE Connect pairing with mesh...${C_RESET}"
+    local kde_rec_out="" kde_rec_rc=0
+    if kde_rec_out="$(kdeconnect_reconcile 2>&1)"; then
+      echo -e "  ${C_GREEN}[✓] KDE Connect paired with mesh.${C_RESET}"
+    else
+      kde_rec_rc=$?
+      echo -e "  ${C_YELLOW}[!] Notice: Turnkey KDE Connect pairing returned (${kde_rec_rc}). Background D2D timer will finalize reconciliation.${C_RESET}"
+    fi
+  fi
+
   echo -e "${C_GREEN}${C_BOLD}[✓] Onboarding complete! This device is now an active Strand in the mesh.${C_RESET}\n"
 }
 
@@ -819,7 +897,7 @@ cmd_uninstall() {
 
   echo -e "${C_CYAN}[•] Stopping Knot Mesh user services...${C_RESET}"
   if command -v systemctl >/dev/null; then
-    for unit in knot-deskflow knot-guard knot-hub knot-agent knot-autounlock; do
+    for unit in knot-deskflow knot-guard knot-hub knot-agent knot-autounlock knot-kdeconnect-reconcile; do
       if systemctl --user is-active --quiet "${unit}.service"; then
         systemctl --user stop "${unit}.service"
         echo -e "    Stopped ${unit}.service"
@@ -827,6 +905,14 @@ cmd_uninstall() {
       if systemctl --user is-enabled --quiet "${unit}.service"; then
         systemctl --user disable "${unit}.service"
         echo -e "    Disabled ${unit}.service"
+      fi
+      if systemctl --user is-active --quiet "${unit}.timer"; then
+        systemctl --user stop "${unit}.timer"
+        echo -e "    Stopped ${unit}.timer"
+      fi
+      if systemctl --user is-enabled --quiet "${unit}.timer"; then
+        systemctl --user disable "${unit}.timer"
+        echo -e "    Disabled ${unit}.timer"
       fi
     done
   fi

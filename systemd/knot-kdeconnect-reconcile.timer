@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodic Knot Tier 1 D2D KDE Connect Mesh Reconciler Timer
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=3min
+RandomizedDelaySec=15s
+
+[Install]
+WantedBy=timers.target

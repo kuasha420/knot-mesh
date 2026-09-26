@@ -303,15 +303,30 @@ knot autologin <node_id>           # Trigger remote auto-login on a specific str
 ---
 
 ### `knot kdeconnect`
-Manages KDE Connect mesh synchronization, custom device discovery, device pairing, and cross-device clipboard sharing.
+Manages KDE Connect mesh synchronization, custom device discovery, automated zero-interaction device pairing, and cross-strand Wayland clipboard sharing.
 
 ```bash
-knot kdeconnect status             # Show paired devices, IP hints, and clipboard status locally
-knot kdeconnect status --all       # Fleet-wide KDE Connect status across all active swarm nodes
-knot kdeconnect sync               # Synchronize swarm IP hints into local customDevices & enforce clipboard plugins
-knot kdeconnect sync --all         # Propagate customDevices and enforce clipboard across the entire fleet
-knot kdeconnect pair <node_id>     # Initiate bidirectional pairing request with a specific mesh peer
+knot kdeconnect status                              # Show discovered/paired devices, IP hints, and clipboard status locally
+knot kdeconnect status --all                        # Fleet-wide KDE Connect status across all active swarm nodes
+knot kdeconnect sync [--all]                        # Synchronize swarm IP hints into customDevices & enforce clipboard plugins
+knot kdeconnect pair <node_id>                      # Automated zero-interaction pairing with a specific mesh peer
+knot kdeconnect pair --all                          # Automated full-mesh zero-interaction pairing across the entire swarm
+knot kdeconnect reconcile                           # Autonomous D2D self-healing: prune stale IDs, auto-accept verified requests & bond unbonded peers
+knot kdeconnect share --target <node_id> [<text>]   # Push text or URLs directly into target strand's clipboard (or stdin pipe)
+knot kdeconnect sync-clipboard [--all|<node_id>]    # Broadcast local clipboard contents across all paired strands
+knot kdeconnect test-clipboard [--all|<node_id>]    # End-to-end automated clipboard round-trip verification sweep
+knot kdeconnect prune-stale                         # Detect and unpair obsolete/duplicate device identities
+knot kdeconnect get-clipboard                       # Read local Wayland/Klipper clipboard contents
+knot kdeconnect set-clipboard "<payload>"           # Set local Wayland/Klipper clipboard contents
 ```
+
+- **Core Capabilities**:
+  - **Tier 1 D2D Continuous Self-Healing**: Fully autonomous background reconciliation supervised by `knot-kdeconnect-reconcile.timer` (running every 3 minutes under `graphical-session.target`) and `knot-guard` (triggering on network roaming). Scans active swarm node manifests, auto-accepts pairing requests from verified peers over reciprocal Ed25519 SSH probes, and silently re-pairs dropped connections without operator intervention.
+  - **Zero-Interaction Trust Bootstrapping**: Leverages existing Ed25519 SSH mesh credentials as out-of-band trust anchors to automatically accept pairing requests via DBus without manual GUI clicks.
+  - **Turnkey Onboarding & 1-Click Repair**: Automatically executes non-blocking reconciliation during `knot onboard` and `knot-installer join`; `knot doctor` detects unbonded swarm peers and `knot repair` self-heals the entire mesh with one click.
+  - **Plasma 6 Wayland Pipeline**: Direct integration with KDE Plasma 6 Klipper DBus (`org.kde.klipper /klipper`) with transparent fallback to `wl-paste` / `wl-copy`. Safely supports large payloads (>8KB / 16KB / 21KB), multi-line snippets, and long URLs with query parameters without shell mangling.
+  - **Intentional Cross-Strand Piping**: Pipe authorization codes, tokens, or URLs straight to another node's clipboard (`echo "https://..." | knot kdeconnect share --target laptop`).
+  - **Auto-Integrated Workflows**: Automatically pre-synchronizes clipboards during `knot auth login` (for instant cross-screen OAuth code copying) and `knot-installer invite` / `join` (for seamless token auto-detection).
 
 ---
 

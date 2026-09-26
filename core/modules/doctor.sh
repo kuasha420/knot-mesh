@@ -453,6 +453,84 @@ doctor_check_local() {
     doc_warn "Neither qdbus6 nor qdbus installed; skipping KDE Connect plugin checks"
     warnings=$((warnings + 1))
   fi
+
+  # Cross-reference active swarm peers from manifests
+  local doc_home
+  doc_home="$(knot_detect_user_home)"
+  local doc_nodes_dirs=()
+  if command -v knot_get_nodes_dir >/dev/null; then
+    local primary_dir=""
+    if primary_dir="$(knot_get_nodes_dir)" && [ -d "$primary_dir" ]; then
+      doc_nodes_dirs+=("$primary_dir")
+    fi
+  fi
+  for d in "$doc_home/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
+    [ -d "$d" ] || continue
+    if [[ ! " ${doc_nodes_dirs[*]} " =~ " ${d} " ]]; then
+      doc_nodes_dirs+=("$d")
+    fi
+  done
+
+  local doc_swarm_peers=()
+  for ndir in "${doc_nodes_dirs[@]}"; do
+    for manifest in "$ndir/"*.json; do
+      [ -e "$manifest" ] || continue
+      local nid nhost
+      nid="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+      nhost="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+      if [ -n "$nid" ] && [ "$nid" != "$my_host" ] && [ "$nhost" != "$my_host" ]; then
+        if [[ ! " ${doc_swarm_peers[*]} " =~ " ${nid} " ]]; then
+          doc_swarm_peers+=("$nid")
+        fi
+      fi
+    done
+  done
+
+  for peer in "${doc_swarm_peers[@]}"; do
+    local is_peer_online=0
+    local p_out=""
+    if p_out="$(ssh -o BatchMode=yes -o ConnectTimeout=2 "$peer" "echo ok" 2>&1)"; then
+      is_peer_online=1
+    fi
+
+    if [ $is_peer_online -eq 1 ]; then
+      local peer_kde_id=""
+      if peer_kde_id="$(ssh -o BatchMode=yes -o ConnectTimeout=2 "$peer" "kdeconnect-cli --my-id" 2>&1)"; then
+        peer_kde_id="$(echo "$peer_kde_id" | tr -d '[:space:]')"
+      fi
+
+      local is_peer_paired=0
+      if [ -n "$peer_kde_id" ] && [ -n "$qdbus_cmd" ]; then
+        local p_chk=""
+        if p_chk="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$peer_kde_id" org.kde.kdeconnect.device.isPaired 2>&1)"; then
+          if [ "$p_chk" = "true" ]; then
+            is_peer_paired=1
+          fi
+        fi
+      fi
+
+      if [ $is_peer_paired -eq 1 ]; then
+        doc_ok "Swarm peer '$peer' is paired in KDE Connect"
+      else
+        doc_fail "Swarm peer '$peer' is online but NOT paired in KDE Connect (run 'knot repair')"
+        failures=$((failures + 1))
+      fi
+    fi
+  done
+
+  # Inspect Tier 1 D2D Reconciler Timer
+  local timer_probe=""
+  if timer_probe="$(systemctl --user is-active knot-kdeconnect-reconcile.timer 2>&1)"; then
+    if [ "$timer_probe" = "active" ]; then
+      doc_ok "knot-kdeconnect-reconcile.timer is active (D2D self-healing enabled)"
+    else
+      doc_warn "knot-kdeconnect-reconcile.timer is not active ($timer_probe) (run 'knot repair' to enable)"
+      warnings=$((warnings + 1))
+    fi
+  else
+    doc_warn "knot-kdeconnect-reconcile.timer is not active (run 'knot repair' to enable)"
+    warnings=$((warnings + 1))
+  fi
   # 7. Antigravity Swarm Node Health
   echo -e "\n${C_BOLD}[Antigravity Swarm Node Health]${C_RESET}"
   if command -v antigravity_detect_cli >/dev/null && antigravity_detect_cli; then
@@ -895,9 +973,31 @@ doctor_repair_local() {
   source "$KNOT_ROOT/core/modules/ssh.sh"
   ssh_sync_client_config
 
-  # 11. Ensure KDE Connect mesh sync & clipboard sharing
+  # 11. Ensure KDE Connect mesh sync & self-healing pairing
   source "$KNOT_ROOT/core/modules/kdeconnect.sh"
-  kdeconnect_sync_mesh
+  kdeconnect_reconcile
+
+  # Deploy and enable Tier 1 D2D KDE Connect reconciler timer
+  local user_unit_dir="${HOME}/.config/systemd/user"
+  mkdir -p "$user_unit_dir"
+  if [ -f "$KNOT_ROOT/systemd/knot-kdeconnect-reconcile.service" ]; then
+    ln -sf "$KNOT_ROOT/systemd/knot-kdeconnect-reconcile.service" "$user_unit_dir/knot-kdeconnect-reconcile.service"
+  fi
+  if [ -f "$KNOT_ROOT/systemd/knot-kdeconnect-reconcile.timer" ]; then
+    ln -sf "$KNOT_ROOT/systemd/knot-kdeconnect-reconcile.timer" "$user_unit_dir/knot-kdeconnect-reconcile.timer"
+    if command -v systemctl >/dev/null; then
+      local r_out=""
+      if ! r_out="$(systemctl --user daemon-reload 2>&1)"; then
+        knot_log_warn "Notice: systemctl daemon-reload: $r_out"
+      fi
+      local t_out=""
+      if ! t_out="$(systemctl --user enable --now knot-kdeconnect-reconcile.timer 2>&1)"; then
+        knot_log_warn "Notice: Could not enable knot-kdeconnect-reconcile.timer: $t_out"
+      else
+        knot_log_ok "Knot Tier 1 D2D KDE Connect reconciler timer active."
+      fi
+    fi
+  fi
 
   knot_log_ok "Local repair operations completed for $my_host."
 }

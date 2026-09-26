@@ -212,6 +212,34 @@ knot exec --all "uname -r"
 knot exec --all "if command -v nvidia-smi >/dev/null; then nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader; elif command -v sensors >/dev/null; then sensors | grep -i edge; fi"
 ```
 
+### 4. Full-Mesh KDE Connect & Wayland Clipboard Synchronization
+Knot Mesh enforces complete separation between Deskflow KVM pointer multiplexing and KDE Connect payload transport:
+- **Tier 1 D2D Continuous Self-Healing Fabric**:
+  - Dropped pairings, device key refreshes, and network transitions are continuously reconciled without user intervention.
+  - **Supervision**: `knot-kdeconnect-reconcile.timer` fires every 3 minutes in active Wayland user sessions (`graphical-session.target`).
+  - **Roaming**: `knot-guard` immediately triggers background reconciliation (`systemctl --user start --no-block knot-kdeconnect-reconcile.service`) upon connecting to the swarm network fence.
+  - **Manual Trigger**:
+    ```bash
+    knot kdeconnect reconcile
+    ```
+- **Inspect Self-Healing Timers & Fleet State**:
+  ```bash
+  systemctl --user list-timers knot-kdeconnect-reconcile.timer
+  knot kdeconnect status --all
+  ```
+- **Targeted & Fleet-Wide Clipping**:
+  ```bash
+  # Push text/URL directly to a specific strand's clipboard via stdin pipe:
+  echo "secret_token_or_url" | knot kdeconnect share --target laptop
+
+  # Broadcast local clipboard contents across all paired strands:
+  knot kdeconnect sync-clipboard --all
+  ```
+- **Automated Verification**:
+  ```bash
+  knot kdeconnect test-clipboard --all
+  ```
+
 ---
 
 ## Power & Sleep Coordination

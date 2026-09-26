@@ -26,15 +26,11 @@ The roadmap is structured across three distinct horizons of fidelity:
 | **PSL** | **PSL Rule 1 & Rule 2 Enforcement**<br>• Zero error swallowing across production code and test suites.<br>• Purged all `2>/dev/null`, `&>/dev/null`, `|| true`, and `|| :`.<br>• Universal PSL integrity suite with 5 automated audits. | `desktop` (Lead)<br>`laptop` (Peer) | **COMPLETED** | Verified via `tests/test_psl_integrity.sh` (0 defects found). |
 | **#60** | **Multi-Tenant Local Profile Sandboxing**<br>• Headless multi-account sandboxing under `~/.config/knot/auth/`.<br>• Atomic symlink switching between profiles without intermediate read errors.<br>• Non-blocking Secret Service / KWallet lock probe.<br>• Zero network credential leakage invariant.<br>• Fleet-wide node targeting (`knot auth <node_id> <action>`, `--all`). | `desktop` (Lead)<br>`rog-ally` (Peer) | **COMPLETED** | Verified via `tests/test_knot_auth.sh` (11/11 tests passed). |
 | **Fleet** | **100% Dual-Profile Fleet Rollout & Starter Quota Telemetry**<br>• Complete dual-account enrollment across all 4 strands (8 total profiles).<br>• Dynamic Antigravity Starter Quota detection and weekly-only telemetry.<br>• Elimination of cross-account quota timestamp merging bugs (BUG-022, BUG-023).<br>• Zero-token live visualizers (`knot quota live`, `knot council board`). | `desktop` (Lead)<br>`steamdeck` (Peer) | **COMPLETED** | Verified live across all 4 strands and `tests/test_live_viewers.py`. |
+| **#62** | **Full E2E KDE Connect Fleet Audit & Wayland Clipboard Harmonization**<br>• Automated zero-interaction pairing via SSH/DBus (`knot kdeconnect pair [--all]`).<br>• KDE Plasma 6 Klipper DBus pipeline (`getClipboardContents`/`setClipboardContents`) with `wl-clipboard` fallback.<br>• Intentional CLI sharing & broadcast (`knot kdeconnect share`, `sync-clipboard`, `test-clipboard`).<br>• Zero-friction integration with `knot auth login` & `knot-installer invite`/`join`.<br>• 100% full-mesh pairing & large payload (>21KB) verification across 4 nodes. | `desktop` (Lead)<br>`laptop` (Peer) | **COMPLETED** | Verified via `tests/test_kdeconnect_qa.sh` (10/10), `test_kdeconnect_autologin.sh` (11/11), and live fleet audit. |
 
 ---
 
 ## 3. Horizon 2 (Intermediate: Medium Resolution) — Platform Maturation & Contracts
-
-* **[Epic #62: Full E2E KDE Connect Fleet Audit & Wayland Clipboard Harmonization](https://github.com/kuasha420/knot-mesh/issues/62) (Immediate QA Priority)**:
-  - Reaffirm KDE Connect as the sole authoritative, asynchronous clipboard transport across the mesh, while preserving Deskflow KVM strictly for raw pointer multiplexing (`clipboardSharing = false`, `switchDelay = 0`).
-  - Automated mesh pairing and trust bootstrapping via SSH hostkeys/TLS CA roots without GUI intervention.
-  - Wayland-native Klipper/DBus pipeline supporting large payloads, OAuth URLs, and dedicated CLI sharing (`knot kdeconnect share`).
 
 * **[Epic #61: Handheld Ambient HUDs & Cockpit Workflow Consolidation](https://github.com/kuasha420/knot-mesh/issues/61)**:
   - Transition from working proof-of-concept to frictionless daily reality for multi-display ambient development.

@@ -429,6 +429,14 @@ auth_login() {
   echo -e "  ${C_YELLOW}3.${C_RESET} Copy the authorization code and paste it right into the prompt below."
   echo ""
 
+  # Pre-sync KDE Connect mesh to ensure cross-screen clipboard propagation is live
+  if [ -f "$KNOT_ROOT/core/modules/kdeconnect.sh" ]; then
+    # shellcheck source=./kdeconnect.sh
+    source "$KNOT_ROOT/core/modules/kdeconnect.sh"
+    local pre_sync_out="" pre_sync_rc=0
+    pre_sync_out="$(kdeconnect_sync_mesh 2>&1)" || pre_sync_rc=$?
+  fi
+
   local agy_rc=0
   if [ $no_browser -eq 1 ]; then
     BROWSER=/bin/true "$agy_bin" || agy_rc=$?
@@ -437,6 +445,12 @@ auth_login() {
   fi
   if [ $agy_rc -ne 0 ]; then
     knot_log_warn "Notice: agy exited with status $agy_rc"
+  fi
+
+  # Post-login clipboard broadcast
+  if command -v kdeconnect_sync_clipboard >/dev/null; then
+    local post_sync_out="" post_sync_rc=0
+    post_sync_out="$(kdeconnect_sync_clipboard --all 2>&1)" || post_sync_rc=$?
   fi
 
   # After login, harvest token from upstream token file

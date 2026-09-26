@@ -49,6 +49,8 @@ The foundational infrastructure layer managing physical machines, hardware netwo
 - **C InputCapture Shim (`libinputcapture-persist.so`)**: Persistent portal session re-binding preventing barrier grab loss across DPMS cycles.
 - **Dynamic PAM Gating (`knot-auth-check`)**: Mathematical CIDR subnet validation for ephemeral passwordless sudo execution.
 - **Display Management & Auto-Unlock (`knot-autounlock`)**: Unlocking and waking Wayland/KDE display sessions on cursor entry.
+- **Dynamic Crossover Strip Daemon (`knot-stripd`)**: High-visibility border strips along active crossover boundaries with GPU-accelerated physics impulse flare animations.
+- **Full-Mesh Clipboard & Payload Transport (`knot kdeconnect`)**: Asynchronous, zero-latency payload synchronization over KDE Connect, strictly decoupled from Tier 2 cognitive agents and supervised continuously by Tier 1 systemd user timers (`knot-kdeconnect-reconcile.timer`) and NetworkManager roaming guards (`knot-guard`).
 - **3-Tier Mesh Network Resolver (`core/resolver.sh`)**: Dynamic resolution hierarchy traversing WireGuard $\to$ mDNS $\to$ LAN physical fallback.
 
 ### Tier 2: Agent-to-Agent (A2A) Cognitive Swarm Layer

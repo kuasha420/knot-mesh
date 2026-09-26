@@ -55,3 +55,48 @@ firewall_configure() {
     knot_log_warn "No active high-level firewall daemon (UFW/firewalld) detected. Ensure local ports are unblocked."
   fi
 }
+
+firewall_verify_kdeconnect() {
+  local subnet
+  subnet="$(knot_detect_subnet)"
+  local engines
+  engines="$(knot_detect_firewalls)"
+  local ok=1
+
+  knot_log_info "Verifying KDE Connect firewall rules (ports 1714-1764 UDP/TCP) for subnet $subnet..."
+
+  if [[ "$engines" =~ "ufw" ]]; then
+    local ufw_out="" ufw_rc=0
+    ufw_out="$(sudo ufw status verbose 2>&1)" || ufw_rc=$?
+    if [ $ufw_rc -eq 0 ]; then
+      if echo "$ufw_out" | grep -q "1714:1764/udp" && echo "$ufw_out" | grep -q "1714:1764/tcp"; then
+        knot_log_ok "UFW: KDE Connect ports 1714-1764 (UDP/TCP) are allowed."
+      else
+        knot_log_warn "UFW: Missing KDE Connect rules for subnet $subnet; inserting..."
+        sudo ufw insert 4 allow from "$subnet" to any port 1714:1764 proto udp comment 'knot-kde-udp'
+        sudo ufw insert 5 allow from "$subnet" to any port 1714:1764 proto tcp comment 'knot-kde-tcp'
+        sudo ufw reload >/dev/null
+        knot_log_ok "UFW rules applied."
+      fi
+    else
+      knot_log_warn "Notice: UFW status check returned non-zero ($ufw_rc): $ufw_out"
+      ok=0
+    fi
+  fi
+
+  if [[ "$engines" =~ "firewalld" ]]; then
+    local fw_svc_out="" fw_rc=0
+    fw_svc_out="$(sudo firewall-cmd --zone=public --query-service=kdeconnect 2>&1)" || fw_rc=$?
+    if [ $fw_rc -eq 0 ] && [ "$fw_svc_out" = "yes" ]; then
+      knot_log_ok "firewalld: KDE Connect service is active in public zone."
+    else
+      knot_log_warn "firewalld: Enabling kdeconnect service..."
+      sudo firewall-cmd --permanent --zone=public --add-service=kdeconnect >/dev/null
+      sudo firewall-cmd --reload >/dev/null
+      knot_log_ok "firewalld rules applied."
+    fi
+  fi
+
+  return $ok
+}
+

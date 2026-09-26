@@ -329,16 +329,22 @@ dispatch_user_services() {
           run_user_service_cmd "$u" "$uname" systemctl --user start knot-hub.service
           run_user_service_cmd "$u" "$uname" systemctl --user restart knot-deskflow.service
           run_user_service_cmd "$u" "$uname" systemctl --user start knot-stripd.service
+          run_user_service_cmd "$u" "$uname" systemctl --user start knot-kdeconnect-reconcile.timer
+          run_user_service_cmd "$u" "$uname" systemctl --user start --no-block knot-kdeconnect-reconcile.service
           ;;
         strand)
           run_user_service_cmd "$u" "$uname" systemctl --user stop knot-hub.service
           run_user_service_cmd "$u" "$uname" systemctl --user restart knot-deskflow.service
           run_user_service_cmd "$u" "$uname" systemctl --user stop knot-stripd.service
+          run_user_service_cmd "$u" "$uname" systemctl --user start knot-kdeconnect-reconcile.timer
+          run_user_service_cmd "$u" "$uname" systemctl --user start --no-block knot-kdeconnect-reconcile.service
           ;;
         standalone)
           run_user_service_cmd "$u" "$uname" systemctl --user stop knot-hub.service
           run_user_service_cmd "$u" "$uname" systemctl --user stop knot-deskflow.service
           run_user_service_cmd "$u" "$uname" systemctl --user stop knot-stripd.service
+          run_user_service_cmd "$u" "$uname" systemctl --user stop knot-kdeconnect-reconcile.timer
+          run_user_service_cmd "$u" "$uname" systemctl --user stop knot-kdeconnect-reconcile.service
           ;;
       esac
     fi

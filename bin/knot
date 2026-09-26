@@ -103,6 +103,36 @@ JSON_EOF
 
   cmd_sync
 
+  # Deploy and enable Tier 1 D2D KDE Connect reconciler timer
+  local user_unit_dir="${HOME}/.config/systemd/user"
+  mkdir -p "$user_unit_dir"
+  if [ -f "$KNOT_ROOT/systemd/knot-kdeconnect-reconcile.service" ]; then
+    ln -sf "$KNOT_ROOT/systemd/knot-kdeconnect-reconcile.service" "$user_unit_dir/knot-kdeconnect-reconcile.service"
+  fi
+  if [ -f "$KNOT_ROOT/systemd/knot-kdeconnect-reconcile.timer" ]; then
+    ln -sf "$KNOT_ROOT/systemd/knot-kdeconnect-reconcile.timer" "$user_unit_dir/knot-kdeconnect-reconcile.timer"
+    if command -v systemctl >/dev/null; then
+      local r_out=""
+      if ! r_out="$(systemctl --user daemon-reload 2>&1)"; then
+        knot_log_warn "Notice: systemctl daemon-reload returned: $r_out"
+      fi
+      local t_out=""
+      if ! t_out="$(systemctl --user enable --now knot-kdeconnect-reconcile.timer 2>&1)"; then
+        knot_log_warn "Notice: Could not enable knot-kdeconnect-reconcile.timer: $t_out"
+      fi
+    fi
+  fi
+
+  # Turnkey initial KDE Connect mesh reconciliation with non-blocking fallback
+  knot_log_info "Initiating turnkey KDE Connect mesh reconciliation..."
+  local rec_out="" rec_rc=0
+  if rec_out="$(kdeconnect_reconcile 2>&1)"; then
+    knot_log_ok "KDE Connect mesh paired and active."
+  else
+    rec_rc=$?
+    knot_log_info "Notice: Initial KDE Connect pairing returned ($rec_rc). Background D2D timer will finalize reconciliation."
+  fi
+
   knot_log_ok "Node '$node_id' successfully onboarded into Knot!"
 }
 
@@ -798,8 +828,29 @@ cmd_kdeconnect() {
     pair)
       kdeconnect_pair "$@"
       ;;
+    prune-stale)
+      kdeconnect_prune_stale "$@"
+      ;;
+    share)
+      kdeconnect_share "$@"
+      ;;
+    sync-clipboard)
+      kdeconnect_sync_clipboard "$@"
+      ;;
+    test-clipboard)
+      kdeconnect_test_clipboard "$@"
+      ;;
+    reconcile)
+      kdeconnect_reconcile "$@"
+      ;;
+    get-clipboard)
+      kdeconnect_get_clipboard "$@"
+      ;;
+    set-clipboard)
+      kdeconnect_set_clipboard "$@"
+      ;;
     *)
-      echo "Usage: knot kdeconnect <status [--all]|sync [--all]|pair <node_id>>"
+      echo "Usage: knot kdeconnect <status [--all]|sync [--all]|pair [<node_id>|--all]|reconcile|share --target <node> [<payload>]|sync-clipboard [--all|<node>]|test-clipboard [--all|<node>]|prune-stale>"
       ;;
   esac
 }
@@ -1833,7 +1884,7 @@ case "${1:-}" in
     echo "  knot kvm <restart|status>     Manage software KVM across the mesh"
     echo "  knot screen <status|unlock|lock|login> Manage screen lock/login states"
     echo "  knot autologin [status|check|doctor|migrate-dm|local|reconcile|fix-kwallet] Manage auto-login"
-    echo "  knot kdeconnect <status|sync|pair> Manage KDE Connect status, sync, pair & clipboard"
+    echo "  knot kdeconnect <status|sync|pair|share|sync-clipboard|test-clipboard|prune-stale> Manage KDE Connect mesh clipboard"
     exit 0
     ;;
 esac
