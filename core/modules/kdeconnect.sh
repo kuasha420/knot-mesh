@@ -938,6 +938,70 @@ kdeconnect_test_clipboard() {
   fi
 }
 
+kdeconnect_vmon_is_active() {
+  # 1. Check local state flags (sender node)
+  local home
+  home="$(knot_detect_user_home)"
+  local f=""
+  for f in /run/knot/vmon_muted_deskflow_* "$home/.local/state/knot/vmon_muted_deskflow_"*; do
+    if [ -f "$f" ]; then
+      return 0
+    fi
+  done
+
+  # 2. Check keepalive pid file or process (receiver node)
+  local uid
+  uid="$(id -u)"
+  local keepalive_pid="/run/user/$uid/knot-vmon-keepalive.pid"
+  if [ -f "$keepalive_pid" ]; then
+    local kpid=""
+    if [ -r "$keepalive_pid" ]; then
+      kpid="$(cat "$keepalive_pid")"
+    fi
+    if [ -n "$kpid" ]; then
+      local k_chk="" k_rc=0
+      k_chk="$(kill -0 "$kpid" 2>&1)" || k_rc=$?
+      if [ $k_rc -eq 0 ]; then
+        return 0
+      fi
+    fi
+  fi
+
+  # 3. Check for active streaming processes (krdpserver on sender, krdc/keepalive on receiver)
+  local p_out="" p_rc=0
+  p_out="$(pgrep -f "krdpserver" 2>&1)" || p_rc=$?
+  if [ $p_rc -eq 0 ]; then
+    return 0
+  fi
+  p_out="$(pgrep -f "krdc.*rdp://" 2>&1)" || p_rc=$?
+  if [ $p_rc -eq 0 ]; then
+    return 0
+  fi
+  p_out="$(pgrep -f "knot-vmon-keepalive" 2>&1)" || p_rc=$?
+  if [ $p_rc -eq 0 ]; then
+    return 0
+  fi
+
+  # 4. Check DBus virtualmonitor active property
+  local qdbus_cmd=""
+  if qdbus_cmd="$(kdeconnect_get_qdbus_cmd)"; then
+    local dev_list="" dev_rc=0
+    dev_list="$("$qdbus_cmd" org.kde.kdeconnect /modules/kdeconnect org.kde.kdeconnect.daemon.devices false true 2>&1)" || dev_rc=$?
+    if [ $dev_rc -eq 0 ] && [ -n "$dev_list" ]; then
+      local dev=""
+      for dev in $dev_list; do
+        local act="" act_rc=0
+        act="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$dev/virtualmonitor" org.kde.kdeconnect.device.virtualmonitor.active 2>&1)" || act_rc=$?
+        if [ $act_rc -eq 0 ] && [ "$act" = "true" ]; then
+          return 0
+        fi
+      done
+    fi
+  fi
+
+  return 1
+}
+
 kdeconnect_sync_mesh() {
   kdeconnect_configure_custom_devices
 
@@ -951,19 +1015,23 @@ kdeconnect_sync_mesh() {
     qdbus_cmd=""
   fi
 
-  # Trigger network discovery reload if DBus is available
-  if [ -n "$qdbus_cmd" ]; then
-    local reload_out=""
-    if ! reload_out="$($qdbus_cmd org.kde.kdeconnect /modules/kdeconnect org.kde.kdeconnect.daemon.forceOnNetworkChange 2>&1)"; then
-      knot_log_warn "Failed to trigger KDE Connect network reload via DBus: $reload_out"
+  # Trigger network discovery reload if DBus is available and no virtual monitor stream is active
+  if kdeconnect_vmon_is_active; then
+    knot_log_info "Virtual Monitor stream is active; skipping forceOnNetworkChange and kdeconnect-cli refresh to prevent stream teardown"
+  else
+    if [ -n "$qdbus_cmd" ]; then
+      local reload_out=""
+      if ! reload_out="$($qdbus_cmd org.kde.kdeconnect /modules/kdeconnect org.kde.kdeconnect.daemon.forceOnNetworkChange 2>&1)"; then
+        knot_log_warn "Failed to trigger KDE Connect network reload via DBus: $reload_out"
+      fi
     fi
-  fi
 
-  # Trigger active network probe
-  if command -v kdeconnect-cli >/dev/null; then
-    local refresh_out=""
-    if ! refresh_out="$(kdeconnect-cli --refresh 2>&1)"; then
-      knot_log_warn "KDE Connect CLI refresh probe failed: $refresh_out"
+    # Trigger active network probe
+    if command -v kdeconnect-cli >/dev/null; then
+      local refresh_out=""
+      if ! refresh_out="$(kdeconnect-cli --refresh 2>&1)"; then
+        knot_log_warn "KDE Connect CLI refresh probe failed: $refresh_out"
+      fi
     fi
   fi
 
@@ -1019,6 +1087,13 @@ kdeconnect_sync_mesh() {
 
 kdeconnect_reconcile() {
   knot_log_info "Reconciling KDE Connect mesh health & pairings..."
+
+  if kdeconnect_vmon_is_active; then
+    knot_log_info "Virtual Monitor stream is active; preserving network state and skipping discovery refresh/re-pair"
+    kdeconnect_sync_mesh
+    knot_log_ok "KDE Connect mesh reconciliation completed (vmon active mode)."
+    return 0
+  fi
 
   # 1. Prune obsolete or collision-causing device IDs
   kdeconnect_prune_stale
