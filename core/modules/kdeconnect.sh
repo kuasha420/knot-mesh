@@ -1474,7 +1474,7 @@ if command -v kwriteconfig6 >/dev/null; then
       kwriteconfig6 --file krdcrc --group hostpreferences --group \"\$h\" --key scaleToSize true
       kwriteconfig6 --file krdcrc --group hostpreferences --group \"\$h\" --key fullscreenScale true
       kwriteconfig6 --file krdcrc --group hostpreferences --group \"\$h\" --key windowedScale true
-      kwriteconfig6 --file krdcrc --group hostpreferences --group \"\$h\" --key showLocalCursor false
+      kwriteconfig6 --file krdcrc --group hostpreferences --group \"\$h\" --key showLocalCursor true
     done
   done
   curr_rules=\"\$(kreadconfig6 --file kwinrulesrc --group General --key rules 2>&1)\" || curr_rules=\"\"
@@ -1858,7 +1858,7 @@ kdeconnect_vmon_start() {
       fi
       local k_rc=0
       ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -p "$target_port" "$ssh_dest" \
-        "mkdir -p ~/.local/state/knot && nohup python3 ~/.local/bin/knot-vmon-keepalive </dev/null > ~/.local/state/knot/vmon-keepalive.log 2>&1 &" || k_rc=$?
+        "if pgrep -f 'krdc.*rdp://' >/dev/null; then pkill -f 'krdc.*rdp://'; fi; mkdir -p ~/.local/state/knot && nohup python3 ~/.local/bin/knot-vmon-keepalive </dev/null > ~/.local/state/knot/vmon-keepalive.log 2>&1 &" || k_rc=$?
       if [ $k_rc -ne 0 ]; then
         knot_log_warn "Notice: Spawning knot-vmon-keepalive on '$target_node' returned non-zero: $k_rc"
       fi
