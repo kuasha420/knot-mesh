@@ -1941,7 +1941,8 @@ case "${1:-}" in
     echo "  knot kvm <restart|status>     Manage software KVM across the mesh"
     echo "  knot screen <status|unlock|lock|login> Manage screen lock/login states"
     echo "  knot autologin [status|check|doctor|migrate-dm|local|reconcile|fix-kwallet] Manage auto-login"
-    echo "  knot kdeconnect <status|sync|pair|share|sync-clipboard|test-clipboard|prune-stale> Manage KDE Connect mesh clipboard"
+    echo "  knot kdeconnect <status|sync|pair|reconcile|vmon|share|sync-clipboard|test-clipboard|prune-stale> Manage KDE Connect mesh clipboard & virtual displays"
+    echo "  knot display <status|extend|stop> [node_id] Dynamic Wayland virtual display extension (RDP/KRDC)"
     exit 0
     ;;
 esac

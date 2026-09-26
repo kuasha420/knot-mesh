@@ -151,7 +151,67 @@ The Knot C preload shim (`libinputcapture-persist.so`) solves this at the librar
 
 ---
 
-## 6. 3-Tier Dynamic Network Resolution Hierarchy (`core/resolver.sh`)
+## 6. Wayland Virtual Monitor Fabric & Zero-Touch Trust Protocol (`knot display`, `knot kdeconnect vmon`)
+
+The Wayland Virtual Monitor Fabric expands an Anchor workstation's physical workspace onto docked handhelds (Steam Deck OLED, ROG Ally) or laptops without physical video cables or hardware capture dongles. It pairs KDE Plasma 6 KWin headless display virtualization with RDP hardware streaming and zero-touch cryptographic trust bootstrapping.
+
+```
+┌────────────────────────────────────────────────────────┐
+│                   Anchor Workstation                   │
+│                                                        │
+│  1. kdeconnect_vmon_ensure_host_certs                  │
+│     - Generate 10-year RSA 2048 cert (krdp.crt)        │
+│     - Configure krdpserverrc (ListeningPort=5900)      │
+│                                                        │
+│  2. kdeconnect_vmon_seed_client_trust (over SSH)       │
+│     - Push krdp.crt to client ~/.config/freerdp/server │
+│     - Symlink ports 5900..5920 to eliminate prompt     │
+│     - Set krdcrc ShowPreferences=false, Fullscreen=true│
+│                                                        │
+│  3. DBus requestVirtualMonitor                         │
+│     - KWin spawns headless virtual output              │
+│     - krdpserver streams display over RDP (5900/tcp)   │
+└──────────────────────────┬─────────────────────────────┘
+                           │ Authenticated TLS Stream
+                           │ (ports 5900-5910/tcp)
+                           ▼
+┌────────────────────────────────────────────────────────┐
+│                      Client Strand                     │
+│                                                        │
+│  - Receives rdp:// URI via KDE Connect DBus packet     │
+│  - Launches KRDC fullscreen without security warnings  │
+│  - Renders low-latency Wayland virtual desktop         │
+│  - On stop: Host terminates DBus & issues pkill over   │
+│    SSH to cleanly close remote KRDC viewer window      │
+└────────────────────────────────────────────────────────┘
+```
+
+### Headless Display Virtualization (`krdp` / `krdpserver`)
+Under KDE Plasma 6 Wayland, virtual monitors cannot be created via X11 dummy drivers or virtual monitor packages. Instead, Knot orchestrates KWin's native virtual monitor portal and `krdpserver`:
+- **Dynamic Virtual Output**: Spawns a headless virtual screen in KWin dynamically sized and scaled to the remote strand's physical panel (e.g. 1920x1080@100% or 1280x800@100%).
+- **Hardware-Accelerated Frame Capture**: KWin pipes rendered frames directly into `krdpserver` via Wayland DMA-BUF / PipeWire buffers.
+- **Automatic Output Destruction**: When the `krdpserver` process terminates, KWin automatically destroys the virtual output and cleanly refits the Anchor's multi-head layout without leaving ghost screens.
+
+### Zero-Touch Cryptographic Trust Protocol
+Stock implementations of KDE Connect Virtual Monitor require tedious manual interaction: certificate acceptance dialogs, connection preference popups, and recurring trust warnings. Knot resolves this through an out-of-band automated trust pipeline:
+1. **Host TLS Certificate Generation**: `krdpserver` requires an explicit TLS certificate to start. `kdeconnect_vmon_ensure_host_certs` checks `~/.local/share/krdpserver/krdp.crt`. If missing, it generates a 10-year self-signed RSA 2048 certificate and writes `ListeningPort=5900`, `Certificate`, and `CertificateKey` into `~/.config/krdpserverrc` via `kwriteconfig6`.
+2. **FreeRDP Dynamic Port Range Pre-Trusting**: KDE Connect's `virtualmonitorplugin.cpp` increments its listening port on every session (`static uint s_port = DEFAULT_PORT; s_port++`). Because FreeRDP 3 indexes trusted server certificates strictly by `<host>_<port>.pem` in `~/.config/freerdp/server/`, standard "Remember this certificate" prompts fail as soon as the port increments on subsequent connections. Knot's `kdeconnect_vmon_seed_client_trust` pushes the host certificate to the client and automatically creates symlinks across the entire dynamic port range `5900..5920` (`<host>_<port>.pem -> <host>.pem`).
+3. **Zero-Prompt Fullscreen KRDC Preferences**: Client configuration `~/.config/krdcrc` is pre-configured with `ShowPreferencesForNewConnections=false` and `FullscreenOnConnect=true`, suppressing modal dialogs and presenting the virtual desktop full-screen instantly.
+4. **Ephemeral Credential Exchange**: Single-use UUID passwords and dynamic connection endpoints are negotiated privately over KDE Connect's TLS encrypted DBus channel. Zero shared secrets or persistent passwords are ever stored on disk.
+
+### Viewer Lifecycle & Remote Process Cleanup
+When stopping a virtual monitor (`knot display stop <node_id>` or `knot kdeconnect vmon stop <node_id>`):
+1. Knot dispatches `org.kde.kdeconnect.device.virtualmonitor.stop` via DBus on the host, signaling KWin and `krdpserver` to terminate the stream and tear down the virtual display output.
+2. Knot simultaneously resolves the remote strand over authenticated SSH and issues a targeted process termination (`pkill -f 'krdc.*rdp://.*<my_ip>'`), instantly closing the KRDC viewer window on the remote screen without leaving orphaned windows or dangling sessions.
+
+### Dual-Mode Coexistence
+The Virtual Monitor Fabric seamlessly coexists with Deskflow KVM:
+- **Mode A (Independent KVM Strand)**: The strand runs its own local desktop session and apps; mouse and keyboard traverse physical screen boundaries via Deskflow KVM.
+- **Mode B (Auxiliary Desktop HUD)**: The strand renders the Anchor's virtual display output full-screen via KRDC. The user moves windows and mouse fluidly into the handheld or laptop as an extra monitor of the primary desktop workstation.
+
+---
+
+## 7. 3-Tier Dynamic Network Resolution Hierarchy (`core/resolver.sh`)
 
 Mesh nodes must communicate reliably despite DHCP lease shifts, roaming between Wi-Fi and Ethernet, and mixed subnet topologies. `core/resolver.sh` implements an algorithmic 3-tier resolution sequence:
 
@@ -190,7 +250,7 @@ Before returning an IP address, `resolver.sh` validates that the host is alive u
 
 ---
 
-## 7. Ephemeral Advisory Autologin & DPMS Autounlock Flows
+## 8. Ephemeral Advisory Autologin & DPMS Autounlock Flows
 
 Knot Mesh eliminates physical workstation friction through coordinated display power and session management while maintaining non-destructive safety guarantees:
 
@@ -215,7 +275,7 @@ When a docked Strand boots up:
 
 ---
 
-## 8. Dynamic PAM Sudo Gate (`knot-auth-check`)
+## 9. Dynamic PAM Sudo Gate (`knot-auth-check`)
 
 Passwordless sudo execution is guarded dynamically via PAM execution check:
 1. Verifies that the host is operating within an authorized active swarm profile (`ALLOW_NOPASSWD_SUDO="true"`).
@@ -226,7 +286,7 @@ Passwordless sudo execution is guarded dynamically via PAM execution check:
 
 ---
 
-## 9. Web Cockpit & Reactive EventBus
+## 10. Web Cockpit & Reactive EventBus
 
 - **Single-Page Application**: Built with React 19, TypeScript, and Tailwind CSS.
 - **SSE Event Streaming**: Consumes continuous server-sent events from Knot Hub (`/events`) for node status, task DAG orchestrations, GPU telemetry, and artifact leases.
@@ -234,7 +294,7 @@ Passwordless sudo execution is guarded dynamically via PAM execution check:
 
 ---
 
-## 10. Out-of-Band Multi-Agent Swarm Council Architecture
+## 11. Out-of-Band Multi-Agent Swarm Council Architecture
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────────────┐
@@ -298,7 +358,7 @@ Swarm Council operates independently of Knot's Blackboard Hub and Linda Tuplespa
 
 ---
 
-## 11. Linda Tuplespace Blackboard Lifecycle & Decentralized CRDT Memory Palace
+## 12. Linda Tuplespace Blackboard Lifecycle & Decentralized CRDT Memory Palace
 
 ### Linda Tuplespace Blackboard Hub (`core/hub/hub.py`, `core/hub/agent.py`)
 Coordination across headless nodes is mediated by an in-memory Linda tuplespace blackboard hosted by Knot Hub:
@@ -321,7 +381,7 @@ Agent memory and workspace context are stored across nodes without reliance on c
 
 ---
 
-## 12. Runtime Skills Architecture (`runtime/skills/`)
+## 13. Runtime Skills Architecture (`runtime/skills/`)
 
 Autonomous agent capabilities are fully decoupled from core bash orchestrators and relocated to the standardized `runtime/skills/` directory adhering to the open Agent Skills specification:
 
@@ -337,7 +397,7 @@ Autonomous agent capabilities are fully decoupled from core bash orchestrators a
 
 ---
 
-## 13. PSL Gold Standard Error Transparency Contracts & CI Verification
+## 14. PSL Gold Standard Error Transparency Contracts & CI Verification
 
 System reliability and observability across Knot Mesh are governed by the Product Systems Language (PSL) Gold Standard:
 

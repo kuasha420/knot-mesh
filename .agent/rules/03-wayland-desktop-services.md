@@ -77,7 +77,19 @@ These rules govern all Wayland service configurations, LayerShell overlay daemon
   - Handled entirely over KDE Connect's TLS encrypted DBus interface (`org.kde.kdeconnect.device.virtualmonitor`).
   - Passwords are auto-generated single-use UUID tokens; zero manual credential entry or persistent shared secrets.
 - **Subnet Port Invariant**: `krdpserver` listens on ports `5900-5910/tcp` (`knot-vmon`). Host firewalls (UFW/firewalld) must scope allow rules strictly to the local mesh subnet (`192.168.68.0/24`).
+- **Host TLS Certificate Invariant**:
+  - `krdpserver` will crash or refuse to start headless streaming without a valid TLS certificate configured at `~/.local/share/krdpserver/krdp.crt` and `krdp.key`, declared in `~/.config/krdpserverrc`.
+  - `knot doctor` and `knot repair` automatically generate a 10-year RSA 2048 self-signed certificate via `kdeconnect_vmon_ensure_host_certs` and configure `ListeningPort=5900` via `kwriteconfig6`.
+- **FreeRDP Dynamic Port Range Pre-Trust Invariant**:
+  - In KDE Connect's `virtualmonitorplugin.cpp`, the listening port is dynamically incremented on every session (`static uint s_port = DEFAULT_PORT; s_port++`).
+  - FreeRDP 3 strictly validates server certificates keyed by `~/.config/freerdp/server/<peer_ip>_<port>.pem`. Standard GUI certificate approval fails on subsequent connections because the port changes dynamically.
+  - `knot display extend` and `knot kdeconnect vmon start` automatically pre-seed the target strand's FreeRDP certificate store over SSH, pushing the host `krdp.crt` and establishing symlinks across the entire dynamic port range `5900..5920` (`<peer_ip>_<port>.pem -> <peer_ip>.pem`).
+- **Client Zero-Prompt Mode Invariant (`krdcrc`)**:
+  - The client's `~/.config/krdcrc` must configure `ShowPreferencesForNewConnections=false` and `FullscreenOnConnect=true` under `[Preferences]` to bypass GUI prompt dialogs and guarantee immediate fullscreen virtual display presentation.
+- **Remote Viewer Process Cleanup Invariant**:
+  - Stopping a virtual monitor stream (`knot display stop` or `knot kdeconnect vmon stop`) must terminate the DBus stream on the host and issue a targeted remote SSH process cleanup (`pkill -f 'krdc.*rdp://.*<my_ip>'`) to cleanly close lingering KRDC viewer windows on the client strand without leaving orphaned windows.
 - **Deskflow KVM Coexistence**:
   - **Mode A (Independent KVM Strand)**: Strand runs its local desktop session, and mouse/keyboard transit across screens via Deskflow KVM.
   - **Mode B (Auxiliary Desktop HUD)**: Strand displays the Anchor's headless virtual display full-screen via KRDC. The Anchor's desktop workspace expands directly onto the handheld or laptop display.
+
 

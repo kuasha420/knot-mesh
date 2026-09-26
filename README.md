@@ -69,6 +69,7 @@ The foundational infrastructure plane managing physical machines, hardware netwo
 - **Wayland LayerShell Strips**: Subtle PyQt6 edge indicators (`knot-stripd`) flashing visual transitions across physical monitor edges.
 - **DPMS Auto-Unlock & Non-Destructive Auto-Login**: Advisory, non-destructive session wake and unlock via DPMS and KDE Connect verification without destroying active sessions.
 - **KDE Connect Clipboard Integration**: Unified cross-node clipboard synchronization and device pairing.
+- **Wayland Virtual Monitor Fabric**: Seamlessly expand the Anchor desktop onto docked handhelds (Steam Deck OLED, ROG Ally) and laptops via KWin Wayland headless outputs + `krdpserver` and KRDC with out-of-band FreeRDP dynamic port pre-trusting (`knot display extend`, `knot kdeconnect vmon`).
 - **3-Tier Mesh Network Resolver**: Dynamic resolution hierarchy traversing WireGuard encrypted mesh $\to$ mDNS local resolution $\to$ LAN physical fallback.
 - **Hardware-Fenced PAM Sudo Gates**: Real-time CIDR subnet and Default Gateway MAC / BSSID validation (`knot-guard`, `knot-auth-check`).
 

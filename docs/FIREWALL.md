@@ -28,6 +28,7 @@ All Knot Mesh ports are designed to be **scoped strictly to your trusted local s
 | **24800** | TCP | Deskflow KVM | Wayland Mouse & Keyboard Multiplexing | Ingress on Anchor |
 | **1714–1764** | TCP + UDP | KDE Connect | Full-Mesh Clipboard & Notification Sync | Bidirectional Fleet |
 | **5353** | UDP | mDNS / Avahi | Zero-Config Local Hostname Resolution | Multicast LAN |
+| **5900–5910** | TCP | Knot Virtual Monitor | Wayland Virtual Screen RDP Stream (krdpserver/krdc) | Ingress on Host |
 | **22** | TCP | OpenSSH (Std) | Secure Remote Administration & Sync | Ingress all nodes |
 | **42069** | TCP | OpenSSH (Knot) | Dedicated Knot Hardened Key-Only Port (if set) | Ingress all nodes |
 
@@ -97,6 +98,9 @@ sudo ufw insert 5 allow from "$SUBNET" to any port 5353 proto udp comment 'knot-
 sudo ufw insert 6 allow from "$SUBNET" to any port 1714:1764 proto tcp comment 'knot-kde-tcp'
 sudo ufw insert 7 allow from "$SUBNET" to any port 1714:1764 proto udp comment 'knot-kde-udp'
 
+# 6. Allow Wayland Virtual Monitor RDP streams (5900:5910 TCP)
+sudo ufw insert 8 allow from "$SUBNET" to any port 5900:5910 proto tcp comment 'knot-vmon'
+
 # Reload UFW
 sudo ufw reload
 ```
@@ -116,13 +120,15 @@ sudo firewall-cmd --permanent --zone=public --add-service=ssh
 sudo firewall-cmd --permanent --zone=public --add-service=kdeconnect
 sudo firewall-cmd --permanent --zone=public --add-service=mdns
 
-# 2. Allow Hub & KVM ports
+# 2. Allow Hub, KVM & Virtual Monitor ports
 sudo firewall-cmd --permanent --zone=public --add-port=4242/tcp
 sudo firewall-cmd --permanent --zone=public --add-port=24800/tcp
+sudo firewall-cmd --permanent --zone=public --add-port=5900-5910/tcp
 
 # 3. Add rich rules scoped to local subnet
 sudo firewall-cmd --permanent --zone=public --add-rich-rule="rule family=\"ipv4\" source address=\"$SUBNET\" port port=\"4242\" protocol=\"tcp\" accept"
 sudo firewall-cmd --permanent --zone=public --add-rich-rule="rule family=\"ipv4\" source address=\"$SUBNET\" port port=\"24800\" protocol=\"tcp\" accept"
+sudo firewall-cmd --permanent --zone=public --add-rich-rule="rule family=\"ipv4\" source address=\"$SUBNET\" port port=\"5900-5910\" protocol=\"tcp\" accept"
 sudo firewall-cmd --permanent --zone=public --add-rich-rule="rule family=\"ipv4\" source address=\"$SUBNET\" port port=\"42069\" protocol=\"tcp\" accept"
 
 # Reload firewalld
@@ -146,6 +152,7 @@ table inet filter {
 
         # Knot Mesh Subnet-Scoped Ingress
         ip saddr 192.168.1.0/24 tcp dport { 22, 4242, 24800, 42069 } accept comment "Knot TCP Services"
+        ip saddr 192.168.1.0/24 tcp dport 5900-5910 accept comment "Knot Virtual Monitor RDP"
         ip saddr 192.168.1.0/24 tcp dport 1714-1764 accept comment "KDE Connect TCP"
         ip saddr 192.168.1.0/24 udp dport 1714-1764 accept comment "KDE Connect UDP"
         ip saddr 192.168.1.0/24 udp dport 5353 accept comment "mDNS Multicast"

@@ -24,6 +24,7 @@ This document provides a comprehensive command-line reference for both `knot` (d
   - [knot screen](#knot-screen)
   - [knot autologin](#knot-autologin)
   - [knot kdeconnect](#knot-kdeconnect)
+  - [knot display](#knot-display)
   - [knot topology](#knot-topology)
   - [knot sleep](#knot-sleep)
 - [3. Tier 2: A2A Cognitive Swarm Layer Commands](#3-tier-2-a2a-cognitive-swarm-layer-commands)
@@ -332,6 +333,26 @@ knot display extend <node_id>                       # Alias for knot kdeconnect 
   - **Plasma 6 Wayland Pipeline**: Direct integration with KDE Plasma 6 Klipper DBus (`org.kde.klipper /klipper`) with transparent fallback to `wl-paste` / `wl-copy`. Safely supports large payloads (>8KB / 16KB / 21KB), multi-line snippets, and long URLs with query parameters without shell mangling.
   - **Intentional Cross-Strand Piping**: Pipe authorization codes, tokens, or URLs straight to another node's clipboard (`echo "https://..." | knot kdeconnect share --target laptop`).
   - **Auto-Integrated Workflows**: Automatically pre-synchronizes clipboards during `knot auth login` (for instant cross-screen OAuth code copying) and `knot-installer invite` / `join` (for seamless token auto-detection).
+
+---
+
+### `knot display`
+Controls dynamic Wayland virtual display extension across the physical mesh. Allows an Anchor workstation to instantly expand its desktop workspace onto auxiliary laptops or docked handhelds (Steam Deck OLED, ROG Ally) without video cables or capture dongles.
+
+```bash
+knot display status [<node_id>]       # Inspect local host/client engines & peer virtual monitor readiness
+knot display extend <node_id>         # Spawn headless Wayland screen on Anchor & stream fullscreen to target
+knot display stop [<node_id>]         # Terminate virtual display stream and cleanly close remote viewer
+```
+
+- **Subcommands**:
+  - `knot display extend <node_id>`: Initiates zero-touch virtual display extension to `<node_id>`. Automatically ensures valid host TLS certificates (`~/.local/share/krdpserver/krdp.crt`), pre-seeds FreeRDP trusted certificates across dynamic port ranges `5900..5920` on the target strand over SSH, verifies firewall rules, and dispatches the DBus stream request.
+  - `knot display stop [<node_id>]`: Stops the virtual monitor stream via DBus and issues an authenticated SSH process cleanup (`pkill -f 'krdc.*rdp://'`) to cleanly close the remote viewer window on the strand without leaving dangling windows. If `<node_id>` is omitted, stops all active streams.
+  - `knot display status [<node_id>]`: Probes local engine packages (`krdpserver`, `krdc`), queries KDE Connect DBus for paired peers, and displays virtual monitor availability, active stream status, and diagnostic error states.
+- **Key Architectural Features**:
+  - **Zero-Touch Dynamic FreeRDP Pre-Trust**: Automatically bypasses FreeRDP 3's per-port certificate store verification by provisioning symlinks for ports `5900..5920` on the remote strand, preventing recurrent certificate warning dialogs.
+  - **Zero-Prompt Fullscreen Streaming**: Automatically enforces `ShowPreferencesForNewConnections=false` and `FullscreenOnConnect=true` in `~/.config/krdcrc` so remote viewers immediately take over the screen.
+  - **Subnet-Scoped Security**: RDP streams run on ports `5900-5910/tcp` (`knot-vmon`), strictly restricted to the local mesh subnet by `core/modules/firewall.sh`.
 
 ---
 
