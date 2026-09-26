@@ -548,6 +548,31 @@ doctor_check_local() {
     warnings=$((warnings + 1))
   fi
 
+  # Host TLS Certificate & Configuration check
+  local vmon_cert="$HOME/.local/share/krdpserver/krdp.crt"
+  if [ -f "$vmon_cert" ]; then
+    doc_ok "Host TLS certificate present: $vmon_cert"
+  else
+    doc_warn "Host TLS certificate missing in ~/.local/share/krdpserver (run 'knot repair' to generate)"
+    warnings=$((warnings + 1))
+  fi
+
+  # Client Zero-Prompt Preference check
+  local krdc_pref=""
+  if command -v kreadconfig6 >/dev/null; then
+    local kp_rc=0
+    krdc_pref="$(kreadconfig6 --file krdcrc --group General --key ShowPreferencesForNewConnections 2>&1)" || kp_rc=$?
+    if [ $kp_rc -ne 0 ]; then
+      krdc_pref=""
+    fi
+  fi
+  if [ "$krdc_pref" = "false" ]; then
+    doc_ok "Client zero-prompt connection mode verified (krdcrc)"
+  else
+    doc_warn "Client zero-prompt mode not enabled in krdcrc (run 'knot repair' to configure)"
+    warnings=$((warnings + 1))
+  fi
+
   # Firewall verification for ports 5900-5910/tcp
   local fw_mod="$KNOT_ROOT/core/modules/firewall.sh"
   if [ -f "$fw_mod" ]; then
@@ -1090,6 +1115,15 @@ doctor_repair_local() {
     # shellcheck source=../../core/modules/firewall.sh
     source "$fw_mod"
     firewall_verify_vmon
+  fi
+
+  # 13. Ensure Virtual Monitor host TLS certificate & client zero-prompt defaults
+  local kde_mod="$KNOT_ROOT/core/modules/kdeconnect.sh"
+  if [ -f "$kde_mod" ]; then
+    # shellcheck source=../../core/modules/kdeconnect.sh
+    source "$kde_mod"
+    kdeconnect_vmon_ensure_host_certs
+    kdeconnect_vmon_seed_client_trust
   fi
 
   knot_log_ok "Local repair operations completed for $my_host."

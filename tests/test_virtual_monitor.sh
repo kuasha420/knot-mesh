@@ -175,6 +175,45 @@ else
 fi
 
 # -------------------------------------------------------------
+# Test 9: Host TLS Certificate & Configuration Automation
+# -------------------------------------------------------------
+echo -e "\n\033[1m[Test 9] Host TLS Certificate & krdpserverrc Generation...\033[0m"
+cert_test_out="" cert_test_rc=0
+cert_test_out=$(bash -c "
+  source '$KNOT_ROOT/core/lib.sh'
+  source '$KNOT_ROOT/core/modules/kdeconnect.sh'
+  kdeconnect_vmon_ensure_host_certs 2>&1
+" 2>&1) || cert_test_rc=$?
+
+if [ $cert_test_rc -eq 0 ] && [ -f "$HOME/.local/share/krdpserver/krdp.crt" ] && [ -f "$HOME/.local/share/krdpserver/krdp.key" ]; then
+  pass "kdeconnect_vmon_ensure_host_certs ensures valid TLS cert and key exist"
+else
+  fail "kdeconnect_vmon_ensure_host_certs failed ($cert_test_rc): $cert_test_out"
+fi
+
+# -------------------------------------------------------------
+# Test 10: Client Zero-Prompt Preference Configuration
+# -------------------------------------------------------------
+echo -e "\n\033[1m[Test 10] Client Zero-Prompt Configuration (krdcrc)...\033[0m"
+client_test_out="" client_test_rc=0
+client_test_out=$(bash -c "
+  source '$KNOT_ROOT/core/lib.sh'
+  source '$KNOT_ROOT/core/modules/kdeconnect.sh'
+  kdeconnect_vmon_seed_client_trust 2>&1
+" 2>&1) || client_test_rc=$?
+
+krdc_pref_val=""
+if command -v kreadconfig6 >/dev/null; then
+  krdc_pref_val="$(kreadconfig6 --file krdcrc --group General --key ShowPreferencesForNewConnections 2>&1)" || krdc_pref_val=""
+fi
+
+if [ $client_test_rc -eq 0 ] && [ "$krdc_pref_val" = "false" ]; then
+  pass "kdeconnect_vmon_seed_client_trust configures zero-prompt krdcrc preferences"
+else
+  fail "kdeconnect_vmon_seed_client_trust failed ($client_test_rc): pref=$krdc_pref_val, out=$client_test_out"
+fi
+
+# -------------------------------------------------------------
 # Summary
 # -------------------------------------------------------------
 echo -e "\n\033[1;34m============================================================\033[0m"

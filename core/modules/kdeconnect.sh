@@ -1300,6 +1300,86 @@ kdeconnect_vmon_status() {
   return 0
 }
 
+kdeconnect_vmon_ensure_host_certs() {
+  local home
+  home="$(knot_detect_user_home)"
+  local cert_dir="$home/.local/share/krdpserver"
+  local cert_file="$cert_dir/krdp.crt"
+  local key_file="$cert_dir/krdp.key"
+
+  if [ ! -f "$cert_file" ] || [ ! -f "$key_file" ]; then
+    mkdir -p "$cert_dir"
+    knot_log_info "Generating local TLS certificate for Wayland Virtual Monitor host (krdpserver)..."
+    local gen_out="" gen_rc=0
+    gen_out="$(openssl req -x509 -newkey rsa:2048 -nodes \
+      -keyout "$key_file" \
+      -out "$cert_file" \
+      -days 3650 \
+      -subj "/CN=Knot-Mesh-VirtualMonitor" 2>&1)" || gen_rc=$?
+    if [ $gen_rc -ne 0 ]; then
+      knot_log_err "Failed to generate krdpserver TLS certificate: $gen_out"
+      return 1
+    fi
+    chmod 600 "$key_file"
+    chmod 644 "$cert_file"
+  fi
+
+  if command -v kwriteconfig6 >/dev/null; then
+    kwriteconfig6 --file krdpserverrc --group General --key Certificate "$cert_file"
+    kwriteconfig6 --file krdpserverrc --group General --key CertificateKey "$key_file"
+    kwriteconfig6 --file krdpserverrc --group General --key ListeningPort 5900
+  fi
+  return 0
+}
+
+kdeconnect_vmon_seed_client_trust() {
+  local target_node="${1:-}"
+  local target_port="${2:-22}"
+  local target_user="${3:-}"
+  local home
+  home="$(knot_detect_user_home)"
+  local cert_file="$home/.local/share/krdpserver/krdp.crt"
+
+  if [ ! -f "$cert_file" ]; then
+    kdeconnect_vmon_ensure_host_certs
+  fi
+
+  # 1. Enforce zero-prompt defaults on local client as well
+  if command -v kwriteconfig6 >/dev/null; then
+    kwriteconfig6 --file krdcrc --group General --key ShowPreferencesForNewConnections false
+    kwriteconfig6 --file krdcrc --group General --key FullscreenOnConnect true
+  fi
+
+  # 2. If remote target is specified and reachable, pre-seed FreeRDP certificate store
+  if [ -n "$target_node" ] && [ -f "$cert_file" ]; then
+    local rip="" r_rc=0
+    rip="$("$KNOT_ROOT/bin/knot" resolve "$target_node" "$target_port" 2>&1)" || r_rc=$?
+    if [ $r_rc -eq 0 ] && [ -n "$rip" ]; then
+      local my_ip
+      my_ip="$(knot_detect_lan_ip)"
+      local ssh_dest="$target_node"
+      if [ -n "$target_user" ] && [ -n "$rip" ]; then
+        ssh_dest="${target_user}@${rip}"
+      fi
+
+      local remote_cmd="mkdir -p ~/.config/freerdp/server && \
+cat > ~/.config/freerdp/server/${my_ip}.pem && \
+for p in {5900..5920}; do ln -sf ${my_ip}.pem ~/.config/freerdp/server/${my_ip}_\${p}.pem; done && \
+if command -v kwriteconfig6 >/dev/null; then \
+  kwriteconfig6 --file krdcrc --group General --key ShowPreferencesForNewConnections false; \
+  kwriteconfig6 --file krdcrc --group General --key FullscreenOnConnect true; \
+fi"
+
+      local s_out="" s_rc=0
+      s_out="$(ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -p "$target_port" "$ssh_dest" "$remote_cmd" < "$cert_file" 2>&1)" || s_rc=$?
+      if [ $s_rc -ne 0 ]; then
+        knot_log_warn "Notice: Automated FreeRDP trust seeding returned non-zero ($s_rc): $s_out"
+      fi
+    fi
+  fi
+  return 0
+}
+
 kdeconnect_vmon_start() {
   local target="${1:-}"
   if [ -z "$target" ]; then
@@ -1319,7 +1399,10 @@ kdeconnect_vmon_start() {
     return 1
   fi
 
-  # 2. Verify firewall rules for ports 5900-5910/tcp
+  # 2. Ensure local host TLS certificates & configuration for krdpserver
+  kdeconnect_vmon_ensure_host_certs
+
+  # 3. Verify firewall rules for ports 5900-5910/tcp
   local fw_mod="$KNOT_ROOT/core/modules/firewall.sh"
   if [ -f "$fw_mod" ]; then
     # shellcheck source=../../core/modules/firewall.sh
@@ -1327,7 +1410,35 @@ kdeconnect_vmon_start() {
     firewall_verify_vmon
   fi
 
-  # 3. Resolve target device ID
+  # 4. Resolve target node manifest & seed zero-prompt client trust
+  local target_node=""
+  local target_port=22
+  local target_user=""
+  local home
+  home="$(knot_detect_user_home)"
+  for d in "$home/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
+    [ -d "$d" ] || continue
+    for mf in "$d/"*.json; do
+      [ -e "$mf" ] || continue
+      local nid nhost nport nuser
+      nid="$(awk -F'"' '/"id":/ {print $4}' "$mf")"
+      nhost="$(awk -F'"' '/"hostname":/ {print $4}' "$mf")"
+      nport="$(awk -F': ' '/"port":/ {print $2}' "$mf" | tr -d ', ')"
+      nuser="$(awk -F'"' '/"user":/ {print $4}' "$mf")"
+      if [ "$nid" = "$target" ] || [ "$nhost" = "$target" ]; then
+        target_node="$nid"
+        target_port="${nport:-22}"
+        target_user="$nuser"
+        break 2
+      fi
+    done
+  done
+
+  if [ -n "$target_node" ]; then
+    kdeconnect_vmon_seed_client_trust "$target_node" "$target_port" "$target_user"
+  fi
+
+  # 5. Resolve target device ID
   local target_id=""
   if ! target_id="$(kdeconnect_resolve_device_id "$target" 2>&1)"; then
     knot_log_err "Could not resolve target '$target' to a paired KDE Connect device ID."
@@ -1341,7 +1452,7 @@ kdeconnect_vmon_start() {
 
   knot_log_info "Initiating Wayland Virtual Monitor stream to '$dev_name' ($target_id)..."
 
-  # 4. Check readiness on remote device
+  # 6. Check readiness on remote device
   local avail="false"
   local a_out=""
   if a_out="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$target_id/virtualmonitor" org.kde.kdeconnect.device.virtualmonitor.isVirtualMonitorAvailable 2>&1)"; then
@@ -1357,7 +1468,7 @@ kdeconnect_vmon_start() {
     return 1
   fi
 
-  # 5. Request Virtual Monitor
+  # 7. Request Virtual Monitor
   local req_out="" req_rc=0
   req_out="$("$qdbus_cmd" org.kde.kdeconnect "/modules/kdeconnect/devices/$target_id/virtualmonitor" org.kde.kdeconnect.device.virtualmonitor.requestVirtualMonitor 2>&1)" || req_rc=$?
 
@@ -1375,7 +1486,7 @@ kdeconnect_vmon_start() {
     return 1
   fi
 
-  # 6. Verify stream activation
+  # 8. Verify stream activation
   local is_active=0
   for _ in {1..10}; do
     sleep 0.5
@@ -1417,7 +1528,30 @@ kdeconnect_vmon_stop() {
   fi
 
   local target_id=""
+  local target_node=""
+  local target_port=22
+  local home
+  home="$(knot_detect_user_home)"
+
   if [ -n "$target" ]; then
+    for d in "$home/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
+      [ -d "$d" ] || continue
+      for mf in "$d/"*.json; do
+        [ -e "$mf" ] || continue
+        local nid nhost nport nuser
+        nid="$(awk -F'"' '/"id":/ {print $4}' "$mf")"
+        nhost="$(awk -F'"' '/"hostname":/ {print $4}' "$mf")"
+        nport="$(awk -F': ' '/"port":/ {print $2}' "$mf" | tr -d ', ')"
+        nuser="$(awk -F'"' '/"user":/ {print $4}' "$mf")"
+        if [ "$nid" = "$target" ] || [ "$nhost" = "$target" ]; then
+          target_node="$nid"
+          target_port="${nport:-22}"
+          target_user="$nuser"
+          break 2
+        fi
+      done
+    done
+
     if ! target_id="$(kdeconnect_resolve_device_id "$target" 2>&1)"; then
       knot_log_err "Could not resolve target '$target' to a paired KDE Connect device ID."
       return 1
@@ -1451,6 +1585,22 @@ kdeconnect_vmon_stop() {
       stopped_any=1
     fi
   done
+
+  # Remote viewer cleanup if target is a known swarm node
+  if [ -n "$target_node" ]; then
+    local rip="" r_rc=0
+    rip="$("$KNOT_ROOT/bin/knot" resolve "$target_node" "$target_port" 2>&1)" || r_rc=$?
+    if [ $r_rc -eq 0 ] && [ -n "$rip" ]; then
+      local ssh_dest="$target_node"
+      if [ -n "${target_user:-}" ] && [ -n "$rip" ]; then
+        ssh_dest="${target_user}@${rip}"
+      fi
+      local my_ip
+      my_ip="$(knot_detect_lan_ip)"
+      local k_rc=0
+      ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=accept-new -p "$target_port" "$ssh_dest" "pkill -f 'krdc.*rdp://.*${my_ip}' 2>&1" || k_rc=$?
+    fi
+  fi
 
   if [ $stopped_any -eq 0 ]; then
     knot_log_info "No active Virtual Monitor streams were found running."
