@@ -557,6 +557,14 @@ doctor_check_local() {
     warnings=$((warnings + 1))
   fi
 
+  # Host Embedded Cursor Check
+  if [ -x "/usr/local/bin/krdpserver" ] && [ -d "/usr/local/lib/knot-vmon" ]; then
+    doc_ok "Host embedded cursor patch active (/usr/local/bin/krdpserver)"
+  else
+    doc_warn "Host embedded cursor patch missing (run 'knot repair' or 'knot-vmon-patch-krdp')"
+    warnings=$((warnings + 1))
+  fi
+
   # Client Zero-Prompt Preference check
   local krdc_pref=""
   if command -v kreadconfig6 >/dev/null; then

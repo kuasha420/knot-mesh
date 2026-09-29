@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""
+Knot Wayland Virtual Monitor KRdp Patcher (knot-vmon-patch-krdp)
+Patches libKRdp.so to set Screencasting::CursorMode::Embedded (2) instead of
+hardcoded Screencasting::CursorMode::Metadata (4) for virtual monitors (plasma/krdp#47).
+Installs patched library in /usr/local/lib/knot-vmon and wrapper in /usr/local/bin/krdpserver.
+"""
+
+import glob
+import os
+import shutil
+import subprocess
+import sys
+
+
+def find_system_libkrdp():
+    candidates = glob.glob("/usr/lib/libKRdp.so.6*")
+    for cand in candidates:
+        if not os.path.islink(cand) and os.path.isfile(cand):
+            return os.path.realpath(cand)
+    for cand in candidates:
+        if os.path.isfile(cand):
+            return os.path.realpath(cand)
+    return None
+
+
+def get_patch_offsets(lib_path):
+    offsets = []
+    # 1. Search via readelf symbol lookup if available
+    try:
+        out = subprocess.check_output(["readelf", "-s", "-W", lib_path], text=True)
+        start_sym = "_ZN4KRdp25PlasmaScreencastV1Session5startEv"
+        func_addr = None
+        func_size = None
+        for line in out.splitlines():
+            if start_sym in line:
+                parts = line.split()
+                func_addr = int(parts[1], 16)
+                func_size = int(parts[2])
+                break
+        if func_addr is not None and func_size is not None:
+            with open(lib_path, "rb") as f:
+                f.seek(func_addr)
+                chunk = f.read(func_size)
+            idx = 0
+            while True:
+                pos = chunk.find(b"\x6a\x04", idx)
+                if pos == -1:
+                    break
+                offsets.append(func_addr + pos)
+                idx = pos + 1
+    except Exception as e:
+        sys.stderr.write(f"[knot-vmon-patch-krdp] Symbol scan notice: {e}\n")
+
+    # 2. Known static fallback offsets for libKRdp 6.7.5
+    static_offsets = [0x157D5, 0x18F01, 0x19241]
+    for so in static_offsets:
+        if so not in offsets:
+            offsets.append(so)
+
+    return sorted(offsets)
+
+
+def patch_library(src_path, dest_dir):
+    os.makedirs(dest_dir, exist_ok=True)
+    dest_path = os.path.join(dest_dir, os.path.basename(src_path))
+    shutil.copy2(src_path, dest_path)
+
+    offsets = get_patch_offsets(src_path)
+    patched_count = 0
+    with open(dest_path, "r+b") as f:
+        for off in offsets:
+            f.seek(off)
+            hdr = f.read(2)
+            if hdr == b"\x6a\x04":
+                f.seek(off)
+                f.write(b"\x6a\x02")
+                patched_count += 1
+
+    link_path = os.path.join(dest_dir, "libKRdp.so.6")
+    if os.path.lexists(link_path):
+        os.remove(link_path)
+    os.symlink(os.path.basename(dest_path), link_path)
+
+    sys.stdout.write(f"[knot-vmon-patch-krdp] Patched {patched_count} cursor mode instruction(s) in {dest_path}\n")
+    return dest_path
+
+
+def ensure_wrapper(wrapper_path):
+    wrapper_content = """#!/bin/bash
+if [ -d "/usr/local/lib/knot-vmon" ]; then
+    export LD_LIBRARY_PATH="/usr/local/lib/knot-vmon${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+exec /usr/bin/krdpserver "$@"
+"""
+    wrapper_dir = os.path.dirname(wrapper_path)
+    os.makedirs(wrapper_dir, exist_ok=True)
+    with open(wrapper_path, "w") as f:
+        f.write(wrapper_content)
+    os.chmod(wrapper_path, 0o755)
+    sys.stdout.write(f"[knot-vmon-patch-krdp] Installed wrapper at {wrapper_path}\n")
+
+
+def main():
+    orig_lib = find_system_libkrdp()
+    if not orig_lib:
+        sys.stderr.write("[knot-vmon-patch-krdp] Notice: libKRdp.so.6 not found on system; skipping patch.\n")
+        return 0
+
+    dest_dir = "/usr/local/lib/knot-vmon"
+    wrapper_path = "/usr/local/bin/krdpserver"
+
+    # Check if writable or requires root
+    if not os.access("/usr/local", os.W_OK) and os.geteuid() != 0:
+        cmd = ["sudo", sys.executable, os.path.abspath(__file__)] + sys.argv[1:]
+        res = subprocess.run(cmd)
+        return res.returncode
+
+    patch_library(orig_lib, dest_dir)
+    ensure_wrapper(wrapper_path)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

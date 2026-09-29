@@ -103,7 +103,7 @@ except Exception as e:
 # 3. Grace period (up to 60s) waiting for KRDC client process to launch
 krdc_started = False
 for _ in range(30):
-    chk = subprocess.run(["pgrep", "-f", "krdc"], capture_output=True)
+    chk = subprocess.run(["pgrep", "-x", "krdc"], capture_output=True)
     if chk.returncode == 0:
         krdc_started = True
         break
@@ -125,7 +125,7 @@ if not krdc_started:
 # 4. Main monitoring loop while KRDC is active
 missing_cycles = 0
 while True:
-    chk = subprocess.run(["pgrep", "-f", "krdc"], capture_output=True)
+    chk = subprocess.run(["pgrep", "-x", "krdc"], capture_output=True)
     if chk.returncode != 0:
         missing_cycles += 1
         if missing_cycles >= 4:

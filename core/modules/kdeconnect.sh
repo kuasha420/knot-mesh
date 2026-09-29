@@ -1404,6 +1404,15 @@ kdeconnect_vmon_ensure_host_certs() {
     kwriteconfig6 --file krdpserverrc --group General --key CertificateKey "$key_file"
     kwriteconfig6 --file krdpserverrc --group General --key ListeningPort 5900
   fi
+
+  # Ensure krdpserver embedded cursor patch is present for Wayland virtual display
+  if [ -x "$KNOT_ROOT/bin/knot-vmon-patch-krdp" ]; then
+    local p_out="" p_rc=0
+    p_out="$("$KNOT_ROOT/bin/knot-vmon-patch-krdp" 2>&1)" || p_rc=$?
+    if [ $p_rc -ne 0 ]; then
+      knot_log_warn "Notice: Checking krdp embedded cursor patch returned non-zero ($p_rc): $p_out"
+    fi
+  fi
   return 0
 }
 
@@ -1474,7 +1483,7 @@ if command -v kwriteconfig6 >/dev/null; then
       kwriteconfig6 --file krdcrc --group hostpreferences --group \"\$h\" --key scaleToSize true
       kwriteconfig6 --file krdcrc --group hostpreferences --group \"\$h\" --key fullscreenScale true
       kwriteconfig6 --file krdcrc --group hostpreferences --group \"\$h\" --key windowedScale true
-      kwriteconfig6 --file krdcrc --group hostpreferences --group \"\$h\" --key showLocalCursor true
+      kwriteconfig6 --file krdcrc --group hostpreferences --group \"\$h\" --key showLocalCursor false
     done
   done
   curr_rules=\"\$(kreadconfig6 --file kwinrulesrc --group General --key rules 2>&1)\" || curr_rules=\"\"
@@ -1858,7 +1867,7 @@ kdeconnect_vmon_start() {
       fi
       local k_rc=0
       ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -p "$target_port" "$ssh_dest" \
-        "if pgrep -f 'krdc.*rdp://' >/dev/null; then pkill -f 'krdc.*rdp://'; fi; mkdir -p ~/.local/state/knot && nohup python3 ~/.local/bin/knot-vmon-keepalive </dev/null > ~/.local/state/knot/vmon-keepalive.log 2>&1 &" || k_rc=$?
+        "if pgrep -x krdc >/dev/null; then pkill -x krdc; fi; mkdir -p ~/.local/state/knot && nohup python3 ~/.local/bin/knot-vmon-keepalive </dev/null > ~/.local/state/knot/vmon-keepalive.log 2>&1 &" || k_rc=$?
       if [ $k_rc -ne 0 ]; then
         knot_log_warn "Notice: Spawning knot-vmon-keepalive on '$target_node' returned non-zero: $k_rc"
       fi
@@ -2065,7 +2074,7 @@ kdeconnect_vmon_stop() {
       my_ip="$(knot_detect_lan_ip)"
       local k_rc=0
       ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=accept-new -p "$target_port" "$ssh_dest" \
-        "pid_file=\"/run/user/\$(id -u)/knot-vmon-keepalive.pid\"; if [ -f \"\$pid_file\" ]; then k_pid=\$(cat \"\$pid_file\"); kill \"\$k_pid\" 2>&1 || k_rc=\$?; rm -f \"\$pid_file\"; fi; pkill -f 'krdc.*rdp://.*${my_ip}' 2>&1 || k_rc=\$?" || k_rc=$?
+        "pid_file=\"/run/user/\$(id -u)/knot-vmon-keepalive.pid\"; if [ -f \"\$pid_file\" ]; then k_pid=\$(cat \"\$pid_file\"); if [ -n \"\$k_pid\" ] && [ -d \"/proc/\$k_pid\" ]; then kill \"\$k_pid\"; fi; rm -f \"\$pid_file\"; fi; if pgrep -x krdc >/dev/null; then pkill -x krdc; fi" || k_rc=$?
     fi
   fi
 

@@ -440,6 +440,22 @@ else
 fi
 
 # -------------------------------------------------------------
+# Test 18: knot-vmon-patch-krdp Embedded Cursor Patch Utility Integrity
+# -------------------------------------------------------------
+echo -e "\n\033[1m[Test 18] knot-vmon-patch-krdp Embedded Cursor Patch Utility Integrity...\033[0m"
+if [ -x "$KNOT_ROOT/bin/knot-vmon-patch-krdp" ]; then
+  patch_syntax_rc=0
+  python3 -m py_compile "$KNOT_ROOT/bin/knot-vmon-patch-krdp" 2>&1 || patch_syntax_rc=$?
+  if [ $patch_syntax_rc -eq 0 ]; then
+    pass "knot-vmon-patch-krdp binary exists, is executable, and compiles cleanly"
+  else
+    fail "knot-vmon-patch-krdp compilation error: $patch_syntax_rc"
+  fi
+else
+  fail "knot-vmon-patch-krdp binary is missing or not executable"
+fi
+
+# -------------------------------------------------------------
 # Summary
 # -------------------------------------------------------------
 echo -e "\n\033[1;34m============================================================\033[0m"
