@@ -43,6 +43,7 @@ This document provides a comprehensive command-line reference for both `knot` (d
 - [4. Handheld & Graphical Cockpit Commands](#4-handheld--graphical-cockpit-commands)
   - [knot kafe](#knot-kafe)
   - [knot web](#knot-web)
+  - [knot-jimheart](#knot-jimheart)
 - [5. `knot-installer` — Onboarding & Lifecycle CLI](#5-knot-installer--onboarding--lifecycle-cli)
   - [knot-installer init](#knot-installer-init)
   - [knot-installer invite](#knot-installer-invite)
@@ -641,6 +642,24 @@ Direct alias dispatch for `knot kafe`.
 ```bash
 knot web [open|dev|build|install]
 ```
+
+---
+
+### `knot-jimheart`
+Launches JimHa's Fullscreen Interactive Key Smash Game across the mesh. Designed for toddler-safe tactile exploration with giant bouncing animations, companion emojis, synthesized pentatonic chimes, and a 3-second continuous `Escape` hold-to-exit protection.
+
+```bash
+knot-jimheart                      # Deploy and launch in fullscreen on Desktop Anchor via Knot Mesh
+knot-jimheart --target <node_id>   # Launch on a specific node across the mesh
+knot-jimheart --local              # Launch locally on current machine
+knot-jimheart --status             # Inspect running status across target node
+knot-jimheart --stop               # Gracefully stop running game instance on target
+```
+
+- **Safety & Audio Features**:
+  - **Hold-to-Exit Protection**: Accidental single clicks or taps on `Escape` will not close the game; players must hold `Escape` for 3.0 continuous seconds while a circular countdown HUD fills up.
+  - **Synthesized Pentatonic Audio**: Generates and caches soothing celesta/chime tones using standard library `wave` and `math` (zero external audio generation dependencies). Rapid key mashing sounds like a melodious wind chime.
+  - **Wayland Native**: Renders natively inside KDE Plasma Wayland sessions (`WAYLAND_DISPLAY=wayland-0`, `QT_QPA_PLATFORM=wayland`) at 60 FPS with intelligent idle framerate scaling.
 
 ---
 

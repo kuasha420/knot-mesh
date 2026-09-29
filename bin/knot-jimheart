@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Knot Mesh - Jim Heart Game Orchestrator
+# Launches and manages Jim Heart's Key Smash Game locally or across Knot Mesh strands.
+
+KNOT_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+TARGET_NODE="desktop"
+ACTION="start"
+
+show_help() {
+  cat << EOF
+Usage: knot-jimheart [options]
+
+Options:
+  --target <node_id>   Target node to run the game on (default: desktop)
+  --local              Run game on current local machine
+  --stop               Stop running instance of the game
+  --status             Check if game is currently running
+  --help               Display this help message
+EOF
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --target)
+      TARGET_NODE="${2:-}"
+      shift 2
+      ;;
+    --local)
+      TARGET_NODE="local"
+      shift
+      ;;
+    --stop)
+      ACTION="stop"
+      shift
+      ;;
+    --status)
+      ACTION="status"
+      shift
+      ;;
+    --help|-h)
+      show_help
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      show_help
+      exit 1
+      ;;
+  esac
+done
+
+PID_FILE="/tmp/knot-jimheart.pid"
+LOG_FILE="/tmp/knot-jimheart.log"
+
+run_local_stop() {
+  if [ -f "$PID_FILE" ]; then
+    local pid
+    pid="$(cat "$PID_FILE")"
+    if kill -0 "$pid" 2> /tmp/knot-jimheart-probe.err; then
+      kill "$pid"
+      rm -f "$PID_FILE"
+      echo "[OK] Stopped Jim Heart Game (PID: $pid)"
+      return 0
+    else
+      rm -f "$PID_FILE"
+      echo "[INFO] Stale PID file cleaned up."
+    fi
+  fi
+  # Clean up any leftover processes
+  if pgrep -f "apps/jimheart/main.py" > /tmp/knot-jimheart-pgrep.tmp; then
+    pkill -f "apps/jimheart/main.py"
+  fi
+  echo "[OK] Jim Heart Game is not running."
+}
+
+run_local_status() {
+  if [ -f "$PID_FILE" ]; then
+    local pid
+    pid="$(cat "$PID_FILE")"
+    if kill -0 "$pid" 2> /tmp/knot-jimheart-probe.err; then
+      echo "[RUNNING] Jim Heart Game is active (PID: $pid)"
+      return 0
+    fi
+  fi
+  if pgrep -f "apps/jimheart/main.py" > /tmp/knot-jimheart-pgrep.out; then
+    local running_pids
+    running_pids="$(cat /tmp/knot-jimheart-pgrep.out | tr '\n' ' ')"
+    echo "[RUNNING] Jim Heart Game active (PIDs: $running_pids)"
+    return 0
+  fi
+  echo "[STOPPED] Jim Heart Game is not active."
+  return 1
+}
+
+run_local_start() {
+  echo "[STARTING] Launching Jim Heart Game locally..."
+  python3 "$KNOT_ROOT/apps/jimheart/main.py" &
+  local new_pid=$!
+  echo "$new_pid" > "$PID_FILE"
+  echo "[OK] Jim Heart Game launched locally with PID: $new_pid"
+}
+
+if [ "$TARGET_NODE" = "local" ]; then
+  case "$ACTION" in
+    start)
+      run_local_start
+      ;;
+    stop)
+      run_local_stop
+      ;;
+    status)
+      run_local_status
+      ;;
+  esac
+  exit 0
+fi
+
+# Remote execution via Knot Mesh
+echo "=== Knot Mesh: Jim Heart Game ($ACTION on @$TARGET_NODE) ==="
+
+case "$ACTION" in
+  stop)
+    echo "Stopping Jim Heart Game on @$TARGET_NODE..."
+    "$KNOT_ROOT/bin/knot" exec "$TARGET_NODE" "
+      if [ -f /tmp/knot-jimheart.pid ]; then
+        PID=\$(cat /tmp/knot-jimheart.pid)
+        if kill -0 \$PID 2>/tmp/knot-jimheart-check.err; then
+          kill \$PID
+        fi
+        rm -f /tmp/knot-jimheart.pid
+      fi
+      if pgrep -f 'apps/jimheart/main.py' > /tmp/knot-jimheart-stop.tmp; then
+        pkill -f 'apps/jimheart/main.py'
+      fi
+      echo '[OK] Jim Heart Game stopped on remote target.'
+    "
+    ;;
+
+  status)
+    echo "Inspecting status of Jim Heart Game on @$TARGET_NODE..."
+    "$KNOT_ROOT/bin/knot" exec "$TARGET_NODE" "
+      if pgrep -f 'apps/jimheart/main.py' > /tmp/knot-jimheart-probe.txt; then
+        echo '[RUNNING] Jim Heart Game is running on desktop (PID: '\$(cat /tmp/knot-jimheart-probe.txt | tr '\n' ' ')').'
+      else
+        echo '[STOPPED] Jim Heart Game is not running on desktop.'
+      fi
+    "
+    ;;
+
+  start)
+    echo "[1/3] Syncing latest Jim Heart game files to @$TARGET_NODE..."
+    tar -czf - -C "$KNOT_ROOT" apps/jimheart | "$KNOT_ROOT/bin/knot" exec "$TARGET_NODE" "
+      mkdir -p \$HOME/Dev/knot-mesh
+      tar -xzf - -C \$HOME/Dev/knot-mesh
+      chmod +x \$HOME/Dev/knot-mesh/apps/jimheart/launch_desktop.sh
+    "
+
+    echo "[2/3] Verifying runtime environment on @$TARGET_NODE..."
+    "$KNOT_ROOT/bin/knot" exec "$TARGET_NODE" "
+      python3 -m py_compile \$HOME/Dev/knot-mesh/apps/jimheart/main.py
+    "
+
+    echo "[3/3] Launching Jim Heart Game in fullscreen on @$TARGET_NODE display..."
+    "$KNOT_ROOT/bin/knot" exec "$TARGET_NODE" "bash \$HOME/Dev/knot-mesh/apps/jimheart/launch_desktop.sh"
+    ;;
+esac
