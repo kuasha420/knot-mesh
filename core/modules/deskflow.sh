@@ -67,8 +67,19 @@ deskflow_compile_server_config() {
 deskflow_mute_node() {
   local node_id="${1:-}"
   [ -z "$node_id" ] && return 0
-  mkdir -p /run/knot
-  touch "/run/knot/vmon_muted_deskflow_${node_id}"
+  local home
+  home="$(knot_detect_user_home)"
+  mkdir -p "$home/.local/state/knot"
+  touch "$home/.local/state/knot/vmon_muted_deskflow_${node_id}"
+  if [ -w /run/knot ]; then
+    touch "/run/knot/vmon_muted_deskflow_${node_id}"
+  elif [ ! -d /run/knot ]; then
+    local mk_rc=0
+    mkdir -p /run/knot 2>&1 || mk_rc=$?
+    if [ $mk_rc -eq 0 ] && [ -w /run/knot ]; then
+      touch "/run/knot/vmon_muted_deskflow_${node_id}"
+    fi
+  fi
   deskflow_compile_server_config "$(deskflow_get_lock)"
   if command -v systemctl >/dev/null; then
     if systemctl --user is-active --quiet knot-deskflow.service; then

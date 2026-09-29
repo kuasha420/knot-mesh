@@ -323,12 +323,16 @@ rm -f /run/knot/vmon_muted_deskflow_laptop "$HOME/.local/state/knot/vmon_muted_d
 toggle_1_out="" toggle_1_rc=0
 toggle_1_out=$("$KNOT_ROOT/bin/knot" display toggle-kvm laptop 2>&1) || toggle_1_rc=$?
 state_1_exists=0
-[ -f "/run/knot/vmon_muted_deskflow_laptop" ] && state_1_exists=1
+if [ -f "/run/knot/vmon_muted_deskflow_laptop" ] || [ -f "$HOME/.local/state/knot/vmon_muted_deskflow_laptop" ]; then
+  state_1_exists=1
+fi
 
 toggle_2_out="" toggle_2_rc=0
 toggle_2_out=$("$KNOT_ROOT/bin/knot" display toggle-kvm laptop 2>&1) || toggle_2_rc=$?
 state_2_exists=0
-[ -f "/run/knot/vmon_muted_deskflow_laptop" ] && state_2_exists=1
+if [ -f "/run/knot/vmon_muted_deskflow_laptop" ] || [ -f "$HOME/.local/state/knot/vmon_muted_deskflow_laptop" ]; then
+  state_2_exists=1
+fi
 
 if [ $toggle_1_rc -eq 0 ] && [ $state_1_exists -eq 1 ] && [ $toggle_2_rc -eq 0 ] && [ $state_2_exists -eq 0 ]; then
   pass "knot display toggle-kvm correctly cycles between MUTED and UNMUTED state"
@@ -395,34 +399,39 @@ fi
 # -------------------------------------------------------------
 echo -e "\n\033[1m[Test 17] kdeconnect_vmon_is_active Guard & Reconciliation Safety...\033[0m"
 vmon_guard_out="" vmon_guard_rc=0
-vmon_guard_out=$(bash -c "
+vmon_guard_out=$(bash -c '
   set -euo pipefail
-  source '$KNOT_ROOT/core/lib.sh'
-  source '$KNOT_ROOT/core/modules/kdeconnect.sh'
+  KNOT_ROOT="'"$KNOT_ROOT"'"
+  source "$KNOT_ROOT/core/lib.sh"
+  source "$KNOT_ROOT/core/modules/kdeconnect.sh"
 
   # Clean any existing test flags
-  rm -f /run/knot/vmon_muted_deskflow_testnode
+  home="$(knot_detect_user_home)"
+  rm -f /run/knot/vmon_muted_deskflow_testnode "$home/.local/state/knot/vmon_muted_deskflow_testnode"
 
-  # Simulate active vmon stream state via mock flag
-  mkdir -p /run/knot
-  touch /run/knot/vmon_muted_deskflow_testnode
+  # Simulate active vmon stream state via mock flag in user state dir
+  mkdir -p "$home/.local/state/knot"
+  touch "$home/.local/state/knot/vmon_muted_deskflow_testnode"
+  if [ -w /run/knot ]; then
+    touch /run/knot/vmon_muted_deskflow_testnode
+  fi
 
   if ! kdeconnect_vmon_is_active; then
-    echo 'FAIL: kdeconnect_vmon_is_active returned false despite flag file'
+    echo "FAIL: kdeconnect_vmon_is_active returned false despite flag file"
     exit 1
   fi
 
   # Test that kdeconnect_sync_mesh detects active vmon and preserves network
-  sync_log=\$(kdeconnect_sync_mesh 2>&1)
-  if ! echo \"\$sync_log\" | grep -q 'Virtual Monitor stream is active; skipping forceOnNetworkChange'; then
-    echo \"FAIL: kdeconnect_sync_mesh did not log vmon bypass: \$sync_log\"
+  sync_log="$(kdeconnect_sync_mesh 2>&1)"
+  if ! echo "$sync_log" | grep -q "Virtual Monitor stream is active; skipping forceOnNetworkChange"; then
+    echo "FAIL: kdeconnect_sync_mesh did not log vmon bypass: $sync_log"
     exit 2
   fi
 
   # Cleanup mock flag
-  rm -f /run/knot/vmon_muted_deskflow_testnode
-  echo 'GUARD_OK'
-" 2>&1) || vmon_guard_rc=$?
+  rm -f /run/knot/vmon_muted_deskflow_testnode "$home/.local/state/knot/vmon_muted_deskflow_testnode"
+  echo "GUARD_OK"
+' 2>&1) || vmon_guard_rc=$?
 
 if [ $vmon_guard_rc -eq 0 ] && echo "$vmon_guard_out" | grep -q "GUARD_OK"; then
   pass "kdeconnect_vmon_is_active accurately detects stream state and protects reconciliation"

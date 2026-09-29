@@ -56,6 +56,7 @@ Window {
     flags: Qt.WindowTransparentForInput | Qt.FramelessWindowHint
     color: "transparent"
 
+    LayerShell.Window.screen: targetScreen
     LayerShell.Window.layer: LayerShell.Window.LayerOverlay
     LayerShell.Window.anchors: __ANCHORS__
     LayerShell.Window.exclusionZone: -1
@@ -548,26 +549,26 @@ def generate_qml_for_edge(edge: str, span: List[int]) -> str:
 
     if direction == "left":
         anchors = "LayerShell.Window.AnchorLeft | LayerShell.Window.AnchorTop"
-        margins = f"LayerShell.Window.margins.top: Math.round(Screen.height * {pct_start})"
+        margins = f"LayerShell.Window.margins.top: Math.round(targetScreen.geometry.height * {pct_start})"
         width_expr = "stripItem.thickness"
-        height_expr = f"Math.round(Screen.height * {pct_span})"
+        height_expr = f"Math.round(targetScreen.geometry.height * {pct_span})"
         orientation = "Gradient.Vertical"
     elif direction == "right":
         anchors = "LayerShell.Window.AnchorRight | LayerShell.Window.AnchorTop"
-        margins = f"LayerShell.Window.margins.top: Math.round(Screen.height * {pct_start})"
+        margins = f"LayerShell.Window.margins.top: Math.round(targetScreen.geometry.height * {pct_start})"
         width_expr = "stripItem.thickness"
-        height_expr = f"Math.round(Screen.height * {pct_span})"
+        height_expr = f"Math.round(targetScreen.geometry.height * {pct_span})"
         orientation = "Gradient.Vertical"
     elif direction in ("down", "bottom"):
         anchors = "LayerShell.Window.AnchorBottom | LayerShell.Window.AnchorLeft"
-        margins = f"LayerShell.Window.margins.left: Math.round(Screen.width * {pct_start})"
-        width_expr = f"Math.round(Screen.width * {pct_span})"
+        margins = f"LayerShell.Window.margins.left: Math.round(targetScreen.geometry.width * {pct_start})"
+        width_expr = f"Math.round(targetScreen.geometry.width * {pct_span})"
         height_expr = "stripItem.thickness"
         orientation = "Gradient.Horizontal"
     elif direction in ("up", "top"):
         anchors = "LayerShell.Window.AnchorTop | LayerShell.Window.AnchorLeft"
-        margins = f"LayerShell.Window.margins.left: Math.round(Screen.width * {pct_start})"
-        width_expr = f"Math.round(Screen.width * {pct_span})"
+        margins = f"LayerShell.Window.margins.left: Math.round(targetScreen.geometry.width * {pct_start})"
+        width_expr = f"Math.round(targetScreen.geometry.width * {pct_span})"
         height_expr = "stripItem.thickness"
         orientation = "Gradient.Horizontal"
     else:
@@ -597,7 +598,16 @@ def main():
         sys.stderr.write("[knot-stripd] No edge controllers configured for current topology; daemon standing by\n")
 
     engine = QQmlApplicationEngine()
+    engine.addImportPath("/usr/lib/qt6/qml")
     windows = []
+
+    def resolve_physical_screen():
+        for s in app.screens():
+            if not s.name().startswith("Virtual"):
+                return s
+        return app.primaryScreen()
+
+    target_screen = resolve_physical_screen()
 
     for ctrl in daemon.controllers:
         try:
@@ -611,8 +621,11 @@ def main():
 
             ctx = QQmlContext(engine.rootContext())
             ctx.setContextProperty("controller", ctrl)
+            ctx.setContextProperty("targetScreen", target_screen)
             win = comp.create(ctx)
             if win:
+                if target_screen:
+                    win.setScreen(target_screen)
                 windows.append((win, ctx))
             else:
                 sys.stderr.write(f"[knot-stripd] Failed to create window for edge {ctrl.edge}\n")
