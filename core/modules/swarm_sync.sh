@@ -313,16 +313,13 @@ swarm_sync_dev_heal_local() {
   mkdir -p "$home/.config/knot"
   echo "dev" > "$home/.config/knot/install_type"
 
-  # 2. Binary symlinks: ensure ~/.local/bin/knot and knot-installer point to active repo
+  # 2. Binary symlinks: ensure ~/.local/bin/* point to active repo
   mkdir -p "$home/.local/bin"
-  if [ -x "$knot_root/bin/knot" ]; then
-    ln -sf "$knot_root/bin/knot" "$home/.local/bin/knot"
-    chmod +x "$knot_root/bin/knot"
-  fi
-  if [ -x "$knot_root/bin/knot-installer" ]; then
-    ln -sf "$knot_root/bin/knot-installer" "$home/.local/bin/knot-installer"
-    chmod +x "$knot_root/bin/knot-installer"
-  fi
+  for b in "$knot_root/bin/"*; do
+    [ -f "$b" ] || continue
+    ln -sf "$b" "$home/.local/bin/$(basename "$b")"
+    chmod +x "$b"
+  done
 
   # 3. Global Antigravity skills symlinks
   mkdir -p "$home/.gemini/config/skills"
@@ -419,12 +416,11 @@ swarm_sync_dev_heal_remote() {
     mkdir -p "$HOME/.config/knot" "$HOME/.local/bin" "$HOME/.gemini/config/skills"
     echo "dev" > "$HOME/.config/knot/install_type"
 
-    ln -sf "$DEV_DIR/bin/knot" "$HOME/.local/bin/knot"
-    chmod +x "$DEV_DIR/bin/knot"
-    if [ -x "$DEV_DIR/bin/knot-installer" ]; then
-      ln -sf "$DEV_DIR/bin/knot-installer" "$HOME/.local/bin/knot-installer"
-      chmod +x "$DEV_DIR/bin/knot-installer"
-    fi
+    for b in "$DEV_DIR/bin/"*; do
+      [ -f "$b" ] || continue
+      ln -sf "$b" "$HOME/.local/bin/$(basename "$b")"
+      chmod +x "$b"
+    done
 
     if [ -d "$DEV_DIR/runtime/skills" ]; then
       for s in "$DEV_DIR/runtime/skills"/*; do

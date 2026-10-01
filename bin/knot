@@ -1185,13 +1185,24 @@ cmd_update_dev() {
     local user_home
     user_home="$(knot_detect_user_home)"
     mkdir -p "$user_home/.local/bin"
-    ln -sf "$KNOT_ROOT/bin/knot" "$user_home/.local/bin/knot"
-    if [ -x "$KNOT_ROOT/bin/knot-installer" ]; then
-      ln -sf "$KNOT_ROOT/bin/knot-installer" "$user_home/.local/bin/knot-installer"
+    for b in "$KNOT_ROOT/bin/"*; do
+      [ -f "$b" ] || continue
+      ln -sf "$b" "$user_home/.local/bin/$(basename "$b")"
+    done
+
+    # Heal global Antigravity skills symlinks
+    if [ -d "$KNOT_ROOT/runtime/skills" ]; then
+      mkdir -p "$user_home/.gemini/config/skills"
+      for s in "$KNOT_ROOT/runtime/skills"/*; do
+        [ -d "$s" ] || continue
+        s_name="$(basename "$s")"
+        ln -sfn "$s" "$user_home/.gemini/config/skills/$s_name"
+      done
     fi
 
     # Restart worker services safely without dropping KVM
     knot_log_info "Refreshing worker services on $my_host (preserving KVM)..."
+    systemctl --user daemon-reload
     for unit in knot-agent.service knot-stripd.service knot-hub.service; do
       if systemctl --user is-active --quiet "$unit"; then
         if r_out="$(systemctl --user restart "$unit" 2>&1)"; then
@@ -1284,11 +1295,21 @@ cmd_update_dev() {
 
       chmod +x "$DEV_DIR/bin/"*
       mkdir -p "$HOME/.local/bin"
-      ln -sf "$DEV_DIR/bin/knot" "$HOME/.local/bin/knot"
-      if [ -x "$DEV_DIR/bin/knot-installer" ]; then
-        ln -sf "$DEV_DIR/bin/knot-installer" "$HOME/.local/bin/knot-installer"
+      for b in "$DEV_DIR/bin/"*; do
+        [ -f "$b" ] || continue
+        ln -sf "$b" "$HOME/.local/bin/$(basename "$b")"
+      done
+
+      if [ -d "$DEV_DIR/runtime/skills" ]; then
+        mkdir -p "$HOME/.gemini/config/skills"
+        for s in "$DEV_DIR/runtime/skills"/*; do
+          [ -d "$s" ] || continue
+          s_name="$(basename "$s")"
+          ln -sfn "$s" "$HOME/.gemini/config/skills/$s_name"
+        done
       fi
 
+      systemctl --user daemon-reload
       for u in knot-agent.service knot-stripd.service; do
         if systemctl --user is-active --quiet "$u"; then
           systemctl --user restart "$u"

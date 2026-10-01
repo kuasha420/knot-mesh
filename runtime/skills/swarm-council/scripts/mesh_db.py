@@ -11,12 +11,34 @@ import json
 import os
 import sqlite3
 import ssl
+import subprocess
 import sys
 import urllib.error
 import urllib.request
 import uuid
 
 DEFAULT_DB_PATH = os.path.expanduser("~/.config/knot/council.db")
+
+
+def resolve_dynamic_anchor_url() -> str | None:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.abspath(os.path.join(script_dir, "../../../..")),
+        os.path.expanduser("~/Dev/knot-mesh"),
+        os.path.expanduser("~/knot-mesh"),
+    ]
+    for c in candidates:
+        resolver = os.path.join(c, "core/resolver.sh")
+        if os.path.isfile(resolver):
+            try:
+                res = subprocess.run([resolver, "desktop", "4242"], capture_output=True, text=True, timeout=2)
+                if res.returncode == 0 and res.stdout.strip():
+                    ip = res.stdout.strip()
+                    if ip and ip != "127.0.0.1":
+                        return f"https://{ip}:4242"
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [mesh_db] Handled exception resolving anchor URL: {_err}\n")
+    return None
 
 
 def get_db_connection(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:
@@ -58,7 +80,10 @@ def try_hub_request(method: str, path: str, payload: dict = None, timeout: float
     env_url = os.environ.get("KNOT_HUB_URL")
     if env_url:
         candidate_urls.append(env_url.rstrip("/"))
-    candidate_urls.extend(["https://192.168.68.153:4242", "https://127.0.0.1:4242"])
+    dyn_anchor = resolve_dynamic_anchor_url()
+    if dyn_anchor:
+        candidate_urls.append(dyn_anchor)
+    candidate_urls.append("https://127.0.0.1:4242")
 
     seen = set()
     urls = []

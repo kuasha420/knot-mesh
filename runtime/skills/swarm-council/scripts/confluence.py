@@ -194,7 +194,20 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
                     mode_label = "Zero-Token Standby (Prompt to steer)"
 
                 if node in [local_node, "localhost"]:
-                    hub_url = os.environ.get("KNOT_HUB_URL", "https://192.168.68.153:4242")
+                    hub_url = os.environ.get("KNOT_HUB_URL")
+                    if not hub_url:
+                        res_sh = os.path.join(knot_root, "core/resolver.sh")
+                        if os.path.isfile(res_sh):
+                            try:
+                                res = subprocess.run([res_sh, "desktop", "4242"], capture_output=True, text=True, timeout=2)
+                                if res.returncode == 0 and res.stdout.strip():
+                                    ip = res.stdout.strip()
+                                    if ip and ip != "127.0.0.1":
+                                        hub_url = f"https://{ip}:4242"
+                            except Exception as _err:
+                                sys.stderr.write(f"Notice: [confluence] Handled exception resolving anchor URL: {_err}\n")
+                    if not hub_url:
+                        hub_url = "https://127.0.0.1:4242"
                     ps.write(f'export KNOT_NODE_ID="{node}"\n')
                     ps.write(f'export KNOT_COUNCIL_RUN_ID="{run_id}"\n')
                     ps.write(f'export KNOT_HUB_URL="{hub_url}"\n')

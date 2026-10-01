@@ -4,7 +4,7 @@ After=network.target default.target
 
 [Service]
 Type=simple
-ExecStart=/home/kuasha/Dev/knot-mesh/core/hub/agent.py
+ExecStart=%h/.local/bin/knot-agent
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
