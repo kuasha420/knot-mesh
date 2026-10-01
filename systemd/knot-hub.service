@@ -4,7 +4,7 @@ After=network.target default.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/knot-hub
+ExecStart=/home/kuasha/Dev/knot-mesh/core/hub/hub.py
 Restart=always
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1

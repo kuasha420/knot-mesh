@@ -139,6 +139,9 @@ council_start() {
   if [ -n "$proj_override" ]; then
     sync_args+=(--project "$proj_override")
   fi
+  if [ -n "$nodes" ]; then
+    sync_args+=(--nodes "$nodes")
+  fi
   if ! sync_out="$(bash "$SCRIPTS_DIR/project_sync.sh" "${sync_args[@]}" 2>"$sync_err_file")"; then
     knot_log_err "Project sync failed:"
     cat "$sync_err_file"
@@ -155,10 +158,13 @@ council_start() {
   fi
 
   local proj_name proj_folder
-  if [ -n "$proj_override" ]; then
-    proj_name="$proj_override"
-  else
-    proj_name="$(echo "$sync_out" | jq -r '.project_name // "knot-mesh"')"
+  proj_name="$(echo "$sync_out" | jq -r '.project_name // empty')"
+  if [ -z "$proj_name" ] || [ "$proj_name" = "." ] || [ "$proj_name" = "./" ]; then
+    if [ -n "$proj_override" ] && [ "$proj_override" != "." ] && [ "$proj_override" != "./" ]; then
+      proj_name="$proj_override"
+    else
+      proj_name="knot-mesh"
+    fi
   fi
   proj_folder="$(echo "$sync_out" | jq -r '.folders[0] // empty')"
   if [ -z "$proj_folder" ] || [ ! -d "$proj_folder" ]; then
@@ -427,6 +433,10 @@ council_steer() {
     if [ ! -t 0 ]; then
       prompt_text="$(cat)"
     fi
+  elif [ ${#positional[@]} -eq 2 ] && [ ! -t 0 ]; then
+    # When piped with 2 positional args: echo "prompt" | knot council steer <node> <run_id>
+    run_id="${positional[1]}"
+    prompt_text="$(cat)"
   fi
 
   if [ -z "$node" ] || [ -z "$prompt_text" ]; then
@@ -460,23 +470,52 @@ council_steer() {
   fi
 
   if [ ! -S "$sock" ]; then
-    local anchor="desktop"
+    local target_host=""
     if [ -f "$meta_file" ]; then
-      anchor="$(jq -r '.anchor // "desktop"' "$meta_file")"
+      target_host="$(jq -r '.cockpit_node // .anchor // "desktop"' "$meta_file")"
+    else
+      target_host="desktop"
     fi
     local my_h=""
     if ! my_h="$(knot_detect_hostname 2>&1)"; then
       my_h="$(uname -n | cut -d. -f1)"
     fi
-    if [ "$my_h" != "$anchor" ] && command -v knot >/dev/null; then
-      if knot exec "$anchor" "test -S /tmp/kitty-council-$run_id.sock"; then
+    if [ "$my_h" != "$target_host" ] && command -v knot >/dev/null; then
+      if knot exec "$target_host" "test -S /tmp/kitty-council-$run_id.sock"; then
         local relay_err=""
-        if relay_err="$(printf '%s\r' "$prompt_text" | knot exec "$anchor" "kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-text --match 'title:.*${node}.*' --stdin && sleep 0.2 && kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-key --match 'title:.*${node}.*' return" 2>&1)"; then
-          knot_log_ok "Steered node '@$node' via Cockpit Bridge Relay to @$anchor (Run: $run_id)"
+        if relay_err="$(printf '%s\r' "$prompt_text" | knot exec "$target_host" "kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-text --match 'title:.*${node}.*' --stdin && sleep 0.2 && kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-key --match 'title:.*${node}.*' return" 2>&1)"; then
+          knot_log_ok "Steered node '@$node' via Cockpit Bridge Relay to @$target_host (Run: $run_id)"
           return 0
         else
-          knot_log_err "Remote steer relay to @$anchor failed for node '$node': $relay_err"
+          knot_log_err "Remote steer relay to @$target_host failed for node '$node': $relay_err"
           return 1
+        fi
+      fi
+    fi
+    # If not on target_host, probe online nodes where the offloaded socket might reside
+    if command -v knot >/dev/null; then
+      local mesh_status=""
+      if mesh_status="$(knot status 2>&1)"; then
+        local cand_node=""
+        while IFS= read -r cand; do
+          [ -n "$cand" ] || continue
+          [[ "$cand" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || continue
+          [ "$cand" != "NODE" ] || continue
+          [ "$cand" != "$my_h" ] && [ "$cand" != "$target_host" ] || continue
+          if knot exec "$cand" "test -S /tmp/kitty-council-$run_id.sock"; then
+            cand_node="$cand"
+            break
+          fi
+        done < <(echo "$mesh_status" | awk 'NR>2 {print $1}')
+        if [ -n "$cand_node" ]; then
+          local relay_err=""
+          if relay_err="$(printf '%s\r' "$prompt_text" | knot exec "$cand_node" "kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-text --match 'title:.*${node}.*' --stdin && sleep 0.2 && kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-key --match 'title:.*${node}.*' return" 2>&1)"; then
+            knot_log_ok "Steered node '@$node' via Cockpit Bridge Relay to @$cand_node (Run: $run_id)"
+            return 0
+          else
+            knot_log_err "Remote steer relay to @$cand_node failed for node '$node': $relay_err"
+            return 1
+          fi
         fi
       fi
     fi
@@ -736,8 +775,8 @@ council_attach() {
     if [ -d "$pdir" ]; then cd "$pdir"; fi
     agy --project "$m_proj" --dangerously-skip-permissions -c
   else
-    local remote_attach_cmd="export KNOT_NODE_ID='$node_id' KNOT_HUB_URL='https://127.0.0.1:4242'; if [ -n '$run_id' ]; then export KNOT_COUNCIL_RUN_ID='$run_id'; fi; export KNOT_COUNCIL_DB='$m_db' KNOT_PROJECT='$m_proj'; if [ -d \\\"Dev/$m_proj\\\" ]; then cd \\\"Dev/$m_proj\\\"; elif [ -d \\\"$m_proj\\\" ]; then cd \\\"$m_proj\\\"; fi; agy --project '$m_proj' --dangerously-skip-permissions -c"
-    "$KNOT_ROOT/bin/knot" exec "$node_id" -tt "$remote_attach_cmd"
+    local remote_attach_cmd="export KNOT_NODE_ID='$node_id' KNOT_HUB_URL='https://127.0.0.1:4242'; if [ -n '$run_id' ]; then export KNOT_COUNCIL_RUN_ID='$run_id'; fi; export KNOT_COUNCIL_DB='$m_db' KNOT_PROJECT='$m_proj'; PDIR=\$(python3 -c 'import sys,os,glob,json;home=os.path.expanduser(\"~\");pname=sys.argv[1].lower() if len(sys.argv)>1 else \"\";pdir=os.path.join(home,\".gemini/config/projects\");res=\"\";[setattr(sys.modules[__name__],\"res\",p if os.path.isdir(p) else next((c for b in [os.path.basename(p)] for c in [os.path.join(home,\"Dev\",b),os.path.join(home,b)] if os.path.isdir(c)),\"\")) for f in (glob.glob(os.path.join(pdir,\"*.json\")) if os.path.isdir(pdir) else []) if not res for d in [json.load(open(f))] if (d.get(\"name\",\"\").lower()==pname or d.get(\"id\",\"\").lower()==pname) for r in d.get(\"projectResources\",{}).get(\"resources\",[]) for u in [r.get(\"gitFolder\",{}).get(\"folderUri\",\"\")] if u.startswith(\"file://\") for p in [u[7:].rstrip(\"/\")]]; print(res or next((c for c in [os.path.join(home,\"Dev\",pname),os.path.join(home,pname)] if os.path.isdir(c)),os.getcwd()))' '$m_proj'); if [ -d \"\$PDIR\" ]; then cd \"\$PDIR\"; fi; agy --project '$m_proj' --dangerously-skip-permissions -c"
+    "$KNOT_ROOT/bin/knot" exec -tt "$node_id" "$remote_attach_cmd"
   fi
 }
 

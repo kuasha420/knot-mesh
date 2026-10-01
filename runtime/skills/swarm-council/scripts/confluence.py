@@ -194,9 +194,10 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
                     mode_label = "Zero-Token Standby (Prompt to steer)"
 
                 if node in [local_node, "localhost"]:
+                    hub_url = os.environ.get("KNOT_HUB_URL", "https://192.168.68.153:4242")
                     ps.write(f'export KNOT_NODE_ID="{node}"\n')
                     ps.write(f'export KNOT_COUNCIL_RUN_ID="{run_id}"\n')
-                    ps.write(f'export KNOT_HUB_URL="https://127.0.0.1:4242"\n')
+                    ps.write(f'export KNOT_HUB_URL="{hub_url}"\n')
                     ps.write(f'export KNOT_COUNCIL_DB="mesh"\n')
                     ps.write(f'export KNOT_PROJECT="{project_name}"\n')
                     ps.write(f'export KNOT_PEERS="{",".join(nodes)}"\n')
@@ -225,7 +226,7 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
                 else:
                     remote_cmd = (
                         f"trap '' HUP; "
-                        f"export KNOT_NODE_ID='{node}' KNOT_COUNCIL_RUN_ID='{run_id}' KNOT_HUB_URL='https://127.0.0.1:4242' KNOT_COUNCIL_DB='mesh' KNOT_PROJECT='{project_name}' KNOT_PEERS='{','.join(nodes)}' PATH=\"\\$HOME/.local/bin:/usr/local/bin:/usr/bin:\\$PATH\"; "
+                        f"export KNOT_NODE_ID='{node}' KNOT_COUNCIL_RUN_ID='{run_id}' KNOT_COUNCIL_DB='mesh' KNOT_PROJECT='{project_name}' KNOT_PEERS='{','.join(nodes)}' PATH=\"\\$HOME/.local/bin:/usr/local/bin:/usr/bin:\\$PATH\"; "
                         f"TARGET=\"\"; for c in \"\\$HOME/Dev/{project_name}\" \"\\$HOME/{project_name}\" \"\\$HOME/.local/share/{project_name}\" \"Dev/{project_name}\" \"{project_name}\"; do if [ -d \"\\$c\" ]; then TARGET=\"\\$c\"; break; fi; done; if [ -n \"\\$TARGET\" ]; then cd \"\\$TARGET\"; fi; "
                         f"echo -e '\\033[1;36m╔══════════════════════════════════════════════════════════════════════╗\\033[0m'; "
                         f"echo -e '\\033[1;36m║\\033[0m  🛰️  \\033[1mKnot Swarm Interactive Cockpit: @[{node}]\\033[0m ({desc})'; "

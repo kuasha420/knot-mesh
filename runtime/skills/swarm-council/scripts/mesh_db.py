@@ -54,21 +54,34 @@ def get_db_connection(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:
 
 
 def try_hub_request(method: str, path: str, payload: dict = None, timeout: float = 2.0) -> dict | None:
-    hub_url = os.environ.get("KNOT_HUB_URL", "https://127.0.0.1:4242").rstrip("/")
-    url = f"{hub_url}{path}"
+    candidate_urls = []
+    env_url = os.environ.get("KNOT_HUB_URL")
+    if env_url:
+        candidate_urls.append(env_url.rstrip("/"))
+    candidate_urls.extend(["https://192.168.68.153:4242", "https://127.0.0.1:4242"])
+
+    seen = set()
+    urls = []
+    for u in candidate_urls:
+        if u not in seen:
+            seen.add(u)
+            urls.append(u)
+
     data = json.dumps(payload).encode("utf-8") if payload else None
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
 
-    try:
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except Exception:
-        return None
+    for hub_url in urls:
+        url = f"{hub_url}{path}"
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            continue
+    return None
 
 
 def create_thread(title: str, body: str, run_id: str = "", category: str = "general", db_path: str = DEFAULT_DB_PATH) -> dict:

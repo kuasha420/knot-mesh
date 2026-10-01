@@ -14,11 +14,13 @@ parser = argparse.ArgumentParser(description="Swarm Council Project Sync")
 parser.add_argument("--pull", action="store_true", help="Pull git mirrors")
 parser.add_argument("--project", default=None, help="Target project name or ID")
 parser.add_argument("--dir", default=None, help="Explicit directory override")
+parser.add_argument("--nodes", default=None, help="Comma-separated nodes to sync")
 args, unknown = parser.parse_known_args()
 
 do_pull = args.pull
 target_project = args.project
 explicit_dir = args.dir
+target_nodes = args.nodes
 
 home = os.path.expanduser("~")
 cwd = os.path.realpath(explicit_dir) if explicit_dir else os.path.realpath(os.getcwd())
@@ -51,31 +53,82 @@ def extract_folders(data):
 
 # 1. Target project specified explicitly
 if target_project:
-    t_clean = target_project.strip().lower()
-    if os.path.isdir(projects_dir):
-        for f in glob.glob(os.path.join(projects_dir, "*.json")):
-            try:
-                with open(f, "r", encoding="utf-8") as pf:
-                    data = json.load(pf)
-                p_id = data.get("id", "").lower()
-                p_name = data.get("name", "").lower()
-                if t_clean in (p_id, p_name):
+    t_clean = target_project.strip()
+    is_path_target = t_clean in (".", "./") or t_clean.startswith((".", "/")) or os.path.isdir(t_clean)
+
+    if is_path_target:
+        target_dir = os.path.realpath(cwd if t_clean in (".", "./") else t_clean)
+        if os.path.isdir(projects_dir):
+            for f in glob.glob(os.path.join(projects_dir, "*.json")):
+                try:
+                    with open(f, "r", encoding="utf-8") as pf:
+                        data = json.load(pf)
                     f_list = extract_folders(data)
-                    if f_list:
-                        matched_project = data
-                        matched_folders = f_list
-                        break
+                    for fpath in f_list:
+                        rf = os.path.realpath(fpath)
+                        if rf == target_dir or target_dir.startswith(rf + "/"):
+                            matched_project = data
+                            matched_folders = f_list
+                            break
+                except Exception:
+                    pass
+                if matched_project:
+                    break
+        if not matched_folders:
+            try:
+                toplevel = subprocess.check_output(
+                    ["git", "rev-parse", "--show-toplevel"],
+                    cwd=target_dir,
+                    text=True,
+                    stderr=subprocess.DEVNULL
+                ).strip()
+                if toplevel and os.path.isdir(toplevel):
+                    matched_folders = [toplevel]
             except Exception:
                 pass
-    if not matched_folders:
-        for cand in [
-            os.path.join(home, "Dev", target_project),
-            os.path.join(home, target_project),
-            os.path.join(home, ".local/share", target_project)
-        ]:
-            if os.path.isdir(cand):
-                matched_folders = [cand]
-                break
+        if not matched_folders and os.path.isdir(target_dir):
+            matched_folders = [target_dir]
+    else:
+        t_clean_lower = t_clean.lower()
+        if os.path.isdir(projects_dir):
+            for f in glob.glob(os.path.join(projects_dir, "*.json")):
+                try:
+                    with open(f, "r", encoding="utf-8") as pf:
+                        data = json.load(pf)
+                    p_id = data.get("id", "").lower()
+                    p_name = data.get("name", "").lower()
+                    if t_clean_lower in (p_id, p_name):
+                        f_list = extract_folders(data)
+                        if f_list:
+                            matched_project = data
+                            matched_folders = f_list
+                            break
+                except Exception:
+                    pass
+        if not matched_folders:
+            for cand in [
+                os.path.join(home, "Dev", target_project),
+                os.path.join(home, target_project),
+                os.path.join(home, ".local/share", target_project)
+            ]:
+                if os.path.isdir(cand):
+                    if os.path.isdir(projects_dir):
+                        for f in glob.glob(os.path.join(projects_dir, "*.json")):
+                            try:
+                                with open(f, "r", encoding="utf-8") as pf:
+                                    data = json.load(pf)
+                                f_list = extract_folders(data)
+                                if any(os.path.realpath(cand) == os.path.realpath(x) for x in f_list):
+                                    matched_project = data
+                                    matched_folders = f_list
+                                    break
+                            except Exception:
+                                pass
+                            if matched_project:
+                                break
+                    if not matched_folders:
+                        matched_folders = [cand]
+                    break
 
 # 2. Try matching CWD against Antigravity project workspaces
 if not matched_folders and os.path.isdir(projects_dir):
@@ -151,17 +204,21 @@ if not os.path.isfile(knot_bin) or not os.access(knot_bin, os.X_OK):
     knot_bin = shutil.which("knot") or os.path.expanduser("~/.local/bin/knot")
 
 nodes = []
-try:
-    status_out = subprocess.check_output([knot_bin, "status"], text=True, stderr=subprocess.DEVNULL)
-    import re
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    clean_out = ansi_escape.sub('', status_out)
-    for line in clean_out.splitlines():
-        parts = line.split()
-        if len(parts) >= 5 and parts[4] == "ONLINE":
-            nodes.append(parts[0])
-except Exception:
-    nodes = ["localhost"]
+if target_nodes:
+    nodes = [n.strip() for n in target_nodes.split(",") if n.strip()]
+
+if not nodes:
+    try:
+        status_out = subprocess.check_output([knot_bin, "status"], text=True, stderr=subprocess.DEVNULL)
+        import re
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        clean_out = ansi_escape.sub('', status_out)
+        for line in clean_out.splitlines():
+            parts = line.split()
+            if len(parts) >= 5 and parts[4] == "ONLINE":
+                nodes.append(parts[0])
+    except Exception:
+        nodes = ["localhost"]
 
 if not nodes:
     nodes = ["localhost"]
@@ -169,7 +226,7 @@ if not nodes:
 project_name = (
     matched_project.get("name")
     if matched_project
-    else (target_project if target_project else os.path.basename(matched_folders[0]))
+    else (target_project if (target_project and target_project not in (".", "./") and not os.path.isdir(target_project)) else os.path.basename(matched_folders[0]))
 )
 project_id = (
     matched_project.get("id")
@@ -186,6 +243,9 @@ results = {
 
 # Determine local node identifiers
 try:
+    _sdir = os.path.dirname(os.path.realpath(__file__))
+    if _sdir not in sys.path:
+        sys.path.insert(0, _sdir)
     from resolve_node import resolve_local_node_id
     detected_local = resolve_local_node_id()
 except Exception:
@@ -227,11 +287,41 @@ for node in nodes:
                     pass
             node_res["folders"][folder_name] = {"path": folder, "exists": exists, "branch": branch, "commit": commit}
         else:
+            # Sync Antigravity project JSON if matched
+            if matched_project:
+                try:
+                    remote_home = subprocess.check_output([knot_bin, "exec", node, 'echo "$HOME"'], text=True, stderr=subprocess.DEVNULL).strip()
+                    if remote_home:
+                        adapted_data = json.loads(json.dumps(matched_project))
+                        for res in adapted_data.get("projectResources", {}).get("resources", []):
+                            u = res.get("gitFolder", {}).get("folderUri", "")
+                            if u.startswith(f"file://{home}/"):
+                                res["gitFolder"]["folderUri"] = f"file://{remote_home}/{u[len(f'file://{home}/'):]}"
+                        p_json_str = json.dumps(adapted_data, indent=2)
+                        sync_proj_cmd = f"mkdir -p ~/.gemini/config/projects && cat > ~/.gemini/config/projects/{project_id}.json"
+                        p = subprocess.Popen([knot_bin, "exec", node, sync_proj_cmd], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
+                        p.communicate(input=p_json_str)
+                except Exception:
+                    pass
+
             # Probe remote node across candidate directory roots
             pull_subcmd = "git pull -q --ff-only && " if do_pull else ""
             remote_cmd = f'TARGET=""; for c in ~/Dev/{folder_name} ~/{folder_name} ~/.local/share/{folder_name}; do if [ -d "$c" ]; then TARGET="$c"; break; fi; done; if [ -n "$TARGET" ]; then (cd "$TARGET" && {pull_subcmd}git rev-parse --abbrev-ref HEAD && git rev-parse --short HEAD && echo "$TARGET"); else echo "MISSING"; fi'
             try:
                 rout = subprocess.check_output([knot_bin, "exec", node, remote_cmd], text=True, stderr=subprocess.DEVNULL).strip().splitlines()
+                if (not rout or rout[0] == "MISSING") and do_pull:
+                    try:
+                        remote_url = subprocess.check_output(
+                            ["git", "-C", folder, "config", "--get", "remote.origin.url"],
+                            text=True, stderr=subprocess.DEVNULL
+                        ).strip()
+                        if remote_url:
+                            clone_cmd = f'mkdir -p ~/Dev && git clone -q "{remote_url}" ~/Dev/{folder_name}'
+                            subprocess.run([knot_bin, "exec", node, clone_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            rout = subprocess.check_output([knot_bin, "exec", node, remote_cmd], text=True, stderr=subprocess.DEVNULL).strip().splitlines()
+                    except Exception:
+                        pass
+
                 if rout and rout[0] != "MISSING":
                     r_branch = rout[0] if len(rout) > 0 else "unknown"
                     r_commit = rout[1] if len(rout) > 1 else "unknown"

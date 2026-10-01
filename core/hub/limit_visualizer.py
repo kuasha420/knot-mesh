@@ -52,6 +52,22 @@ NODE_ROLES = {
     "anchor": ("Anchor Workstation", "🟣"),
 }
 
+ANSI_ESCAPE_RE = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
+
+
+def visible_len(s: str) -> int:
+    """Computes visible terminal length of string excluding ANSI escape sequences."""
+    return len(ANSI_ESCAPE_RE.sub('', s))
+
+
+def pad_visible(s: str, width: int, align: str = "left") -> str:
+    """Pads string to visible width taking ANSI codes into account."""
+    vlen = visible_len(s)
+    pad = max(0, width - vlen)
+    if align == "right":
+        return (" " * pad) + s
+    return s + (" " * pad)
+
 
 def try_hub_request(path: str, hub_url: str = DEFAULT_HUB_URL, timeout: float = 1.5) -> Optional[Any]:
     """Queries Knot Hub REST API with proper TLS verification gating and narrow exception handling."""
@@ -260,16 +276,20 @@ class QuotaDataAggregator:
 class LimitVisualizerRenderer:
     """Renders all-node live antigravity quota matrices."""
 
-    def __init__(self, aggregator: QuotaDataAggregator):
+    def __init__(self, aggregator: QuotaDataAggregator, compact: bool = False, wide: bool = False):
         self.aggregator = aggregator
+        self.compact = compact
+        self.wide = wide
 
-    def render_snapshot(self, width: Optional[int] = None, height: Optional[int] = None, compact: bool = False, wide: bool = False) -> str:
+    def render_snapshot(self, width: Optional[int] = None, height: Optional[int] = None, compact: Optional[bool] = None, wide: Optional[bool] = None) -> str:
         term_width, term_height = shutil.get_terminal_size((100, 30))
         w = width or term_width
         h = height or term_height
 
+        c = self.compact if compact is None else compact
+        wd = self.wide if wide is None else wide
         nodes, power = self.aggregator.fetch_all()
-        is_compact = compact or (w < 100 and not wide)
+        is_compact = c or (w < 100 and not wd)
 
         if is_compact:
             return self._render_compact(w, h, nodes, power)
@@ -344,10 +364,10 @@ class LimitVisualizerRenderer:
         lines.append(f"{C_BOLD}{title}{C_RESET} | {backend_tag} | {C_DIM}{time_str}{C_RESET}")
         lines.append(f"{C_CYAN}{'═' * w}{C_RESET}")
 
-        # Table Header
-        header_fmt = "%-14s %-22s %-20s %-22s %-22s %-16s"
-        lines.append(f"{C_BOLD}" + header_fmt % ("STRAND NODE", "SPECIALIZATION / ROLE", "MODEL ASSIGNMENT", "5-HOUR QUOTA", "WEEKLY BUDGET", "REFRESH / POWER") + f"{C_RESET}")
-        lines.append(f"{C_DIM}" + header_fmt % ("───────────", "─────────────────────", "──────────────────", "────────────", "─────────────", "───────────────") + f"{C_RESET}")
+        cols = [16, 24, 22, 24, 24, 16]
+        h_strs = ["STRAND NODE", "SPECIALIZATION / ROLE", "MODEL ASSIGNMENT", "5-HOUR QUOTA", "WEEKLY BUDGET", "REFRESH / POWER"]
+        lines.append(f"{C_BOLD}" + " ".join(pad_visible(h, c_w) for h, c_w in zip(h_strs, cols)) + f"{C_RESET}")
+        lines.append(f"{C_DIM}" + " ".join("─" * c_w for c_w in cols) + f"{C_RESET}")
 
         for n in nodes:
             nid = n.get("id") or n.get("node_id", "unknown")
@@ -357,7 +377,6 @@ class LimitVisualizerRenderer:
 
             status_icon = "●" if not is_offline else "○"
             status_color = C_BGREEN if not is_offline else C_BRED
-            node_label = f"{icon} @{nid} {status_color}{status_icon}{C_RESET}"
 
             model_name = n.get("selected_model") or "gemini-3.8-flash"
 
@@ -380,30 +399,36 @@ class LimitVisualizerRenderer:
                 cell_5h = f"{C_DIM}[WEEKLY ONLY]{C_RESET}"
             else:
                 bar_5h = render_progress_bar(g_5h, is_offline=is_offline, width=8)
-                cell_5h = f"{bar_5h} {rst_5h[:6]}"
+                cell_5h = f"{bar_5h} {rst_5h[:10]}"
 
             bar_wk = render_progress_bar(g_wk, is_offline=is_offline, width=8)
 
             pwr_info = power.get(nid) if isinstance(power, dict) else None
             pwr_str = format_power_string(pwr_info, is_offline=is_offline)
 
-            lines.append(header_fmt % (
+            row_items = [
                 f"{icon} @{nid}",
-                role_desc[:21],
-                model_name[:19],
+                role_desc[:23],
+                model_name[:21],
                 cell_5h,
-                f"{bar_wk} {rst_wk[:6]}",
+                f"{bar_wk} {rst_wk[:10]}",
                 pwr_str
-            ))
+            ]
+            lines.append(" ".join(pad_visible(item, c_w) for item, c_w in zip(row_items, cols)))
 
         lines.append(f"{C_CYAN}{'─' * w}{C_RESET}")
         lines.append(f"{C_REV} [q] Quit  [r] Manual Refresh  [p] Pause Timer  [k] Kitty Fullscreen {C_RESET}")
         return "\n".join(lines)
 
 
-def run_interactive_loop(aggregator: QuotaDataAggregator, poll_interval: float = 2.0) -> None:
+def run_interactive_loop(
+    aggregator: QuotaDataAggregator,
+    poll_interval: float = 2.0,
+    compact: bool = False,
+    wide: bool = False,
+) -> None:
     """Live interactive loop with ticking countdowns."""
-    renderer = LimitVisualizerRenderer(aggregator)
+    renderer = LimitVisualizerRenderer(aggregator, compact=compact, wide=wide)
 
     is_tty = sys.stdin.isatty()
     old_term_settings = None
@@ -436,7 +461,7 @@ def run_interactive_loop(aggregator: QuotaDataAggregator, poll_interval: float =
         paused = False
         while True:
             snapshot = renderer.render_snapshot()
-            sys.stdout.write("\033[H" + snapshot)
+            sys.stdout.write("\033[H\033[J" + snapshot)
             sys.stdout.flush()
 
             if is_tty:
@@ -497,7 +522,7 @@ def main():
     aggregator = QuotaDataAggregator(hub_url=args.hub_url)
 
     if args.render_once or not sys.stdin.isatty():
-        renderer = LimitVisualizerRenderer(aggregator)
+        renderer = LimitVisualizerRenderer(aggregator, compact=args.compact, wide=args.wide)
         w, h = shutil.get_terminal_size((100, 30))
         if args.compact:
             w = 80
@@ -506,7 +531,7 @@ def main():
         print(renderer.render_snapshot(width=w, height=h, compact=args.compact, wide=args.wide))
         sys.exit(0)
 
-    run_interactive_loop(aggregator, poll_interval=args.interval)
+    run_interactive_loop(aggregator, poll_interval=args.interval, compact=args.compact, wide=args.wide)
 
 
 if __name__ == "__main__":

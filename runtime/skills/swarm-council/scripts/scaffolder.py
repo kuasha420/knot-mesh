@@ -111,7 +111,7 @@ def resolve_chunks(project_dir=None):
     Dynamically derive codebase chunks. If project_dir is knot-mesh,
     returns DEFAULT_CHUNKS. Otherwise discovers files and creates balanced chunks.
     """
-    pdir = project_dir or os.getcwd()
+    pdir = os.path.realpath(project_dir) if project_dir else os.getcwd()
     if os.path.exists(os.path.join(pdir, "bin/knot")) and os.path.exists(os.path.join(pdir, "core/lib.sh")):
         return DEFAULT_CHUNKS
 
@@ -423,7 +423,7 @@ def main():
 
     script_dir = os.path.dirname(os.path.realpath(__file__))
     knot_root = os.path.realpath(os.environ.get("KNOT_ROOT", os.path.join(script_dir, "../../../..")))
-    project_dir = args.project_dir or os.getcwd()
+    project_dir = os.path.realpath(args.project_dir) if args.project_dir else os.getcwd()
 
     # Load prompt
     if args.prompt_file:

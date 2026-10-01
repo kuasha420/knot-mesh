@@ -527,5 +527,46 @@ fi
 rm -rf "$heal_missions_dir" "$mock_bin_dir" "$mock_sock" "$mock_log"
 echo "PASSED"
 
+# 21. Testing dot project resolution and clean launch.sh staging across modes
+echo -n "21. Testing dot project resolution and clean launch.sh staging... "
+sync_dot_out="$(cd "$KNOT_ROOT" && bash "$COUNCIL_SCRIPTS/project_sync.sh" --project .)"
+dot_proj_name="$(echo "$sync_dot_out" | jq -r '.project_name')"
+dot_first_folder="$(echo "$sync_dot_out" | jq -r '.folders[0]')"
+if [ "$dot_proj_name" != "knot-mesh" ]; then
+  echo "FAILED (Expected project_name knot-mesh for --project ., got $dot_proj_name)"
+  exit 1
+fi
+if [ "$dot_first_folder" != "$KNOT_ROOT" ]; then
+  echo "FAILED (Expected folders[0] to be $KNOT_ROOT, got $dot_first_folder)"
+  exit 1
+fi
+
+res_dot_dir="$(cd "$KNOT_ROOT" && python3 "$COUNCIL_SCRIPTS/resolve_project.py" .)"
+if [ "$res_dot_dir" != "$KNOT_ROOT" ]; then
+  echo "FAILED (Expected resolve_project.py . to return $KNOT_ROOT, got $res_dot_dir)"
+  exit 1
+fi
+
+tui_stage_run="test_tui_stage_$$"
+tui_stage_dir="$HOME/.config/knot/missions/$tui_stage_run"
+mkdir -p "$tui_stage_dir"
+echo "Testing TUI staging prompt" > "$tui_stage_dir/desktop_prompt.md"
+
+tui_deliver_out="$(LAUNCH=0 bash "$COUNCIL_SCRIPTS/deliver.sh" tui "$tui_stage_run" "knot-mesh" grid 0 "desktop" 2>&1)"
+if [ ! -x "$tui_stage_dir/launch.sh" ]; then
+  echo "FAILED (launch.sh was not generated or not executable in TUI mode)"
+  rm -rf "$tui_stage_dir"
+  exit 1
+fi
+
+if ! bash -n "$tui_stage_dir/launch.sh"; then
+  echo "FAILED (launch.sh syntax validation failed via bash -n)"
+  rm -rf "$tui_stage_dir"
+  exit 1
+fi
+
+rm -rf "$tui_stage_dir"
+echo "PASSED"
+
 echo ""
-echo "=== All 20 Swarm Council Tests PASSED Successfully! ==="
+echo "=== All 21 Swarm Council Tests PASSED Successfully! ==="

@@ -44,39 +44,26 @@ if [ "$MODE" = "suggested" ]; then
   echo "--> Activating suggested mode: $MODE"
 fi
 
-case "$MODE" in
-  confluence)
-    if [ "$INTERACTIVE" = "1" ] || [ "$INTERACTIVE" = "true" ]; then
-      if [ "$RESUME" = "1" ] || [ "$RESUME" = "true" ]; then
-        echo "==> Resuming Interactive Confluence Spatial Cockpit in Kitty..."
-        local_conf_cmd=(python3 "$SCRIPT_DIR/confluence.py" --run-id "$RUN_ID" --project "$PROJECT" --tiling "$TILING" --interactive --resume)
-      else
-        echo "==> Spawning Zero-Token Interactive Confluence Cockpit in Kitty..."
-        local_conf_cmd=(python3 "$SCRIPT_DIR/confluence.py" --run-id "$RUN_ID" --project "$PROJECT" --tiling "$TILING" --interactive)
-      fi
-      if [ -n "$NODES" ]; then
-        local_conf_cmd+=(--nodes "$NODES")
-      fi
-      "${local_conf_cmd[@]}"
-    else
-      echo "==> Staging prompt files and launchers across mesh..."
-      pack=""
-      opening_node=""
-      if [ -f "$MISSIONS_DIR/meta.json" ]; then
-        pack="$(jq -r '.pack // ""' "$MISSIONS_DIR/meta.json")"
-        opening_node="$(jq -r '.opening_node // .ring[0] // ""' "$MISSIONS_DIR/meta.json")"
-      fi
-      if [ -z "$opening_node" ]; then
-        opening_node="$LOCAL_NODE"
-      fi
+# Stage prompt files and launchers across mesh for non-interactive missions
+if [ "$INTERACTIVE" != "1" ] && [ "$INTERACTIVE" != "true" ]; then
+  echo "==> Staging prompt files and launchers across mesh..."
+  pack=""
+  opening_node=""
+  if [ -f "$MISSIONS_DIR/meta.json" ]; then
+    pack="$(jq -r '.pack // ""' "$MISSIONS_DIR/meta.json")"
+    opening_node="$(jq -r '.opening_node // .ring[0] // ""' "$MISSIONS_DIR/meta.json")"
+  fi
+  if [ -z "$opening_node" ]; then
+    opening_node="$LOCAL_NODE"
+  fi
 
-      for pfile in "$MISSIONS_DIR"/*_prompt.md; do
-        [ -f "$pfile" ] || continue
-        node_id="$(basename "$pfile" | sed 's/_prompt.md//')"
-        
-        launcher_script="$MISSIONS_DIR/${node_id}_launch.sh"
-        if [ "$pack" = "tournament" ] && [ "$node_id" != "$opening_node" ]; then
-          cat << 'EOF_LAUNCH' > "$launcher_script"
+  for pfile in "$MISSIONS_DIR"/*_prompt.md; do
+    [ -f "$pfile" ] || continue
+    node_id="$(basename "$pfile" | sed 's/_prompt.md//')"
+    
+    launcher_script="$MISSIONS_DIR/${node_id}_launch.sh"
+    if [ "$pack" = "tournament" ] && [ "$node_id" != "$opening_node" ]; then
+      cat << 'EOF_LAUNCH' > "$launcher_script"
 #!/usr/bin/env bash
 trap '' HUP
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:$PATH"
@@ -107,7 +94,7 @@ if os.path.isdir(pdir):
                                 res = c; break
                 if res: break
         except Exception: pass
-if not res:
+if not res and pname and pname not in (".", "./"):
     for c in [os.path.join(home, "Dev", pname), os.path.join(home, pname), os.path.join(home, ".local/share", pname)]:
         if os.path.isdir(c):
             res = c; break
@@ -127,8 +114,8 @@ echo -e "\033[1;36m╚═══════════════════�
 echo ""
 exec agy --project "$PROJECT_NAME" --dangerously-skip-permissions
 EOF_LAUNCH
-        else
-          cat << 'EOF_LAUNCH' > "$launcher_script"
+    else
+      cat << 'EOF_LAUNCH' > "$launcher_script"
 #!/usr/bin/env bash
 trap '' HUP
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:$PATH"
@@ -160,7 +147,7 @@ if os.path.isdir(pdir):
                                 res = c; break
                 if res: break
         except Exception: pass
-if not res:
+if not res and pname and pname not in (".", "./"):
     for c in [os.path.join(home, "Dev", pname), os.path.join(home, pname), os.path.join(home, ".local/share", pname)]:
         if os.path.isdir(c):
             res = c; break
@@ -170,36 +157,56 @@ print(res or os.getcwd())
 if [ -d "$PROJECT_DIR" ]; then
   cd "$PROJECT_DIR"
 fi
-exec agy --project "$PROJECT_NAME" --dangerously-skip-permissions -i "$(< "$PROMPT_FILE")"
-EOF_LAUNCH
-        fi
-        sed -i "s|RUN_ID_PLACEHOLDER|$RUN_ID|g" "$launcher_script"
-        sed -i "s|PROJECT_PLACEHOLDER|$PROJECT|g" "$launcher_script"
-        sed -i "s|NODE_ID_PLACEHOLDER|$node_id|g" "$launcher_script"
-        chmod +x "$launcher_script"
 
-        if [ "$node_id" = "$LOCAL_NODE" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$LOCAL_HOST" ]; then
-          cp "$pfile" "$MISSIONS_DIR/prompt.md"
-          cp "$launcher_script" "$MISSIONS_DIR/launch.sh"
-        elif [ "$LAUNCH" -eq 1 ]; then
-          "$KNOT_BIN" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
-          cat "$pfile" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
-          cat "$launcher_script" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/launch.sh && chmod +x ~/.config/knot/missions/$RUN_ID/launch.sh"
-        fi
-      done
-      if [ "$LAUNCH" -eq 1 ]; then
-        echo "==> Spawning Confluence Spatial Cockpit in Kitty..."
-        ACTIVE_NODES="$(python3 -c 'import glob, os, sys, re; p=glob.glob(os.path.join(sys.argv[1], "*_prompt.md")); print(",".join(re.sub(r"_prompt\.md$", "", os.path.basename(x)) for x in p))' "$MISSIONS_DIR")"
-        local_conf_cmd=(python3 "$SCRIPT_DIR/confluence.py" --run-id "$RUN_ID" --project "$PROJECT" --tiling "$TILING")
-        if [ -n "$ACTIVE_NODES" ]; then
-          local_conf_cmd+=(--nodes "$ACTIVE_NODES")
-        elif [ -n "$NODES" ]; then
-          local_conf_cmd+=(--nodes "$NODES")
-        fi
-        "${local_conf_cmd[@]}"
+if [ "${1:-}" = "--headless" ] || [ "${1:-}" = "-p" ]; then
+  exec agy --project "$PROJECT_NAME" --dangerously-skip-permissions -p "$(< "$PROMPT_FILE")" --output-format json
+else
+  exec agy --project "$PROJECT_NAME" --dangerously-skip-permissions -i "$(< "$PROMPT_FILE")"
+fi
+EOF_LAUNCH
+    fi
+    sed -i "s|RUN_ID_PLACEHOLDER|$RUN_ID|g" "$launcher_script"
+    sed -i "s|PROJECT_PLACEHOLDER|$PROJECT|g" "$launcher_script"
+    sed -i "s|NODE_ID_PLACEHOLDER|$node_id|g" "$launcher_script"
+    chmod +x "$launcher_script"
+
+    if [ "$node_id" = "$LOCAL_NODE" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$LOCAL_HOST" ]; then
+      cp "$pfile" "$MISSIONS_DIR/prompt.md"
+      cp "$launcher_script" "$MISSIONS_DIR/launch.sh"
+    elif [ "$LAUNCH" -eq 1 ]; then
+      "$KNOT_BIN" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
+      cat "$pfile" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
+      cat "$launcher_script" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/launch.sh && chmod +x ~/.config/knot/missions/$RUN_ID/launch.sh"
+    fi
+  done
+fi
+
+case "$MODE" in
+  confluence)
+    if [ "$INTERACTIVE" = "1" ] || [ "$INTERACTIVE" = "true" ]; then
+      if [ "$RESUME" = "1" ] || [ "$RESUME" = "true" ]; then
+        echo "==> Resuming Interactive Confluence Spatial Cockpit in Kitty..."
+        local_conf_cmd=(python3 "$SCRIPT_DIR/confluence.py" --run-id "$RUN_ID" --project "$PROJECT" --tiling "$TILING" --interactive --resume)
       else
-        echo "==> Staging complete for Confluence mode (launch=0)."
+        echo "==> Spawning Zero-Token Interactive Confluence Cockpit in Kitty..."
+        local_conf_cmd=(python3 "$SCRIPT_DIR/confluence.py" --run-id "$RUN_ID" --project "$PROJECT" --tiling "$TILING" --interactive)
       fi
+      if [ -n "$NODES" ]; then
+        local_conf_cmd+=(--nodes "$NODES")
+      fi
+      "${local_conf_cmd[@]}"
+    elif [ "$LAUNCH" -eq 1 ]; then
+      echo "==> Spawning Confluence Spatial Cockpit in Kitty..."
+      ACTIVE_NODES="$(python3 -c 'import glob, os, sys, re; p=glob.glob(os.path.join(sys.argv[1], "*_prompt.md")); print(",".join(re.sub(r"_prompt\.md$", "", os.path.basename(x)) for x in p))' "$MISSIONS_DIR")"
+      local_conf_cmd=(python3 "$SCRIPT_DIR/confluence.py" --run-id "$RUN_ID" --project "$PROJECT" --tiling "$TILING")
+      if [ -n "$ACTIVE_NODES" ]; then
+        local_conf_cmd+=(--nodes "$ACTIVE_NODES")
+      elif [ -n "$NODES" ]; then
+        local_conf_cmd+=(--nodes "$NODES")
+      fi
+      "${local_conf_cmd[@]}"
+    else
+      echo "==> Staging complete for Confluence mode (launch=0)."
     fi
     ;;
 
@@ -209,18 +216,13 @@ EOF_LAUNCH
       [ -f "$pfile" ] || continue
       node_id="$(basename "$pfile" | sed 's/_prompt.md//')"
       echo "  [•] Dispatching to $node_id (headless)..."
-      
-      resolve_cmd="python3 -c 'import sys, os, glob, json; home=os.path.expanduser(\"~\"); pname=sys.argv[1].lower(); pdir=os.path.join(home, \".gemini/config/projects\"); res=\"\"; [None for f in glob.glob(os.path.join(pdir, \"*.json\")) if not res and (lambda d: [setattr(sys.modules[__name__], \"res\", p if os.path.isdir(p) else next((c for b in [os.path.basename(p)] for c in [os.path.join(home, \"Dev\", b), os.path.join(home, b), os.path.join(home, \".local/share\", b)] if os.path.isdir(c)), \"\")) for r in d.get(\"projectResources\",{}).get(\"resources\",[]) for u in [r.get(\"gitFolder\",{}).get(\"folderUri\",\"\")] if u.startswith(\"file://\") for p in [u[7:].rstrip(\"/\")] if res==\"\"])(json.load(open(f))) if (lambda d: d.get(\"name\",\"\").lower()==pname or d.get(\"id\",\"\").lower()==pname)(json.load(open(f)))]; print(res or next((c for c in [os.path.join(home, \"Dev\", pname), os.path.join(home, pname), os.path.join(home, \".local/share\", pname)] if os.path.isdir(c)), os.getcwd()))' '$PROJECT'"
 
       if [ "$node_id" = "$LOCAL_NODE" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$LOCAL_HOST" ]; then
         systemd-run --user --unit="knot-council-$RUN_ID-$node_id" \
-          bash -c "PDIR=\"\$($resolve_cmd)\"; if [ -d \"\$PDIR\" ]; then cd \"\$PDIR\"; fi; export KNOT_NODE_ID='$node_id'; export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/bin:\$PATH\"; agy --project '$PROJECT' --dangerously-skip-permissions -p \"\$(cat '$pfile')\" --output-format json" \
+          bash "$MISSIONS_DIR/${node_id}_launch.sh" --headless \
           > "$MISSIONS_DIR/${node_id}_output.json" 2>&1 &
       else
-        # Push prompt file to target node and execute via systemd-run
-        "$KNOT_BIN" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
-        cat "$pfile" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
-        "$KNOT_BIN" exec "$node_id" "systemd-run --user --unit=knot-council-$RUN_ID bash -c \"PDIR=\\\$($resolve_cmd); if [ -d \\\"\\\$PDIR\\\" ]; then cd \\\"\\\$PDIR\\\"; fi; export KNOT_NODE_ID='$node_id'; export PATH=\\\"\\\$HOME/.local/bin:/usr/local/bin:/usr/bin:\\\$PATH\\\"; agy --project $PROJECT --dangerously-skip-permissions -p \\\"\\\$(cat ~/.config/knot/missions/$RUN_ID/prompt.md)\\\" --output-format json\" > ~/.config/knot/missions/$RUN_ID/output.json 2>&1 &"
+        "$KNOT_BIN" exec "$node_id" "systemd-run --user --unit=knot-council-$RUN_ID bash ~/.config/knot/missions/$RUN_ID/launch.sh --headless > ~/.config/knot/missions/$RUN_ID/output.json 2>&1 &"
       fi
     done
     echo "[✓] Fleet runners dispatched headlessly in background."
@@ -232,19 +234,12 @@ EOF_LAUNCH
       [ -f "$pfile" ] || continue
       node_id="$(basename "$pfile" | sed 's/_prompt.md//')"
       echo "  [•] Spawning Konsole on $node_id screen..."
-      
-      resolve_cmd="python3 -c 'import sys, os, glob, json; home=os.path.expanduser(\"~\"); pname=sys.argv[1].lower(); pdir=os.path.join(home, \".gemini/config/projects\"); res=\"\"; [None for f in glob.glob(os.path.join(pdir, \"*.json\")) if not res and (lambda d: [setattr(sys.modules[__name__], \"res\", p if os.path.isdir(p) else next((c for b in [os.path.basename(p)] for c in [os.path.join(home, \"Dev\", b), os.path.join(home, b), os.path.join(home, \".local/share\", b)] if os.path.isdir(c)), \"\")) for r in d.get(\"projectResources\",{}).get(\"resources\",[]) for u in [r.get(\"gitFolder\",{}).get(\"folderUri\",\"\")] if u.startswith(\"file://\") for p in [u[7:].rstrip(\"/\")] if res==\"\"])(json.load(open(f))) if (lambda d: d.get(\"name\",\"\").lower()==pname or d.get(\"id\",\"\").lower()==pname)(json.load(open(f)))]; print(res or next((c for c in [os.path.join(home, \"Dev\", pname), os.path.join(home, pname), os.path.join(home, \".local/share\", pname)] if os.path.isdir(c)), os.getcwd()))' '$PROJECT'"
 
       if [ "$node_id" = "$LOCAL_NODE" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$LOCAL_HOST" ]; then
-        local_pdir="$(python3 "$SCRIPT_DIR/resolve_project.py" "$PROJECT")"
         mkdir -p "$MISSIONS_DIR/logs"
-        WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 nohup konsole --hold --workdir "$local_pdir" -e bash -c "export KNOT_NODE_ID='$node_id'; exec agy --project '$PROJECT' --dangerously-skip-permissions -i \"\$(cat '$pfile')\"" > "$MISSIONS_DIR/logs/konsole_$node_id.log" 2>&1 &
+        WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}" DISPLAY="${DISPLAY:-:0}" nohup konsole --hold -e "$MISSIONS_DIR/${node_id}_launch.sh" > "$MISSIONS_DIR/logs/konsole_$node_id.log" 2>&1 &
       else
-        # Push prompt and launch konsole on remote display
-        "$KNOT_BIN" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID/logs"
-        cat "$pfile" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
-        
-        "$KNOT_BIN" exec "$node_id" "PDIR=\\\$($resolve_cmd); WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/\\\$(id -u) nohup konsole --hold --workdir \\\"\\\$PDIR\\\" -e bash -c \\\"export KNOT_NODE_ID='$node_id'; exec agy --project $PROJECT --dangerously-skip-permissions -i \\\$(cat ~/.config/knot/missions/$RUN_ID/prompt.md)\\\" > ~/.config/knot/missions/$RUN_ID/logs/konsole.log 2>&1 &"
+        "$KNOT_BIN" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID/logs && WAYLAND_DISPLAY=\"\${WAYLAND_DISPLAY:-wayland-0}\" DISPLAY=\"\${DISPLAY:-:0}\" XDG_RUNTIME_DIR=\"/run/user/\$(id -u)\" nohup konsole --hold -e ~/.config/knot/missions/$RUN_ID/launch.sh > ~/.config/knot/missions/$RUN_ID/logs/konsole.log 2>&1 &"
       fi
     done
     echo "[✓] Interactive TUI windows open on fleet displays."

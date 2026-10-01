@@ -177,8 +177,17 @@ def truncate_text(text: str, max_len: int) -> str:
 class BoardViewerRenderer:
     """Renders the message board in compact (handheld) or wide (multi-pane) mode."""
 
-    def __init__(self, model: CouncilBoardModel):
+    def __init__(
+        self,
+        model: CouncilBoardModel,
+        force_compact: bool = False,
+        force_wide: bool = False,
+        run_id: Optional[str] = None,
+    ):
         self.model = model
+        self.force_compact = force_compact
+        self.force_wide = force_wide
+        self.run_id = run_id
         self.selected_thread_idx = 0
         self.scroll_offset = 0
 
@@ -188,9 +197,10 @@ class BoardViewerRenderer:
         h = height or term_height
 
         threads = self.model.fetch_threads()
-        if thread_override:
+        target_override = thread_override or self.run_id
+        if target_override:
             for idx, t in enumerate(threads):
-                if t.get("id") == thread_override or t.get("run_id") == thread_override:
+                if t.get("id") == target_override or t.get("run_id") == target_override:
                     self.selected_thread_idx = idx
                     break
 
@@ -206,7 +216,11 @@ class BoardViewerRenderer:
         thread_id = active_thread.get("id") or active_thread.get("run_id", "")
         messages = self.model.fetch_messages(thread_id)
 
-        if w < 100:
+        if self.force_compact:
+            return self._render_compact(w, h, threads, active_thread, messages)
+        elif self.force_wide:
+            return self._render_wide(w, h, threads, active_thread, messages)
+        elif w < 100:
             return self._render_compact(w, h, threads, active_thread, messages)
         else:
             return self._render_wide(w, h, threads, active_thread, messages)
@@ -375,9 +389,14 @@ class BoardViewerRenderer:
 
         # Combine sidebar and detail rows
         body_height = max(10, h - 5)
+        if len(detail_rows) > body_height:
+            visible_detail = detail_rows[-body_height:]
+        else:
+            visible_detail = detail_rows
+
         for i in range(body_height):
             s_row = sidebar_rows[i] if i < len(sidebar_rows) else ""
-            d_row = detail_rows[i] if i < len(detail_rows) else ""
+            d_row = visible_detail[i] if i < len(visible_detail) else ""
             # Pad sidebar text (accounting for ANSI color escapes)
             lines.append(f"{s_row:<{sidebar_width}} {C_CYAN}│{C_RESET} {d_row}")
 
@@ -388,9 +407,20 @@ class BoardViewerRenderer:
         return "\n".join(lines)
 
 
-def run_interactive_loop(model: CouncilBoardModel, poll_interval: float = 2.0) -> None:
+def run_interactive_loop(
+    model: CouncilBoardModel,
+    poll_interval: float = 2.0,
+    force_compact: bool = False,
+    force_wide: bool = False,
+    run_id: Optional[str] = None,
+) -> None:
     """Live interactive loop using non-blocking terminal IO."""
-    renderer = BoardViewerRenderer(model)
+    renderer = BoardViewerRenderer(
+        model,
+        force_compact=force_compact,
+        force_wide=force_wide,
+        run_id=run_id,
+    )
 
     # Save terminal state if in interactive TTY
     is_tty = sys.stdin.isatty()
@@ -428,7 +458,7 @@ def run_interactive_loop(model: CouncilBoardModel, poll_interval: float = 2.0) -
         while True:
             # Clear screen and draw
             snapshot = renderer.render_snapshot()
-            sys.stdout.write("\033[H" + snapshot)
+            sys.stdout.write("\033[H\033[J" + snapshot)
             sys.stdout.flush()
 
             # Wait for keypress or timeout
@@ -447,7 +477,7 @@ def run_interactive_loop(model: CouncilBoardModel, poll_interval: float = 2.0) -
                     elif ch in ("p", "h"):  # Previous thread
                         threads = model.fetch_threads()
                         num_threads = max(1, len(threads))
-                        renderer.selected_thread_idx = (renderer.selected_thread_idx - 1) % num_threads
+                        renderer.selected_thread_idx = max(0, renderer.selected_thread_idx - 1)
                     elif ch == "\x1b":  # Arrow escape sequence
                         seq = sys.stdin.read(2)
                         if seq == "[A":  # Up
@@ -505,7 +535,12 @@ def main():
     model = CouncilBoardModel(db_path=args.db_path, hub_url=args.hub_url)
 
     if args.render_once or not sys.stdin.isatty():
-        renderer = BoardViewerRenderer(model)
+        renderer = BoardViewerRenderer(
+            model,
+            force_compact=args.compact,
+            force_wide=args.wide,
+            run_id=args.run_id,
+        )
         w, h = shutil.get_terminal_size((100, 30))
         if args.compact:
             w = 80
@@ -514,7 +549,13 @@ def main():
         print(renderer.render_snapshot(width=w, height=h, thread_override=args.run_id))
         sys.exit(0)
 
-    run_interactive_loop(model, poll_interval=args.interval)
+    run_interactive_loop(
+        model,
+        poll_interval=args.interval,
+        force_compact=args.compact,
+        force_wide=args.wide,
+        run_id=args.run_id,
+    )
 
 
 if __name__ == "__main__":

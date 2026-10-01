@@ -812,9 +812,24 @@ cmd_sleep() {
       fi
       ;;
     prevent|wake|awake)
-      local mins="${1:-60}"
+      local mins=60
+      local reason=""
+      if [ $# -ge 1 ]; then
+        if [[ "$1" =~ ^[0-9]+$ ]]; then
+          mins="$1"
+          shift
+          reason="${*:-}"
+        else
+          reason="${*:-}"
+          mins=480
+        fi
+      fi
       local duration_sec=$((mins * 60))
-      knot_log_info "Enforcing wholesale sleep prevention across swarm for ${mins} minutes..."
+      if [ -n "$reason" ]; then
+        knot_log_info "Enforcing wholesale sleep prevention across swarm for ${mins} minutes (Reason: $reason)..."
+      else
+        knot_log_info "Enforcing wholesale sleep prevention across swarm for ${mins} minutes..."
+      fi
       local resp
       resp="$(curl -k -s -X POST "$hub_url/swarm/wake" -H "Content-Type: application/json" -d "{\"duration_sec\": $duration_sec}")"
       if echo "$resp" | grep -qE '"ok"\s*:\s*true'; then
