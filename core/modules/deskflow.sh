@@ -709,6 +709,18 @@ RUNNER_EOF
     fi
   fi
 
+  # Ensure xdg-desktop-portal waits for plasma-xdg-desktop-portal-kde on KDE environments
+  # so that InputCapture API 2 is properly discovered on boot without prompting
+  if [ -f "/usr/lib/xdg-desktop-portal-kde" ]; then
+    local portal_dropin_dir="$systemd_dir/xdg-desktop-portal.service.d"
+    mkdir -p "$portal_dropin_dir"
+    cat << 'PORTAL_DROPIN_EOF' > "$portal_dropin_dir/kde-ordering.conf"
+[Unit]
+After=plasma-xdg-desktop-portal-kde.service
+Wants=plasma-xdg-desktop-portal-kde.service
+PORTAL_DROPIN_EOF
+  fi
+
   knot_log_info "Deploying Unified Knot Deskflow systemd service..."
   cat << SERVICE_EOF > "$systemd_dir/knot-deskflow.service"
 [Unit]
