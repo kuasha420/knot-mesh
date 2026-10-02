@@ -724,8 +724,8 @@ Environment=WAYLAND_DISPLAY=wayland-0
 Environment=XDG_CURRENT_DESKTOP=KDE
 Environment=XDG_DESKTOP_PORTAL_APP_ID=org.deskflow.deskflow
 ExecStart=%h/.local/bin/knot-deskflow
-Restart=on-failure
-RestartSec=10
+Restart=always
+RestartSec=3
 
 [Install]
 WantedBy=graphical-session.target

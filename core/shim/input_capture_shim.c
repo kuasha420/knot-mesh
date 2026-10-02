@@ -99,6 +99,14 @@ static void on_session_created(GObject *source, GAsyncResult *res, gpointer user
 
     if (!session) {
         fprintf(stderr, "[knot-shim] create_input_capture_session2 failed: %s\n", error ? error->message : "unknown error");
+        typeof(xdp_portal_create_input_capture_session) *orig = dlsym(RTLD_NEXT, "xdp_portal_create_input_capture_session");
+        if (orig) {
+            fprintf(stderr, "[knot-shim] Falling back to standard xdp_portal_create_input_capture_session (API 1)...\n");
+            g_clear_error(&error);
+            orig(ctx->portal, ctx->parent, ctx->capabilities, ctx->cancellable, ctx->orig_callback, ctx->orig_data);
+            g_free(ctx);
+            return;
+        }
         GTask *task = g_task_new(G_OBJECT(ctx->portal), ctx->cancellable, ctx->orig_callback, ctx->orig_data);
         g_task_return_error(task, error);
         g_object_unref(task);
