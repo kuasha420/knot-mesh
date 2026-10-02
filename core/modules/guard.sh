@@ -302,6 +302,11 @@ run_user_service_cmd() {
 
 dispatch_user_services() {
   local role="$1" # "anchor", "strand", or "standalone"
+  local prev_role=""
+  if [ -r "$STATE_DIR/active_role" ]; then
+    prev_role="$(tr -d '[:space:]' < "$STATE_DIR/active_role")"
+  fi
+  echo "$role" > "$STATE_DIR/active_role"
 
   local uids=""
   for udir in /run/user/*; do
@@ -327,14 +332,22 @@ dispatch_user_services() {
       case "$role" in
         anchor)
           run_user_service_cmd "$u" "$uname" systemctl --user start knot-hub.service
-          run_user_service_cmd "$u" "$uname" systemctl --user restart knot-deskflow.service
+          if [ "$prev_role" != "anchor" ]; then
+            run_user_service_cmd "$u" "$uname" systemctl --user restart knot-deskflow.service
+          else
+            run_user_service_cmd "$u" "$uname" systemctl --user start knot-deskflow.service
+          fi
           run_user_service_cmd "$u" "$uname" systemctl --user start knot-stripd.service
           run_user_service_cmd "$u" "$uname" systemctl --user start knot-kdeconnect-reconcile.timer
           run_user_service_cmd "$u" "$uname" systemctl --user start --no-block knot-kdeconnect-reconcile.service
           ;;
         strand)
           run_user_service_cmd "$u" "$uname" systemctl --user stop knot-hub.service
-          run_user_service_cmd "$u" "$uname" systemctl --user restart knot-deskflow.service
+          if [ "$prev_role" != "strand" ]; then
+            run_user_service_cmd "$u" "$uname" systemctl --user restart knot-deskflow.service
+          else
+            run_user_service_cmd "$u" "$uname" systemctl --user start knot-deskflow.service
+          fi
           run_user_service_cmd "$u" "$uname" systemctl --user stop knot-stripd.service
           run_user_service_cmd "$u" "$uname" systemctl --user start knot-kdeconnect-reconcile.timer
           run_user_service_cmd "$u" "$uname" systemctl --user start --no-block knot-kdeconnect-reconcile.service
