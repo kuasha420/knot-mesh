@@ -1,5 +1,7 @@
 # Knot Mesh Runtime & Temporary State
 state/
+data/
+*.db
 *.tmp
 *.log
 __pycache__/

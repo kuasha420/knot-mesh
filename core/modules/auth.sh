@@ -11,6 +11,10 @@ fi
 source "$KNOT_ROOT/core/lib.sh"
 
 # Default authentication sandbox directory (overrideable for isolated automated testing)
+if [ -z "${HOME:-}" ]; then
+  HOME="$(knot_detect_user_home)"
+  export HOME
+fi
 KNOT_AUTH_DIR="${KNOT_TEST_AUTH_DIR:-$HOME/.config/knot/auth}"
 UPSTREAM_CLI_TOKEN_FILE="${KNOT_TEST_UPSTREAM_TOKEN:-$HOME/.gemini/antigravity-cli/antigravity-oauth-token}"
 UPSTREAM_IDE_TOKEN_FILE="${KNOT_TEST_IDE_TOKEN:-$HOME/.gemini/antigravity/oauth-token.json}"

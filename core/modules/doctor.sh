@@ -532,6 +532,26 @@ doctor_check_local() {
     warnings=$((warnings + 1))
   fi
 
+  if autologin_is_anchor; then
+    local atimer_probe=""
+    if atimer_probe="$(systemctl --user is-active knot-autologin-reconcile.timer 2>&1)"; then
+      if [ "$atimer_probe" = "active" ]; then
+        doc_ok "knot-autologin-reconcile.timer is active (Mesh autologin reconciliation enabled)"
+      else
+        doc_warn "knot-autologin-reconcile.timer is not active ($atimer_probe) (run 'knot repair' or 'knot autologin configure-timer')"
+        warnings=$((warnings + 1))
+      fi
+    else
+      doc_warn "knot-autologin-reconcile.timer is not active (run 'knot repair' or 'knot autologin configure-timer')"
+      warnings=$((warnings + 1))
+    fi
+  fi
+
+  if [ -f /etc/plasmalogin.conf ] && grep -q "\[Autologin\]" /etc/plasmalogin.conf; then
+    doc_warn "Stale residual /etc/plasmalogin.conf detected (ephemeral security invariant violated; run 'knot autologin purge-stale')"
+    warnings=$((warnings + 1))
+  fi
+
   # 7. Wayland Virtual Monitor (D2D Phase 2)
   echo -e "\n${C_BOLD}[Wayland Virtual Monitor (D2D)]${C_RESET}"
   if command -v krdpserver >/dev/null; then
@@ -1095,6 +1115,28 @@ doctor_repair_local() {
       fi
     fi
   fi
+
+  # Deploy and enable Swarm Mesh Autologin reconciler timer (Anchor only)
+  source "$KNOT_ROOT/core/modules/autologin.sh"
+  if autologin_is_anchor; then
+    if [ -f "$KNOT_ROOT/systemd/knot-autologin-reconcile.service" ]; then
+      ln -sf "$KNOT_ROOT/systemd/knot-autologin-reconcile.service" "$user_unit_dir/knot-autologin-reconcile.service"
+    fi
+    if [ -f "$KNOT_ROOT/systemd/knot-autologin-reconcile.timer" ]; then
+      ln -sf "$KNOT_ROOT/systemd/knot-autologin-reconcile.timer" "$user_unit_dir/knot-autologin-reconcile.timer"
+      if command -v systemctl >/dev/null; then
+        local at_out=""
+        if ! at_out="$(systemctl --user enable --now knot-autologin-reconcile.timer 2>&1)"; then
+          knot_log_warn "Notice: Could not enable knot-autologin-reconcile.timer: $at_out"
+        else
+          knot_log_ok "Knot Swarm Mesh Autologin reconciler timer active on Anchor."
+        fi
+      fi
+    fi
+  fi
+
+  # Purge any stale residual /etc/plasmalogin.conf
+  autologin_purge_stale
 
   # 12. Ensure Wayland Virtual Monitor prerequisites (krdp, krdc, freerdp, firewall)
   if command -v pacman >/dev/null; then

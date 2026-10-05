@@ -340,6 +340,7 @@ dispatch_user_services() {
           run_user_service_cmd "$u" "$uname" systemctl --user start knot-stripd.service
           run_user_service_cmd "$u" "$uname" systemctl --user start knot-kdeconnect-reconcile.timer
           run_user_service_cmd "$u" "$uname" systemctl --user start --no-block knot-kdeconnect-reconcile.service
+          run_user_service_cmd "$u" "$uname" systemctl --user start knot-autologin-reconcile.timer
           ;;
         strand)
           run_user_service_cmd "$u" "$uname" systemctl --user stop knot-hub.service
@@ -351,6 +352,8 @@ dispatch_user_services() {
           run_user_service_cmd "$u" "$uname" systemctl --user stop knot-stripd.service
           run_user_service_cmd "$u" "$uname" systemctl --user start knot-kdeconnect-reconcile.timer
           run_user_service_cmd "$u" "$uname" systemctl --user start --no-block knot-kdeconnect-reconcile.service
+          run_user_service_cmd "$u" "$uname" systemctl --user stop knot-autologin-reconcile.timer
+          run_user_service_cmd "$u" "$uname" systemctl --user stop knot-autologin-reconcile.service
           ;;
         standalone)
           run_user_service_cmd "$u" "$uname" systemctl --user stop knot-hub.service
@@ -358,6 +361,8 @@ dispatch_user_services() {
           run_user_service_cmd "$u" "$uname" systemctl --user stop knot-stripd.service
           run_user_service_cmd "$u" "$uname" systemctl --user stop knot-kdeconnect-reconcile.timer
           run_user_service_cmd "$u" "$uname" systemctl --user stop knot-kdeconnect-reconcile.service
+          run_user_service_cmd "$u" "$uname" systemctl --user stop knot-autologin-reconcile.timer
+          run_user_service_cmd "$u" "$uname" systemctl --user stop knot-autologin-reconcile.service
           ;;
       esac
     fi
@@ -365,6 +370,15 @@ dispatch_user_services() {
 }
 
 reconcile_state() {
+  # 0. Boot hygiene: Purge residual ephemeral autologin configuration from previous boots
+  if [ ! -f "$STATE_DIR/boot_cleaned" ]; then
+    touch "$STATE_DIR/boot_cleaned"
+    if [ -f /etc/plasmalogin.conf ] && grep -q "\[Autologin\]" /etc/plasmalogin.conf; then
+      rm -f /etc/plasmalogin.conf
+      logger -t knot-guard "Purged stale boot residual /etc/plasmalogin.conf"
+    fi
+  fi
+
   local active_swarm
   active_swarm="$(check_active_network)"
 
@@ -380,20 +394,29 @@ reconcile_state() {
       fi
     fi
 
-    # Trigger autologin check if Anchor is reachable (guarded against recursive invocation)
-    if [ -x /usr/local/bin/knot ] && [ "${_KNOT_AUTOLOGIN_RUNNING:-0}" -eq 0 ]; then
-      local auto_out=""
-      if ! auto_out="$(/usr/local/bin/knot autologin check 2>&1)"; then
-        logger -t knot-guard "Autologin check notice: $auto_out"
-      fi
-    fi
-
     # Dynamic role orchestration (Anchor Server vs Strand Client)
     if is_local_anchor "$active_swarm"; then
       logger -t knot-guard "Node is ANCHOR for swarm [$active_swarm]. Orchestrating Hub & Deskflow Server."
       dispatch_user_services "anchor"
     else
-      logger -t knot-guard "Node is STRAND for swarm [$active_swarm]. Orchestrating Deskflow Client."
+      logger -t knot-guard "Node is STRAND for swarm [$active_swarm]. Checking autologin status."
+      # Trigger autologin check and synchronous login if Anchor is UP & UNLOCKED
+      if [ -x /usr/local/bin/knot ] && [ "${_KNOT_AUTOLOGIN_RUNNING:-0}" -eq 0 ]; then
+        local auto_out=""
+        if auto_out="$(/usr/local/bin/knot autologin check 2>&1)"; then
+          if [ "$auto_out" = "READY_FOR_AUTOLOGIN" ]; then
+            logger -t knot-guard "Strand is ready for autologin. Triggering synchronous ephemeral first login..."
+            local login_out=""
+            if ! login_out="$(/usr/local/bin/knot autologin local 2>&1)"; then
+              logger -t knot-guard "Autologin local execution failed: $login_out"
+            else
+              logger -t knot-guard "Autologin local completed successfully: $login_out"
+            fi
+          fi
+        else
+          logger -t knot-guard "Autologin check notice: $auto_out"
+        fi
+      fi
       dispatch_user_services "strand"
     fi
   else
@@ -409,7 +432,13 @@ reconcile_state() {
       fi
     fi
 
-    # 2. Stop Deskflow & Hub across all sessions
+    # 2. Purge residual autologin configuration to prevent static credentials lingering
+    if [ -f /etc/plasmalogin.conf ] && grep -q "\[Autologin\]" /etc/plasmalogin.conf; then
+      rm -f /etc/plasmalogin.conf
+      logger -t knot-guard "Purged residual /etc/plasmalogin.conf in standalone mode"
+    fi
+
+    # 3. Stop Deskflow & Hub across all sessions
     dispatch_user_services "standalone"
   fi
 }

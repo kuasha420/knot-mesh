@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodic Knot Swarm Mesh Autologin Reconciler Timer
+
+[Timer]
+OnBootSec=10s
+OnUnitActiveSec=30s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

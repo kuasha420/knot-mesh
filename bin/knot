@@ -938,6 +938,12 @@ cmd_autologin() {
     reconcile)
       autologin_reconcile_all "$@"
       ;;
+    purge-stale|clean-stale)
+      autologin_purge_stale "$@"
+      ;;
+    configure-timer|enable-timer)
+      autologin_configure_reconciler "$@"
+      ;;
     fix-kwallet|kwallet)
       autologin_fix_kwallet "$@"
       ;;
@@ -1968,7 +1974,7 @@ case "${1:-}" in
     echo "  knot exec <target|--all> <cmd> Run commands across mesh nodes"
     echo "  knot kvm <restart|status>     Manage software KVM across the mesh"
     echo "  knot screen <status|unlock|lock|login> Manage screen lock/login states"
-    echo "  knot autologin [status|check|doctor|migrate-dm|local|reconcile|fix-kwallet] Manage auto-login"
+    echo "  knot autologin [status|check|doctor|migrate-dm|local|reconcile|fix-kwallet|purge-stale|configure-timer] Manage auto-login"
     echo "  knot kdeconnect <status|sync|pair|reconcile|vmon|share|sync-clipboard|test-clipboard|prune-stale> Manage KDE Connect mesh clipboard & virtual displays"
     echo "  knot display <status|extend|stop> [node_id] Dynamic Wayland virtual display extension (RDP/KRDC)"
     exit 0

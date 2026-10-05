@@ -1,0 +1,11 @@
+[Unit]
+Description=Knot Swarm Mesh Autologin Reconciler
+PartOf=graphical-session.target
+After=graphical-session.target
+Requisite=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/knot autologin reconcile
+StandardOutput=journal
+StandardError=journal

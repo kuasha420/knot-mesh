@@ -302,6 +302,30 @@ autologin_doctor() {
   else
     echo -e "  [✗] Anchor Status: \033[31mOFFLINE or Unreachable\033[0m"
   fi
+
+  # 6. Ephemeral Security Invariant Check
+  if [ -f /etc/plasmalogin.conf ]; then
+    if grep -q "\[Autologin\]" /etc/plasmalogin.conf; then
+      echo -e "  [!] Ephemeral Security Invariant: \033[33mResidual /etc/plasmalogin.conf detected on disk!\033[0m"
+      echo -e "      Static autologin bypasses Anchor-gating. Run '\033[36mknot autologin purge-stale\033[0m' to clean."
+    fi
+  else
+    echo -e "  [✓] Ephemeral Security Invariant: \033[32mClean (no residual static autologin files)\033[0m"
+  fi
+
+  # 7. Swarm Reconciler Timer Check (Anchor Desktop)
+  if autologin_is_anchor; then
+    local t_active=""
+    if t_active="$(systemctl --user is-active knot-autologin-reconcile.timer 2>&1)"; then
+      if [ "$t_active" = "active" ]; then
+        echo -e "  [✓] Swarm Reconciler Timer: \033[32mActive (knot-autologin-reconcile.timer running)\033[0m"
+      else
+        echo -e "  [!] Swarm Reconciler Timer: \033[33mInactive ($t_active)\033[0m (Run 'knot autologin configure-timer')"
+      fi
+    else
+      echo -e "  [!] Swarm Reconciler Timer: \033[33mNot deployed\033[0m (Run 'knot autologin configure-timer')"
+    fi
+  fi
 }
 
 autologin_migrate_dm() {
@@ -456,6 +480,29 @@ autologin_execute_local() {
 
   local user
   user="$(autologin_detect_user)"
+
+  # Atomic concurrency lock to prevent simultaneous Anchor push and Strand pull collisions
+  mkdir -p /run/knot
+  local lock_file="/run/knot/autologin.lock"
+  local lock_fd
+  exec {lock_fd}>"$lock_file"
+  if ! flock -n "$lock_fd"; then
+    knot_log_info "Another autologin sequence is currently in progress on $my_host. Waiting for lock..."
+    if flock -w 20 "$lock_fd"; then
+      local sess_after=""
+      sess_after="$(screen_get_local_session "$user")"
+      if [ -n "$sess_after" ]; then
+        knot_log_ok "Session $sess_after was established by parallel autologin."
+        exec {lock_fd}>&-
+        return 0
+      fi
+    else
+      knot_log_warn "Timed out waiting for parallel autologin lock on $my_host."
+      exec {lock_fd}>&-
+      return 1
+    fi
+  fi
+
   knot_log_info "Anchor is UP and UNLOCKED. Performing ephemeral first login for user '$user' on $my_host..."
 
   local conf_file="/etc/plasmalogin.conf"
@@ -467,10 +514,14 @@ autologin_execute_local() {
   fi
 
   cleanup_autologin() {
-    if [ "${had_existing:-0}" -eq 1 ]; then
+    # If the backup content itself was an ephemeral [Autologin] config, do not restore it!
+    if [ "${had_existing:-0}" -eq 1 ] && ! echo "${backup_content:-}" | grep -q "\[Autologin\]"; then
       echo "${backup_content:-}" | sudo tee "$conf_file" >/dev/null
     else
       sudo rm -f "$conf_file"
+    fi
+    if [ -n "${lock_fd:-}" ]; then
+      exec {lock_fd}>&-
     fi
   }
   trap cleanup_autologin EXIT INT TERM
@@ -636,4 +687,65 @@ autologin_fix_kwallet() {
   fi
 
   knot_log_ok "KWallet dialog launched on active desktop display."
+}
+
+autologin_purge_stale() {
+  local conf_file="/etc/plasmalogin.conf"
+  if [ -f "$conf_file" ]; then
+    if grep -q "\[Autologin\]" "$conf_file"; then
+      local has_root=0
+      if [ "$(id -u)" -eq 0 ]; then
+        has_root=1
+      elif command -v sudo >/dev/null && sudo -n true 2>&1; then
+        has_root=1
+      fi
+      if [ $has_root -eq 1 ]; then
+        local rm_err=""
+        if ! rm_err="$(sudo rm -f "$conf_file" 2>&1)"; then
+          knot_log_err "Failed to remove stale $conf_file: $rm_err"
+          return 1
+        fi
+        knot_log_ok "Purged stale residual $conf_file."
+        return 0
+      else
+        knot_log_warn "Stale $conf_file detected but root privileges not non-interactively available."
+        return 1
+      fi
+    fi
+  fi
+  knot_log_ok "No stale autologin configuration found."
+  return 0
+}
+
+autologin_configure_reconciler() {
+  local home
+  home="$(knot_detect_user_home)"
+  local my_host
+  my_host="$(knot_detect_hostname)"
+
+  local user_unit_dir="$home/.config/systemd/user"
+  mkdir -p "$user_unit_dir"
+
+  if [ -f "$KNOT_ROOT/systemd/knot-autologin-reconcile.service" ]; then
+    ln -sf "$KNOT_ROOT/systemd/knot-autologin-reconcile.service" "$user_unit_dir/knot-autologin-reconcile.service"
+  fi
+  if [ -f "$KNOT_ROOT/systemd/knot-autologin-reconcile.timer" ]; then
+    ln -sf "$KNOT_ROOT/systemd/knot-autologin-reconcile.timer" "$user_unit_dir/knot-autologin-reconcile.timer"
+  fi
+
+  if command -v systemctl >/dev/null; then
+    local r_out=""
+    if ! r_out="$(systemctl --user daemon-reload 2>&1)"; then
+      knot_log_warn "Notice: systemctl daemon-reload: $r_out"
+    fi
+    local t_out=""
+    if ! t_out="$(systemctl --user enable --now knot-autologin-reconcile.timer 2>&1)"; then
+      knot_log_warn "Notice: Could not enable knot-autologin-reconcile.timer: $t_out"
+      return 1
+    else
+      knot_log_ok "Knot Swarm Mesh Autologin Reconciler timer active on $my_host."
+      return 0
+    fi
+  fi
+  return 0
 }

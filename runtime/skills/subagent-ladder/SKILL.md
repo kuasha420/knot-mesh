@@ -2,7 +2,7 @@
 name: subagent-ladder
 description: >-
   Strictly user-invoked SWE ladder protocol (/subagent-ladder). Coordinates multi-agent
-  execution pipelines (Executioner -> Hammer -> Auditor) for multi-phase engineering tasks.
+  execution pipelines (Executioner -> Hammer -> Custodian -> Auditor) for multi-phase engineering tasks.
   Activate ONLY when explicitly commanded by the user (e.g., 'run subagent ladder',
   'use subagent flow', '/subagent-ladder', 'execute ladder'). Never auto-trigger autonomously.
 ---
@@ -30,11 +30,11 @@ The Subagent Ladder partitions execution across specialized subagent roles:
 
 ## 2. The Phase Lifecycle Ladder
 
-Every milestone progresses through a strict 5-stage pipeline:
+Every milestone progresses through a strict 6-stage pipeline:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ STAGE 1: PLANNING & OPERATOR LOCK-IN                                    │
+│ STAGE 1: PLANNING & OPERATOR LOCK-IN (`coordinator`)                    │
 │ - Coordinator drafts `phase_X_plan.md` & updates `implementation_plan.md`│
 │ - Operator reviews, grills, refines, and formally locks in the plan.    │
 └────────────────────────────────────┬────────────────────────────────────┘
@@ -60,8 +60,20 @@ Every milestone progresses through a strict 5-stage pipeline:
                    │ (Passed Hammer Review)            │                                            │
                    ▼                                   │ (Hammer Code Rejection)                    │
 ┌──────────────────────────────────────────────────┐   │                                            │
-│ STAGE 4: QA & AUDIT (`subagent-X-auditor`)       │   │                                            │
-│ - Executes automated test suites in shell/python.│   │                                            │
+│ STAGE 4: GIT COMMIT GATE & WORKSPACE CUSTODY     │   │                                            │
+│ (`subagent-X-custodian`)                         │   │                                            │
+│ - Audits git status & porcelain tree state.      │   │                                            │
+│ - Stages strictly intended deliverables.         │   │                                            │
+│ - Validates atomic commit message matches phase. │   │                                            │
+│ - Verdict: COMMITTED or REJECT with defect report│   │                                            │
+└──────────────────┬───────────────────────────────┘   │                                            │
+                   │ (Clean Commit Verified)           │ (Custodian Staging Rejection)              │
+                   ▼                                   │                                            │
+┌──────────────────────────────────────────────────┐   │                                            │
+│ STAGE 5: QA & BENCHMARK AUDIT                    │   │                                            │
+│ (`subagent-X-auditor`)                           │   │                                            │
+│ - Audits the COMMITTED git revision on HEAD.     │   │                                            │
+│ - Executes automated test suites (<1.0s).        │   │                                            │
 │ - Probes remote nodes via SSH.                   │   │                                            │
 │ - Verifies environment state and exit codes.     │   │                                            │
 │ - Verdict: PASS or FAIL with raw diagnostics.    │   │                                            │
@@ -72,7 +84,7 @@ Every milestone progresses through a strict 5-stage pipeline:
          │                   └──────────────────────────────────────────────────────────────────────┘
          ▼                                                     (MANDATORY: Return to Executioner,
 ┌─────────────────────────────────────────────────────────────────────────┐   THEN through Hammer!)
-│ STAGE 5: PHASE ARCHIVAL & PROMOTION                                     │
+│ STAGE 6: PHASE ARCHIVAL & PROMOTION (`coordinator`)                     │
 │ - Coordinator archives `phase_X_plan.md` -> `phase_X_delivery_final.md`. │
 │ - Coordinator records Phase X completion in `master_plan.md`.           │
 │ - Phase X subagents are formally retired.                               │
@@ -87,14 +99,26 @@ Every milestone progresses through a strict 5-stage pipeline:
 ### 3.1 Anti-Bypass Invariant (Zero Shortcuts)
 > [!CAUTION]
 > If `subagent-X-auditor` detects a failure and `subagent-X-executioner` produces a patch:
-> $$\text{Auditor FAIL} \longrightarrow \text{Executioner (Remedy)} \longrightarrow \mathbf{Hammer\ (Mandatory\ Re\text{-}Review)} \longrightarrow \text{Auditor (QA)}$$
-> **Under NO circumstances may an Executioner remedy bypass Hammer review.** An executioner fixing an edge case under test failure pressure is prone to introducing error-swallowing constructs (`2>/dev/null`) or artificial mocks.
+> $$\text{Auditor FAIL} \longrightarrow \text{Executioner (Remedy)} \longrightarrow \mathbf{Hammer\ (Mandatory\ Re\text{-}Review)} \longrightarrow \mathbf{Custodian\ (Commit\ Gate)} \longrightarrow \text{Auditor (QA)}$$
+> **Under NO circumstances may an Executioner remedy bypass Hammer review or Custodian commit gate.** An executioner fixing an edge case under test failure pressure is prone to introducing error-swallowing constructs (`2>/dev/null`) or artificial mocks. Auditor must audit strictly the clean, committed revision.
 
 ### 3.2 Zero Coordinator Remediation Invariant
 > [!CRITICAL]
 > The Coordinator is **strictly forbidden from modifying product code, patching files directly, or self-resolving review defects**.
 > - The Coordinator orchestrates the ladder, manages persistent artifacts, and routes diagnostics.
 > - Defect reports must be routed back to the designated `subagent-X-executioner`.
+
+### 3.3 Git Commit Gate & Custodian Mandate
+> [!IMPORTANT]
+> The Custodian (`subagent-X-custodian`) is the sole entity authorized to stage and commit milestone deliverables.
+> - **DRY & Code Deduplication Audit**: Before approving any commit gate, Custodian actively executes targeted sweeps (`grep_search`, `find_by_name`) to verify newly introduced helpers, utilities, constants, and test fixtures do NOT duplicate existing logic elsewhere in the repository. If duplicates are found, reject with a DRY defect report instructing Executioner to reuse existing modules.
+> - **Macro Architectural Review**: Evaluates repository-wide architectural integrity beyond Hammer's micro-diff: verifies cross-module boundary compliance (e.g. ADR-014 Product vs. Project bifurcation: `harness/` must never import `pipeline/`), detects orphan files, dead code, leftover temporary scripts, and uncommitted working-tree residue.
+> - **Clean Revision Invariant**: The Auditor must certify a **committed git revision**, never a volatile, dirty working tree.
+> - **Elimination of Tested-vs-Uncommitted Desync**: Committing before Auditor QA guarantees that everything passing tests is already recorded in version control.
+> - **Atomic Staging**: Deliberately stage only files specified in the approved implementation plan. Blind `git add .` or `git add -A` is strictly prohibited.
+> - **Zero Scratch Debris**: Telemetry databases, temporary logs, and scratch artifacts must never be staged into version control.
+> - **Zero Direct Code Mutation**: The Custodian cannot modify product or test code (`write: false`). If dirty state or missing files are found, the commit gate is rejected and routed back to `subagent-X-executioner`.
+> - **Targeted Macro & Deduplication Sweep Invariant**: Blind wandering without a query is prohibited, but targeted repository sweeps (`grep_search`, `find_by_name`, `list_dir`) for symbol discovery, deduplication checks, and macro consistency are explicitly mandated and prescribed for Custodian.
 
 ---
 
@@ -105,6 +129,7 @@ Every milestone progresses through a strict 5-stage pipeline:
 | **Builder** | `subagent-X-executioner` | Implements exact tasks from approved phase plan. Strictly enforces `set -euo pipefail`. Zero scope creep. Delivers exact diffs and outputs. | Read & write tools, bash commands (`view_file`, `write_to_file`, `replace_file_content`, `run_command`). |
 | **Reviewer** | `subagent-X-hammer` | Assumes shortcuts were taken until proven otherwise. Ruthlessly scans modified files for forbidden patterns, missing type safety, or mock cheating. Issues formal PASS/REJECT report. | Read-only inspection tools (`view_file`, `grep_search`, `list_dir`). **No write or execution tools.** |
 | **Verifier** | `subagent-X-auditor` | Runs automated test suites, probes remote nodes via SSH, checks process states and exit codes, conducts leak detection. Issues formal PASS/FAIL report. | Read tools, test runner commands (`view_file`, `grep_search`, `run_command`). **No file modification tools.** |
+| **Custodian** | `subagent-X-custodian` | Macro architectural review, DRY deduplication audit, workspace hygiene, and atomic git commit gate. | Read tools, git/task commands (`view_file`, `grep_search`, `list_dir`, `find_by_name`, `run_command`, `manage_task`). **No direct code file mutation.** |
 
 ---
 
