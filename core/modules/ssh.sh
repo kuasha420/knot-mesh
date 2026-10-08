@@ -124,6 +124,8 @@ ssh_sync_client_config() {
   knot_log_info "Compiling ~/.ssh/config with knot-resolve host aliases across swarms..."
   mkdir -p "$home/.ssh"
   touch "$config_file"
+  mkdir -p "$home/.cache/knot/ssh"
+  chmod 700 "$home/.cache/knot/ssh"
 
   local existing_config=""
   if [ -f "$config_file" ]; then
@@ -174,7 +176,10 @@ ssh_sync_client_config() {
           knot_config+="    IdentitiesOnly yes"$'\n'
           knot_config+="    StrictHostKeyChecking accept-new"$'\n'
           knot_config+="    ServerAliveInterval 15"$'\n'
-          knot_config+="    ServerAliveCountMax 3"$'\n'$'\n'
+          knot_config+="    ServerAliveCountMax 3"$'\n'
+          knot_config+="    ControlMaster auto"$'\n'
+          knot_config+="    ControlPath ~/.cache/knot/ssh/cm_%C"$'\n'
+          knot_config+="    ControlPersist 10m"$'\n'$'\n'
         fi
       done
     done
@@ -222,7 +227,10 @@ ssh_sync_client_config() {
         knot_config+="    IdentitiesOnly yes"$'\n'
         knot_config+="    StrictHostKeyChecking accept-new"$'\n'
         knot_config+="    ServerAliveInterval 15"$'\n'
-        knot_config+="    ServerAliveCountMax 3"$'\n'$'\n'
+        knot_config+="    ServerAliveCountMax 3"$'\n'
+        knot_config+="    ControlMaster auto"$'\n'
+        knot_config+="    ControlPath ~/.cache/knot/ssh/cm_%C"$'\n'
+        knot_config+="    ControlPersist 10m"$'\n'$'\n'
       fi
     done
   fi
@@ -242,6 +250,48 @@ ssh_sync_client_config() {
   knot_log_ok "~/.ssh/config compiled with dynamic resolver ProxyCommands."
 }
 
+ssh_socket_status() {
+  local home
+  home="$(knot_detect_user_home)"
+  local sock_dir="$home/.cache/knot/ssh"
+  if [ ! -d "$sock_dir" ]; then
+    echo "No OpenSSH ControlMaster socket directory found at $sock_dir"
+    return 0
+  fi
+  local count=0
+  for s in "$sock_dir"/cm_*; do
+    [ -e "$s" ] || continue
+    echo "Active socket: $s"
+    count=$((count + 1))
+  done
+  if [ "$count" -eq 0 ]; then
+    echo "No active OpenSSH ControlMaster multiplexing sockets."
+  else
+    echo "Total active ControlMaster sockets: $count"
+  fi
+}
+
+ssh_socket_cleanup() {
+  local home
+  home="$(knot_detect_user_home)"
+  local sock_dir="$home/.cache/knot/ssh"
+  if [ ! -d "$sock_dir" ]; then
+    return 0
+  fi
+  local pruned=0
+  for s in "$sock_dir"/cm_*; do
+    [ -e "$s" ] || continue
+    local exit_out=""
+    if ! exit_out="$(ssh -O exit -o "ControlPath=$s" dummy 2>&1)"; then
+      rm -f "$s"
+      pruned=$((pruned + 1))
+    else
+      pruned=$((pruned + 1))
+    fi
+  done
+  knot_log_ok "Pruned $pruned OpenSSH ControlMaster socket(s)."
+}
+
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   case "${1:-}" in
     sync-config|client-config)
@@ -252,6 +302,12 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
       ;;
     harden)
       ssh_harden_server
+      ;;
+    socket-status|socket_status)
+      ssh_socket_status
+      ;;
+    socket-cleanup|socket_cleanup)
+      ssh_socket_cleanup
       ;;
     *)
       ssh_ensure_local_key

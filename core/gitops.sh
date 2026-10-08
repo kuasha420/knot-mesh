@@ -397,3 +397,273 @@ gitops_provision_worktree_mesh() {
   done
   knot_log_ok "Cross-node git worktree provisioning sweep completed."
 }
+
+_gitops_resolve_or_quarantine_rebase() {
+  local wt_path="$1"
+  local branch="$2"
+  local toplevel="$3"
+
+  local conflict_files=()
+  local raw_diff=""
+  if raw_diff="$(git -C "$wt_path" diff --name-only --diff-filter=U 2>&1)"; then
+    while IFS= read -r f; do
+      [ -n "$f" ] && conflict_files+=("$f")
+    done <<< "$raw_diff"
+  fi
+
+  if [ ${#conflict_files[@]} -eq 0 ]; then
+    local ab_err=""
+    if ! ab_err="$(git -C "$wt_path" rebase --abort 2>&1)"; then
+      knot_log_warn "Notice: rebase abort: $ab_err"
+    fi
+    return 1
+  fi
+
+  # Check if all conflicted files are barrel pattern exports
+  local is_all_barrels=1
+  for cf in "${conflict_files[@]}"; do
+    local base
+    base="$(basename "$cf")"
+    if [[ ! "$base" =~ ^(index\.(ts|tsx|js|jsx|d\.ts)|__init__\.py|mod\.rs|barrel\.(ts|tsx|js|jsx)|exports\.(ts|tsx|js|jsx))$ ]]; then
+      is_all_barrels=0
+      break
+    fi
+  done
+
+  local barrel_resolved=0
+  if [ "$is_all_barrels" -eq 1 ]; then
+    local can_resolve=1
+    for cf in "${conflict_files[@]}"; do
+      local full_cf="$wt_path/$cf"
+      if ! python3 -c '
+import sys
+
+def try_resolve(file_path):
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception:
+        return False
+
+    if "<<<<<<<" not in content or "=======" not in content or ">>>>>>>" not in content:
+        return False
+
+    lines = content.splitlines()
+    resolved = []
+    in_conflict = False
+    in_side_b = False
+    side_a = []
+    side_b = []
+
+    for line in lines:
+        if line.startswith("<<<<<<<"):
+            in_conflict = True
+            in_side_b = False
+            side_a = []
+            side_b = []
+        elif in_conflict and line.startswith("======="):
+            in_side_b = True
+        elif in_conflict and line.startswith(">>>>>>>"):
+            in_conflict = False
+            for l in side_a + side_b:
+                s = l.strip()
+                if not s:
+                    continue
+                if s.startswith(("//", "/*", "*", "*/", "#")):
+                    continue
+                if s.startswith(("export ", "import ", "from ", "pub mod ", "pub use ")):
+                    continue
+                return False
+            seen = set()
+            for l in side_a:
+                if l not in seen:
+                    resolved.append(l)
+                    seen.add(l)
+            for l in side_b:
+                if l not in seen:
+                    resolved.append(l)
+                    seen.add(l)
+        elif in_conflict:
+            if in_side_b:
+                side_b.append(line)
+            else:
+                side_a.append(line)
+        else:
+            resolved.append(line)
+
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(resolved) + "\n")
+        return True
+    except Exception:
+        return False
+
+if not try_resolve(sys.argv[1]):
+    sys.exit(1)
+' "$full_cf" 2>&1; then
+        can_resolve=0
+        break
+      fi
+    done
+
+    if [ "$can_resolve" -eq 1 ]; then
+      for cf in "${conflict_files[@]}"; do
+        git -C "$wt_path" add "$cf"
+      done
+      local cont_out=""
+      if cont_out="$(GIT_EDITOR=true git -C "$wt_path" rebase --continue 2>&1)"; then
+        knot_log_ok "Auto-resolved barrel export conflict(s) in $wt_path ($branch): ${conflict_files[*]}."
+        barrel_resolved=1
+      fi
+    fi
+  fi
+
+  if [ "$barrel_resolved" -eq 1 ]; then
+    return 0
+  fi
+
+  # Ambiguous conflict: abort rebase and quarantine
+  local abort_out=""
+  if ! abort_out="$(git -C "$wt_path" rebase --abort 2>&1)"; then
+    knot_log_warn "Notice: rebase abort: $abort_out"
+  fi
+  echo "${conflict_files[*]}" > "$wt_path/.knot_quarantine"
+  knot_log_err "[QUARANTINE] Worktree $wt_path (branch: $branch) encountered ambiguous conflicts in: ${conflict_files[*]}. Rebase aborted and branch quarantined."
+  return 1
+}
+
+gitops_worktree_rebase_mesh() {
+  local repo_name="${1:-}"
+  local upstream_branch="${2:-main}"
+  local nodes_arg="${3:-}"
+
+  if [ -z "$repo_name" ]; then
+    knot_log_err "Usage: knot worktree rebase-mesh <repo_or_project> [--upstream <branch>] [--nodes <node_list>]"
+    return 1
+  fi
+
+  local toplevel=""
+  if ! toplevel="$(gitops_find_repo "$repo_name")"; then
+    knot_log_err "Base repository not found for '$repo_name'."
+    return 1
+  fi
+
+  # Remote node fan-out if specified
+  if [ -n "$nodes_arg" ]; then
+    local nodes=()
+    if [ "$nodes_arg" = "--all" ]; then
+      local nodes_dir=""
+      if nodes_dir="$(knot_get_nodes_dir 2>&1)"; then
+        for mf in "$nodes_dir/"*.json; do
+          [ -e "$mf" ] || continue
+          nodes+=("$(awk -F'"' '/"id":/ {print $4}' "$mf")")
+        done
+      fi
+    else
+      IFS=',' read -ra split_nodes <<< "$nodes_arg"
+      for n in "${split_nodes[@]}"; do
+        nodes+=("$(echo "$n" | tr -d '[:space:]')")
+      done
+    fi
+
+    local my_node_id my_host
+    my_node_id="$(knot_detect_node_id)"
+    my_host="$(knot_detect_hostname)"
+
+    local remote_failed=0
+    for node in "${nodes[@]}"; do
+      [ -n "$node" ] || continue
+      if [ "$node" != "$my_node_id" ] && [ "$node" != "$my_host" ] && [ "$node" != "local" ] && [ "$node" != "localhost" ]; then
+        knot_log_info "Dispatching worktree rebase on remote node [$node]..."
+        local r_cmd="knot worktree rebase-mesh \"$repo_name\" --upstream \"$upstream_branch\""
+        if ! knot exec "$node" "$r_cmd"; then
+          knot_log_warn "Notice: Rebase failed on remote node $node"
+          remote_failed=$((remote_failed + 1))
+        fi
+      fi
+    done
+  fi
+
+  knot_log_info "Running automated worktree rebase arbiter on '$repo_name' against upstream '$upstream_branch'..."
+
+  # Fetch upstream
+  local upstream_ref="$upstream_branch"
+  local remotes_list=""
+  if remotes_list="$(git -C "$toplevel" remote 2>&1)" && echo "$remotes_list" | grep -qx "origin"; then
+    local fetch_err=""
+    if ! fetch_err="$(git -C "$toplevel" fetch origin "$upstream_branch" 2>&1)"; then
+      knot_log_warn "Notice: Fetching origin/$upstream_branch: $fetch_err"
+    else
+      upstream_ref="origin/$upstream_branch"
+    fi
+  fi
+
+  local wt_entries=()
+  local current_wt=""
+  local current_branch=""
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ "$line" =~ ^worktree[[:space:]]+(.*)$ ]]; then
+      current_wt="${BASH_REMATCH[1]}"
+      current_branch=""
+    elif [[ "$line" =~ ^branch[[:space:]]+refs/heads/(.*)$ ]]; then
+      current_branch="${BASH_REMATCH[1]}"
+      if [ -n "$current_wt" ] && [ -n "$current_branch" ]; then
+        wt_entries+=("$current_wt:$current_branch")
+        current_wt=""
+        current_branch=""
+      fi
+    fi
+  done < <(git -C "$toplevel" worktree list --porcelain)
+
+  local rebased_count=0
+  local quarantined_count=0
+
+  for entry in "${wt_entries[@]}"; do
+    local wt_path="${entry%%:*}"
+    local branch="${entry#*:}"
+
+    # Skip if branch is the upstream branch itself
+    if [ "$branch" = "$upstream_branch" ]; then
+      continue
+    fi
+
+    # Check dirty working tree
+    local dirty=""
+    if dirty="$(git -C "$wt_path" status --porcelain 2>&1)" && [ -n "$dirty" ]; then
+      knot_log_warn "Worktree $wt_path ($branch) has uncommitted changes. Skipping."
+      continue
+    fi
+
+    local behind_count="0"
+    if ! behind_count="$(git -C "$wt_path" rev-list --count "HEAD..$upstream_ref" 2>&1)"; then
+      behind_count="0"
+    fi
+
+    if [ "$behind_count" = "0" ]; then
+      knot_log_ok "Worktree $wt_path ($branch) is up-to-date with $upstream_ref."
+      continue
+    fi
+
+    knot_log_info "Rebasing $wt_path ($branch) onto $upstream_ref ($behind_count commits behind)..."
+    local rb_out=""
+    if rb_out="$(git -C "$wt_path" rebase "$upstream_ref" 2>&1)"; then
+      knot_log_ok "Worktree $wt_path ($branch) rebased cleanly onto $upstream_ref."
+      rebased_count=$((rebased_count + 1))
+    else
+      # Rebase conflict handling
+      if _gitops_resolve_or_quarantine_rebase "$wt_path" "$branch" "$toplevel"; then
+        rebased_count=$((rebased_count + 1))
+      else
+        quarantined_count=$((quarantined_count + 1))
+      fi
+    fi
+  done
+
+  if [ "$quarantined_count" -gt 0 ] || [ "${remote_failed:-0}" -gt 0 ]; then
+    knot_log_warn "Mesh worktree rebase completed with issues: $rebased_count rebased, $quarantined_count quarantined, ${remote_failed:-0} remote failure(s)."
+    return 1
+  fi
+  knot_log_ok "Mesh worktree rebase completed successfully ($rebased_count rebased)."
+  return 0
+}

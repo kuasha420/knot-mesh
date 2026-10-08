@@ -415,27 +415,72 @@ cmd_status() {
   fi
 }
 
+cmd_ledger() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot ledger [generate] [--json] [--swarm <swarm_id>]"
+    echo "Expose deterministic machine-readable cluster health metrics."
+    return 0
+  fi
+  source "$KNOT_ROOT/core/modules/telemetry.sh"
+  telemetry_ledger_generate "$@"
+}
+
 
 cmd_exec() {
   if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-    echo "Usage: knot exec [-t] <node_id|--all> <command>"
+    echo "Usage: knot exec [-P|--parallel] [--timeout <seconds>] [-t] <node_id|--all> <command>"
     return 0
   fi
+  local parallel=0
+  local timeout_sec=""
   local tty_opts=()
-  while [ "${1:-}" = "-t" ] || [ "${1:-}" = "-tt" ]; do
-    tty_opts=("$1")
-    shift
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -P|--parallel)
+        parallel=1
+        shift
+        ;;
+      --timeout)
+        timeout_sec="${2:-}"
+        shift 2
+        ;;
+      -t|-tt)
+        tty_opts+=("$1")
+        shift
+        ;;
+      *)
+        break
+        ;;
+    esac
   done
+
   local target="${1:-}"
   [ $# -gt 0 ] && shift
-  while [ "${1:-}" = "-t" ] || [ "${1:-}" = "-tt" ]; do
-    tty_opts=("$1")
-    shift
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -P|--parallel)
+        parallel=1
+        shift
+        ;;
+      --timeout)
+        timeout_sec="${2:-}"
+        shift 2
+        ;;
+      -t|-tt)
+        tty_opts+=("$1")
+        shift
+        ;;
+      *)
+        break
+        ;;
+    esac
   done
   local cmd="$*"
 
   if [ -z "$target" ] || [ -z "$cmd" ]; then
-    knot_log_err "Usage: knot exec [-t] <node_id|--all> <command>"
+    knot_log_err "Usage: knot exec [-P|--parallel] [--timeout <seconds>] [-t] <node_id|--all> <command>"
     exit 1
   fi
 
@@ -464,34 +509,132 @@ cmd_exec() {
       knot_log_warn "No active swarm nodes directory found."
       return 1
     fi
-    for manifest in "$nodes_dir/"*.json; do
-      [ -e "$manifest" ] || continue
-      local id host
-      id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-      host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
-      echo -e "\n${C_CYAN}=== [$id] ===${C_RESET}"
 
-      local target_hub_url
-      if [ "$id" = "$my_node_id" ] || [ "$host" = "$my_host" ]; then
-        target_hub_url="${KNOT_HUB_URL:-$(hub_resolve_url || echo "https://127.0.0.1:${hub_port}")}"
-      else
-        target_hub_url="${KNOT_HUB_URL:-https://${anchor_host}:${hub_port}}"
-      fi
-      local remote_cmd="export TERM=\"\${TERM:-xterm-256color}\"; export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:\$PATH\"; export KNOT_NODE_ID=\"$id\"; export KNOT_HUB_URL=\"$target_hub_url\"; $anchor_env $council_env $cmd"
+    if [ "$parallel" -eq 1 ]; then
+      local tmpdir
+      tmpdir="$(mktemp -d)"
+      local pids=()
+      local node_list=()
 
-      local e_out=""
-      if [ "$id" = "$my_node_id" ] || [ "$host" = "$my_host" ]; then
-        if e_out="$(bash -c "$remote_cmd" 2>&1)"; then
-          echo "$e_out"
+      for manifest in "$nodes_dir/"*.json; do
+        [ -e "$manifest" ] || continue
+        local id host
+        id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+        host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+        node_list+=("$id")
+
+        local target_hub_url
+        if [ "$id" = "$my_node_id" ] || [ "$host" = "$my_host" ]; then
+          target_hub_url="${KNOT_HUB_URL:-$(hub_resolve_url || echo "https://127.0.0.1:${hub_port}")}"
         else
-          knot_log_warn "Notice: Command failed locally on $id: $e_out"
+          target_hub_url="${KNOT_HUB_URL:-https://${anchor_host}:${hub_port}}"
         fi
-      elif e_out="$(ssh -o BatchMode=yes -o ConnectTimeout=3 "$id" "$remote_cmd" 2>&1)"; then
-        echo "$e_out"
+        local remote_cmd="export TERM=\"\${TERM:-xterm-256color}\"; export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:\$PATH\"; export KNOT_NODE_ID=\"$id\"; export KNOT_HUB_URL=\"$target_hub_url\"; $anchor_env $council_env $cmd"
+
+        (
+          set +e
+          local rc=0
+          if [ "$id" = "$my_node_id" ] || [ "$host" = "$my_host" ]; then
+            if [ -n "$timeout_sec" ]; then
+              timeout "$timeout_sec" bash -lc "$remote_cmd"
+              rc=$?
+            else
+              bash -lc "$remote_cmd"
+              rc=$?
+            fi
+          else
+            if [ -n "$timeout_sec" ]; then
+              timeout "$timeout_sec" ssh -o BatchMode=yes -o ConnectTimeout=5 "$id" "bash -lc $(printf %q "$remote_cmd")"
+              rc=$?
+            else
+              ssh -o BatchMode=yes -o ConnectTimeout=5 "$id" "bash -lc $(printf %q "$remote_cmd")"
+              rc=$?
+            fi
+          fi
+          echo "$rc" > "$tmpdir/$id.rc"
+        ) 2>&1 | while IFS= read -r line || [ -n "$line" ]; do
+          printf "[%s] %s\n" "$id" "$line"
+        done &
+        pids+=("$!")
+      done
+
+      for pid in "${pids[@]}"; do
+        if ! wait "$pid"; then
+          :
+        fi
+      done
+
+      local overall_rc=0
+      local failed_nodes=()
+      for nid in "${node_list[@]}"; do
+        local node_rc=1
+        if [ -f "$tmpdir/$nid.rc" ]; then
+          node_rc="$(cat "$tmpdir/$nid.rc")"
+        fi
+        if [ "$node_rc" -ne 0 ]; then
+          failed_nodes+=("$nid (exit $node_rc)")
+          if [ "$overall_rc" -eq 0 ]; then
+            overall_rc="$node_rc"
+          fi
+        fi
+      done
+      rm -rf "$tmpdir"
+
+      if [ "$overall_rc" -ne 0 ]; then
+        knot_log_err "Parallel execution completed with failures: ${failed_nodes[*]}"
+        return "$overall_rc"
       else
-        knot_log_warn "Notice: Command failed on $id: $e_out"
+        knot_log_ok "Parallel execution completed successfully across all nodes."
+        return 0
       fi
-    done
+    else
+      for manifest in "$nodes_dir/"*.json; do
+        [ -e "$manifest" ] || continue
+        local id host
+        id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+        host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+        echo -e "\n${C_CYAN}=== [$id] ===${C_RESET}"
+
+        local target_hub_url
+        if [ "$id" = "$my_node_id" ] || [ "$host" = "$my_host" ]; then
+          target_hub_url="${KNOT_HUB_URL:-$(hub_resolve_url || echo "https://127.0.0.1:${hub_port}")}"
+        else
+          target_hub_url="${KNOT_HUB_URL:-https://${anchor_host}:${hub_port}}"
+        fi
+        local remote_cmd="export TERM=\"\${TERM:-xterm-256color}\"; export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:\$PATH\"; export KNOT_NODE_ID=\"$id\"; export KNOT_HUB_URL=\"$target_hub_url\"; $anchor_env $council_env $cmd"
+
+        local e_out=""
+        if [ "$id" = "$my_node_id" ] || [ "$host" = "$my_host" ]; then
+          if [ -n "$timeout_sec" ]; then
+            if e_out="$(timeout "$timeout_sec" bash -lc "$remote_cmd" 2>&1)"; then
+              echo "$e_out"
+            else
+              knot_log_warn "Notice: Command failed locally on $id: $e_out"
+            fi
+          else
+            if e_out="$(bash -lc "$remote_cmd" 2>&1)"; then
+              echo "$e_out"
+            else
+              knot_log_warn "Notice: Command failed locally on $id: $e_out"
+            fi
+          fi
+        else
+          if [ -n "$timeout_sec" ]; then
+            if e_out="$(timeout "$timeout_sec" ssh -o BatchMode=yes -o ConnectTimeout=5 "$id" "bash -lc $(printf %q "$remote_cmd")" 2>&1)"; then
+              echo "$e_out"
+            else
+              knot_log_warn "Notice: Command failed on $id: $e_out"
+            fi
+          else
+            if e_out="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$id" "bash -lc $(printf %q "$remote_cmd")" 2>&1)"; then
+              echo "$e_out"
+            else
+              knot_log_warn "Notice: Command failed on $id: $e_out"
+            fi
+          fi
+        fi
+      done
+    fi
   else
     local nodes_dir=""
     if ! nodes_dir="$(knot_get_nodes_dir 2>&1)"; then
@@ -526,16 +669,76 @@ cmd_exec() {
     fi
     local remote_cmd="export TERM=\"\${TERM:-xterm-256color}\"; export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:\$PATH\"; export KNOT_NODE_ID=\"$target_nid\"; export KNOT_HUB_URL=\"$target_hub_url\"; $anchor_env $council_env $cmd"
 
-    if [ "$is_local" -eq 1 ]; then
-      bash -c "$remote_cmd"
+    if [ "$parallel" -eq 1 ]; then
+      (
+        set +e
+        local rc=0
+        if [ "$is_local" -eq 1 ]; then
+          if [ -n "$timeout_sec" ]; then
+            timeout "$timeout_sec" bash -lc "$remote_cmd"
+            rc=$?
+          else
+            bash -lc "$remote_cmd"
+            rc=$?
+          fi
+        else
+          if [ -n "$timeout_sec" ]; then
+            timeout "$timeout_sec" ssh -o BatchMode=yes -o ConnectTimeout=5 "$target_nid" "bash -lc $(printf %q "$remote_cmd")"
+            rc=$?
+          else
+            ssh -o BatchMode=yes -o ConnectTimeout=5 "$target_nid" "bash -lc $(printf %q "$remote_cmd")"
+            rc=$?
+          fi
+        fi
+        exit "$rc"
+      ) 2>&1 | while IFS= read -r line || [ -n "$line" ]; do
+        printf "[%s] %s\n" "$target_nid" "$line"
+      done
     else
-      if [ ${#tty_opts[@]} -gt 0 ]; then
-        ssh "${tty_opts[@]}" -o ConnectTimeout=5 "$target_nid" "$remote_cmd"
+      if [ "$is_local" -eq 1 ]; then
+        if [ -n "$timeout_sec" ]; then
+          timeout "$timeout_sec" bash -lc "$remote_cmd"
+        else
+          bash -lc "$remote_cmd"
+        fi
       else
-        ssh -o BatchMode=yes -o ConnectTimeout=5 "$target_nid" "$remote_cmd"
+        if [ ${#tty_opts[@]} -gt 0 ]; then
+          if [ -n "$timeout_sec" ]; then
+            timeout "$timeout_sec" ssh "${tty_opts[@]}" -o ConnectTimeout=5 "$target_nid" "bash -lc $(printf %q "$remote_cmd")"
+          else
+            ssh "${tty_opts[@]}" -o ConnectTimeout=5 "$target_nid" "bash -lc $(printf %q "$remote_cmd")"
+          fi
+        else
+          if [ -n "$timeout_sec" ]; then
+            timeout "$timeout_sec" ssh -o BatchMode=yes -o ConnectTimeout=5 "$target_nid" "bash -lc $(printf %q "$remote_cmd")"
+          else
+            ssh -o BatchMode=yes -o ConnectTimeout=5 "$target_nid" "bash -lc $(printf %q "$remote_cmd")"
+          fi
+        fi
       fi
     fi
   fi
+}
+
+cmd_socket() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot socket <status|cleanup>"
+    return 0
+  fi
+  source "$KNOT_ROOT/core/modules/ssh.sh"
+  local action="${1:-status}"
+  case "$action" in
+    status)
+      ssh_socket_status
+      ;;
+    cleanup|prune)
+      ssh_socket_cleanup
+      ;;
+    *)
+      echo "Usage: knot socket <status|cleanup>" >&2
+      return 1
+      ;;
+  esac
 }
 
 cmd_kvm() {
@@ -957,13 +1160,20 @@ cmd_kdeconnect() {
 
 cmd_display() {
   if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-    echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|toggle-kvm [<node>]>"
+    echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|toggle-kvm [<node>]|launch <node> <preset|cmd>|capture-fleet [--node <node|--all>]>"
     return 0
   fi
+  source "$KNOT_ROOT/core/modules/display.sh"
   local action="${1:-status}"
   [ $# -gt 0 ] && shift
 
   case "$action" in
+    launch)
+      display_launch_app "$@"
+      ;;
+    capture-fleet|capture)
+      display_capture_fleet "$@"
+      ;;
     extend)
       kdeconnect_vmon_start "$@"
       ;;
@@ -977,11 +1187,11 @@ cmd_display() {
       deskflow_toggle_mute_node "$@"
       ;;
     -h|--help)
-      echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|toggle-kvm [<node>]>"
+      echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|toggle-kvm [<node>]|launch <node> <preset|cmd>|capture-fleet [--node <node|--all>]>"
       return 0
       ;;
     *)
-      echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|toggle-kvm [<node>]>" >&2
+      echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|toggle-kvm [<node>]|launch <node> <preset|cmd>|capture-fleet [--node <node|--all>]>" >&2
       return 1
       ;;
   esac
@@ -1787,7 +1997,7 @@ cmd_update() {
 
 cmd_worktree() {
   if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-    echo "Usage: knot worktree <add|remove|list|normalize|provision> [args]"
+    echo "Usage: knot worktree <add|remove|list|normalize|provision|rebase-mesh> [args]"
     return 0
   fi
   local action="${1:-list}"
@@ -1908,12 +2118,44 @@ cmd_worktree() {
       fi
       gitops_provision_worktree_mesh "$@"
       ;;
+    rebase-mesh|rebase)
+      if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+        echo "Usage: knot worktree rebase-mesh <repo_or_project> [--upstream <branch>] [--nodes <node_list>]"
+        return 0
+      fi
+      local repo_name=""
+      local upstream="main"
+      local nodes=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --upstream|-u)
+            upstream="$2"
+            shift 2
+            ;;
+          --nodes)
+            nodes="$2"
+            shift 2
+            ;;
+          *)
+            if [ -z "$repo_name" ]; then
+              repo_name="$1"
+            fi
+            shift
+            ;;
+        esac
+      done
+      if [ -z "$repo_name" ]; then
+        knot_log_err "Usage: knot worktree rebase-mesh <repo_or_project> [--upstream <branch>] [--nodes <node_list>]"
+        return 1
+      fi
+      gitops_worktree_rebase_mesh "$repo_name" "$upstream" "$nodes"
+      ;;
     -h|--help)
-      echo "Usage: knot worktree <add|remove|list|normalize|provision> [args]"
+      echo "Usage: knot worktree <add|remove|list|normalize|provision|rebase-mesh> [args]"
       return 0
       ;;
     *)
-      echo "Usage: knot worktree <add|remove|list|normalize|provision> [args]" >&2
+      echo "Usage: knot worktree <add|remove|list|normalize|provision|rebase-mesh> [args]" >&2
       return 1
       ;;
   esac
@@ -2075,6 +2317,14 @@ case "${1:-}" in
     shift
     cmd_topology "$@"
     ;;
+  socket)
+    shift
+    cmd_socket "$@"
+    ;;
+  ledger)
+    shift
+    cmd_ledger "$@"
+    ;;
   -h|--help|help|"")
     echo -e "${C_BOLD}Knot - Multi-Device Mesh Orchestrator${C_RESET}"
     echo "Usage:"
@@ -2084,6 +2334,7 @@ case "${1:-}" in
     echo "  knot sync [--all | <node_id>] [--dev] Reconcile keys, configs, layout, or heal dev drift"
     echo "  knot resolve <node_id> [port] Resolve active IP across 3 tiers"
     echo "  knot status                   Show live status of all mesh nodes"
+    echo "  knot ledger generate [--json] Deterministic machine-readable cluster health ledger"
     echo "  knot council <start|resume|status|reply|list|attach|reconcile|copy|clean|kill> Out-of-band multi-agent swarm coordination"
     echo "  knot swarm [status|quota|test|exec|auth] Manage Antigravity AI agents across the mesh"
     echo "  knot quota [node|--all]       Show real-time 5h & weekly model quota limits"
@@ -2093,7 +2344,7 @@ case "${1:-}" in
     echo "  knot agent <start|stop|restart|status|logs> Manage Worker Agent daemon"
     echo "  knot task <post|list|batch|get|wait|watch> Manage Linda Tuplespace tasks"
     echo "  knot project <list|get|sync|worktree> Manage native Antigravity multi-folder projects"
-    echo "  knot worktree <add|remove|list|normalize|provision> Cross-node git worktrees without duplicate clones"
+    echo "  knot worktree <add|remove|list|normalize|provision|rebase-mesh> Cross-node git worktrees & parallel landing arbiter"
     echo "  knot chat <channels|create|post|read> Manage Swarm Konversations channels"
     echo "  knot sleep <status|prevent|allow> Enforce wholesale prevent-sleep on AC power"
     echo "  knot kafe [open|dev|build]    Boot / open Knot Kommand Kafe cockpit"
@@ -2102,12 +2353,13 @@ case "${1:-}" in
     echo "  knot repair [node|--all]      Auto-repair KVM dropout and mesh state"
     echo "  knot shutdown [target] [opt]  Graceful swarm-wide shutdown or reboot (--all, -d, -r, -c)"
     echo "  knot reboot [target] [opt]    Graceful swarm-wide reboot alias"
-    echo "  knot exec <target|--all> <cmd> Run commands across mesh nodes"
+    echo "  knot exec [-P] <target|--all> <cmd> Run commands across mesh nodes (supports -P/--parallel)"
+    echo "  knot socket <status|cleanup>  Manage OpenSSH ControlMaster multiplexing sockets"
     echo "  knot kvm <restart|status>     Manage software KVM across the mesh"
     echo "  knot screen <status|unlock|lock|login> Manage screen lock/login states"
     echo "  knot autologin [status|check|doctor|migrate-dm|local|reconcile|fix-kwallet|purge-stale|configure-timer] Manage auto-login"
     echo "  knot kdeconnect <status|sync|pair|reconcile|vmon|share|sync-clipboard|test-clipboard|prune-stale> Manage KDE Connect mesh clipboard & virtual displays"
-    echo "  knot display <status|extend|stop> [node_id] Dynamic Wayland virtual display extension (RDP/KRDC)"
+    echo "  knot display <status|extend|stop|launch|capture-fleet> Manage Wayland cockpits & headless fleet captures"
     exit 0
     ;;
   *)

@@ -172,7 +172,7 @@ swarm_sync_anchor_push() {
   fi
 
   local remote_sync_out=""
-  if ! remote_sync_out="$(ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new "$target" "$remote_sync_cmd" 2>&1)"; then
+  if ! remote_sync_out="$(ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new "$target" "bash -lc $(printf %q "$remote_sync_cmd")" 2>&1)"; then
     knot_log_err "Remote knot sync failed on '$target': $remote_sync_out"
     return 1
   fi
@@ -465,7 +465,7 @@ PY_INNER
   '
 
   local heal_out=""
-  if heal_out="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$remote_cmd" 2>&1)"; then
+  if heal_out="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "bash -lc $(printf %q "$remote_cmd")" 2>&1)"; then
     knot_log_ok "Strand '$target' dev environment healed ($heal_out)."
     return 0
   else

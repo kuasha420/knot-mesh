@@ -702,5 +702,18 @@ fi
 rm -rf "$conf_fail_dir"
 echo "PASSED"
 
+# 24. Display Cockpit Hub URL Resolution & Injection (Issue #71)
+echo -n "24. Testing display launch KNOT_HUB_URL dynamic propagation... "
+display_test_out="$("$KNOT_ROOT/bin/knot" display launch laptop board --dry-run)"
+if ! echo "$display_test_out" | grep -q "KNOT_HUB_URL="; then
+  echo "FAILED (KNOT_HUB_URL not found in display launch output: $display_test_out)"
+  exit 1
+fi
+if ! echo "$display_test_out" | grep -q "knot council board --compact"; then
+  echo "FAILED (Expected preset command in display launch output: $display_test_out)"
+  exit 1
+fi
+echo "PASSED"
+
 echo ""
-echo "=== All 23 Swarm Council Tests PASSED Successfully! ==="
+echo "=== All 24 Swarm Council Tests PASSED Successfully! ==="

@@ -393,3 +393,21 @@ def test_zero_token_audit():
             code = f.read()
         for forbidden in ["google.generativeai", "openai", "anthropic", "langchain", "llama_index"]:
             assert forbidden not in code, f"Forbidden LLM library '{forbidden}' found in {script_path}"
+
+
+def test_display_launch_hub_url_injection():
+    """Verify that knot display launch resolves and injects KNOT_HUB_URL into execution commands."""
+    cmd = [
+        os.path.join(REPO_ROOT, "bin", "knot"),
+        "display",
+        "launch",
+        "laptop",
+        "board",
+        "--dry-run",
+    ]
+    env = os.environ.copy()
+    env["KNOT_HUB_URL"] = "https://192.168.1.100:4242"
+    res = subprocess.run(cmd, env=env, capture_output=True, text=True, check=True)
+    assert "KNOT_HUB_URL='https://192.168.1.100:4242'" in res.stdout
+    assert "knot council board --compact" in res.stdout
+

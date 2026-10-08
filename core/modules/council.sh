@@ -868,10 +868,12 @@ council_attach() {
   knot_log_info "Connecting to active agent session on node '$node_id' (Mission: ${run_id:-none})..."
   local local_node
   local_node="$(knot_detect_node_id)"
+  local resolved_hub
+  resolved_hub="${KNOT_HUB_URL:-$(hub_resolve_url)}"
   if [ "$node_id" = "$local_node" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$(knot_detect_hostname)" ]; then
     export KNOT_NODE_ID="$node_id"
     if [ -n "$run_id" ]; then export KNOT_COUNCIL_RUN_ID="$run_id"; fi
-    export KNOT_HUB_URL="https://127.0.0.1:4242"
+    export KNOT_HUB_URL="$resolved_hub"
     export KNOT_COUNCIL_DB="$m_db"
     export KNOT_PROJECT="$m_proj"
     local pdir=""
@@ -881,7 +883,7 @@ council_attach() {
     if [ -d "$pdir" ]; then cd "$pdir"; fi
     agy --project "$m_proj" --dangerously-skip-permissions -c
   else
-    local remote_attach_cmd="export KNOT_NODE_ID='$node_id' KNOT_HUB_URL='https://127.0.0.1:4242'; if [ -n '$run_id' ]; then export KNOT_COUNCIL_RUN_ID='$run_id'; fi; export KNOT_COUNCIL_DB='$m_db' KNOT_PROJECT='$m_proj'; PDIR=\$(python3 -c 'import sys,os,glob,json;home=os.path.expanduser(\"~\");pname=sys.argv[1].lower() if len(sys.argv)>1 else \"\";pdir=os.path.join(home,\".gemini/config/projects\");res=\"\";[setattr(sys.modules[__name__],\"res\",p if os.path.isdir(p) else next((c for b in [os.path.basename(p)] for c in [os.path.join(home,\"Dev\",b),os.path.join(home,b)] if os.path.isdir(c)),\"\")) for f in (glob.glob(os.path.join(pdir,\"*.json\")) if os.path.isdir(pdir) else []) if not res for d in [json.load(open(f))] if (d.get(\"name\",\"\").lower()==pname or d.get(\"id\",\"\").lower()==pname) for r in d.get(\"projectResources\",{}).get(\"resources\",[]) for u in [r.get(\"gitFolder\",{}).get(\"folderUri\",\"\")] if u.startswith(\"file://\") for p in [u[7:].rstrip(\"/\")]]; print(res or next((c for c in [os.path.join(home,\"Dev\",pname),os.path.join(home,pname)] if os.path.isdir(c)),os.getcwd()))' '$m_proj'); if [ -d \"\$PDIR\" ]; then cd \"\$PDIR\"; fi; agy --project '$m_proj' --dangerously-skip-permissions -c"
+    local remote_attach_cmd="export KNOT_NODE_ID='$node_id' KNOT_HUB_URL='$resolved_hub'; if [ -n '$run_id' ]; then export KNOT_COUNCIL_RUN_ID='$run_id'; fi; export KNOT_COUNCIL_DB='$m_db' KNOT_PROJECT='$m_proj'; PDIR=\$(python3 -c 'import sys,os,glob,json;home=os.path.expanduser(\"~\");pname=sys.argv[1].lower() if len(sys.argv)>1 else \"\";pdir=os.path.join(home,\".gemini/config/projects\");res=\"\";[setattr(sys.modules[__name__],\"res\",p if os.path.isdir(p) else next((c for b in [os.path.basename(p)] for c in [os.path.join(home,\"Dev\",b),os.path.join(home,b)] if os.path.isdir(c)),\"\")) for f in (glob.glob(os.path.join(pdir,\"*.json\")) if os.path.isdir(pdir) else []) if not res for d in [json.load(open(f))] if (d.get(\"name\",\"\").lower()==pname or d.get(\"id\",\"\").lower()==pname) for r in d.get(\"projectResources\",{}).get(\"resources\",[]) for u in [r.get(\"gitFolder\",{}).get(\"folderUri\",\"\")] if u.startswith(\"file://\") for p in [u[7:].rstrip(\"/\")]]; print(res or next((c for c in [os.path.join(home,\"Dev\",pname),os.path.join(home,pname)] if os.path.isdir(c)),os.getcwd()))' '$m_proj'); if [ -d \"\$PDIR\" ]; then cd \"\$PDIR\"; fi; agy --project '$m_proj' --dangerously-skip-permissions -c"
     "$KNOT_ROOT/bin/knot" exec -tt "$node_id" "$remote_attach_cmd"
   fi
 }
