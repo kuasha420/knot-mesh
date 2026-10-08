@@ -158,6 +158,10 @@ autologin_ensure_dm() {
 }
 
 autologin_status() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot autologin status"
+    return 0
+  fi
   local my_host
   my_host="$(knot_detect_hostname)"
   echo -e "\033[1;36m=== Knot Auto-Login Status on $my_host ===\033[0m"

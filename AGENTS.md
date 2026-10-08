@@ -35,7 +35,7 @@ This repository strictly adheres to the PSL Gold Standard of engineering integri
 
 ## 2. Multi-Agent SWE Execution Protocol
 
-For complex multi-phase engineering milestones, contributors and operators invoke the **`subagent-ladder`** operational skill ([`runtime/skills/subagent-ladder/SKILL.md`](file:///home/kuasha/Dev/knot-mesh/runtime/skills/subagent-ladder/SKILL.md)).
+For complex multi-phase engineering milestones, contributors and operators invoke the **`subagent-ladder`** operational skill ([`runtime/skills/subagent-ladder/SKILL.md`](runtime/skills/subagent-ladder/SKILL.md)).
 
 > [!IMPORTANT]
 > **User-Invoked Only**: Autonomous agents must **NEVER** auto-trigger or assume the multi-agent ladder pipeline on their own. The ladder workflow is strictly engaged upon explicit operator direction (e.g., `/subagent-ladder`, *"use subagent ladder"*). Single-turn queries and targeted bug fixes must be handled directly.

@@ -337,10 +337,34 @@ class LimitVisualizerRenderer:
             pwr_info = power.get(nid) if isinstance(power, dict) else None
             pwr_str = format_power_string(pwr_info, is_offline=is_offline)
 
+            account = n.get("account") or qdata.get("account") or {}
+            prof_alias = (
+                account.get("profile")
+                or account.get("profile_alias")
+                or account.get("active_profile")
+                or n.get("active_profile")
+                or n.get("profile")
+                or qdata.get("active_profile")
+                or qdata.get("profile")
+            )
+            if not prof_alias:
+                is_local = nid in (os.environ.get("KNOT_NODE_ID"), "local", "localhost", os.uname().nodename)
+                if is_local:
+                    prof_alias = os.environ.get("KNOT_AUTH_PROFILE")
+                    if not prof_alias:
+                        active_sym = os.path.expanduser("~/.config/knot/auth/active_profile")
+                        if os.path.islink(active_sym):
+                            try:
+                                prof_alias = os.path.basename(os.readlink(active_sym))
+                            except (OSError, ValueError):
+                                prof_alias = None
+
+            auth_badge = f"Valid ({prof_alias})" if prof_alias else "Valid"
+
             # Node card box
             border_len = max(10, w - 2)
             lines.append(f"{C_CYAN}┌── {icon} {C_BOLD}@{nid}{C_RESET} {C_DIM}({role_desc}){C_RESET} ── {status_str} {C_CYAN}{'─' * max(2, border_len - len(nid) - len(role_desc) - 20)}┐{C_RESET}")
-            lines.append(f"{C_CYAN}│{C_RESET} Model: {C_BCYAN}{model_name}{C_RESET} • Auth: {C_BGREEN}Valid{C_RESET} • Power: {pwr_str}")
+            lines.append(f"{C_CYAN}│{C_RESET} Model: {C_BCYAN}{model_name}{C_RESET} • Auth: {C_BGREEN}{auth_badge}{C_RESET} • Power: {pwr_str}")
             if not has_5h:
                 lines.append(f"{C_CYAN}│{C_RESET} 5-Hour Limit: {C_DIM}[ WEEKLY ONLY ]  N/A{C_RESET}")
             else:
@@ -364,8 +388,8 @@ class LimitVisualizerRenderer:
         lines.append(f"{C_BOLD}{title}{C_RESET} | {backend_tag} | {C_DIM}{time_str}{C_RESET}")
         lines.append(f"{C_CYAN}{'═' * w}{C_RESET}")
 
-        cols = [16, 24, 22, 24, 24, 16]
-        h_strs = ["STRAND NODE", "SPECIALIZATION / ROLE", "MODEL ASSIGNMENT", "5-HOUR QUOTA", "WEEKLY BUDGET", "REFRESH / POWER"]
+        cols = [14, 20, 18, 30, 18, 18, 12]
+        h_strs = ["STRAND NODE", "SPECIALIZATION / ROLE", "MODEL ASSIGNMENT", "PROFILE / EMAIL", "5-HOUR QUOTA", "WEEKLY BUDGET", "REFRESH / POWER"]
         lines.append(f"{C_BOLD}" + " ".join(pad_visible(h, c_w) for h, c_w in zip(h_strs, cols)) + f"{C_RESET}")
         lines.append(f"{C_DIM}" + " ".join("─" * c_w for c_w in cols) + f"{C_RESET}")
 
@@ -389,6 +413,38 @@ class LimitVisualizerRenderer:
                         sys.stderr.write(f"[DEBUG] Failed to parse quota_data JSON for {nid}: {e}\n")
                     qdata = {}
 
+            account = n.get("account") or qdata.get("account") or {}
+            email = account.get("email") or ""
+            prof_alias = (
+                account.get("profile")
+                or account.get("profile_alias")
+                or account.get("active_profile")
+                or n.get("active_profile")
+                or n.get("profile")
+                or qdata.get("active_profile")
+                or qdata.get("profile")
+            )
+            if not prof_alias:
+                is_local = nid in (os.environ.get("KNOT_NODE_ID"), "local", "localhost", os.uname().nodename)
+                if is_local:
+                    prof_alias = os.environ.get("KNOT_AUTH_PROFILE")
+                    if not prof_alias:
+                        active_sym = os.path.expanduser("~/.config/knot/auth/active_profile")
+                        if os.path.islink(active_sym):
+                            try:
+                                prof_alias = os.path.basename(os.readlink(active_sym))
+                            except (OSError, ValueError):
+                                prof_alias = None
+
+            if prof_alias and email and email != "unlinked":
+                prof_email_cell = f"{prof_alias} ({email})"
+            elif prof_alias:
+                prof_email_cell = prof_alias
+            elif email and email != "unlinked":
+                prof_email_cell = f"({email})"
+            else:
+                prof_email_cell = "-"
+
             g_5h = n.get("quota_5h_gemini")
             g_wk = n.get("quota_weekly_gemini", 1.0)
             rst_5h = qdata.get("gemini_5h_reset_in") or qdata.get("gemini_5h_reset", "Ready")
@@ -408,8 +464,9 @@ class LimitVisualizerRenderer:
 
             row_items = [
                 f"{icon} @{nid}",
-                role_desc[:23],
-                model_name[:21],
+                role_desc[:19],
+                model_name[:17],
+                prof_email_cell[:29],
                 cell_5h,
                 f"{bar_wk} {rst_wk[:10]}",
                 pwr_str

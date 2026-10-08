@@ -440,6 +440,10 @@ sys.exit(1)
 
 # Show swarm status across all registered mesh nodes
 antigravity_swarm_status() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot swarm status"
+    return 0
+  fi
   echo -e "${C_BOLD}--- Knot Antigravity Swarm Status ---${C_RESET}"
   printf "%-12s %-16s %-12s %-16s %-12s\n" "NODE" "HOST" "CLI VERSION" "AUTH STATUS" "LATENCY"
   printf "%-12s %-16s %-12s %-16s %-12s\n" "----" "----" "-----------" "-----------" "-------"
@@ -587,6 +591,11 @@ antigravity_swarm_test() {
   local target="${1:-all}"
   local prompt="${2:-Say hello from your node name in 4 words}"
 
+  if [ "$target" = "-h" ] || [ "$target" = "--help" ]; then
+    echo "Usage: knot swarm test [node|--all] [prompt]"
+    return 0
+  fi
+
   if [ "$target" = "all" ] || [ "$target" = "--all" ]; then
     local nodes_dirs=()
     local primary_dir=""
@@ -663,6 +672,10 @@ antigravity_swarm_test() {
 # Display model quotas across the mesh
 antigravity_swarm_quota() {
   local target="${1:-all}"
+  if [ "$target" = "-h" ] || [ "$target" = "--help" ]; then
+    echo "Usage: knot quota [node|--all] [watch|live]"
+    return 0
+  fi
   local hub_url=""
   if [ -n "${KNOT_HUB_URL:-}" ]; then
     hub_url="$KNOT_HUB_URL"
@@ -738,6 +751,12 @@ antigravity_swarm_auth() {
     echo "  knot auth laptop            Interactive terminal login via SSH"
     echo "  knot auth steamdeck --gui   Open terminal window on Steam Deck display"
     return 0
+  fi
+
+  if [[ "${1:-}" == -* ]] && [ "${1:-}" != "--gui" ]; then
+    echo "Error: Unknown auth action or option '$1'" >&2
+    echo "Run 'knot auth --help' for usage." >&2
+    return 1
   fi
 
   if [ "${1:-}" = "sync" ]; then

@@ -281,6 +281,7 @@ def test_limit_visualizer_rendering():
             "selected_model": "gemini-3.1-pro-high",
             "quota_5h_gemini": 0.95,
             "quota_weekly_gemini": 1.0,
+            "account": {"email": "primary@knot.mesh", "profile": "primary"},
             "quota_data": {
                 "gemini_5h_reset_in": "Ready",
                 "gemini_weekly_reset_in": "in 6d 02h",
@@ -294,6 +295,7 @@ def test_limit_visualizer_rendering():
             "selected_model": "gemini-3.8-flash-high",
             "quota_5h_gemini": 0.35,
             "quota_weekly_gemini": 0.80,
+            "account": {"email": "work@knot.mesh", "profile": "work"},
             "quota_data": {
                 "gemini_5h_reset_in": "in 1h 22m",
                 "gemini_weekly_reset_in": "in 3d 14h",
@@ -314,14 +316,19 @@ def test_limit_visualizer_rendering():
     assert "desktop" in compact
     assert "laptop" in compact
     assert "gemini-3.1-pro-high" in compact
+    assert "Valid (primary)" in compact
+    assert "Valid (work)" in compact
 
     # Wide matrix layout
     wide = renderer.render_snapshot(width=120, height=30, wide=True)
     assert "NODE" in wide
     assert "MODEL" in wide
+    assert "PROFILE / EMAIL" in wide
     assert "5-HOUR QUOTA" in wide
     assert "WEEKLY BUDGET" in wide
     assert "@desktop" in wide
+    assert "primary (primary@knot.mesh)" in wide
+    assert "work (work@knot.mesh)" in wide
     assert "Bat 98% (AC)" in wide
     assert "AC Power" in wide
 

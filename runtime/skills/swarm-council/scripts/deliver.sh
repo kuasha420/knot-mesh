@@ -49,9 +49,11 @@ if [ "$INTERACTIVE" != "1" ] && [ "$INTERACTIVE" != "true" ]; then
   echo "==> Staging prompt files and launchers across mesh..."
   pack=""
   opening_node=""
+  auth_profile=""
   if [ -f "$MISSIONS_DIR/meta.json" ]; then
     pack="$(jq -r '.pack // ""' "$MISSIONS_DIR/meta.json")"
     opening_node="$(jq -r '.opening_node // .ring[0] // ""' "$MISSIONS_DIR/meta.json")"
+    auth_profile="$(jq -r '.auth_profile // empty' "$MISSIONS_DIR/meta.json")"
   fi
   if [ -z "$opening_node" ]; then
     opening_node="$LOCAL_NODE"
@@ -68,6 +70,7 @@ if [ "$INTERACTIVE" != "1" ] && [ "$INTERACTIVE" != "true" ]; then
 trap '' HUP
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:$PATH"
 export KNOT_NODE_ID="NODE_ID_PLACEHOLDER"
+AUTH_PROFILE_PLACEHOLDER
 PROJECT_NAME="PROJECT_PLACEHOLDER"
 
 PROJECT_DIR="$(python3 -c '
@@ -120,6 +123,7 @@ EOF_LAUNCH
 trap '' HUP
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:$PATH"
 export KNOT_NODE_ID="NODE_ID_PLACEHOLDER"
+AUTH_PROFILE_PLACEHOLDER
 PROMPT_FILE="$HOME/.config/knot/missions/RUN_ID_PLACEHOLDER/prompt.md"
 PROJECT_NAME="PROJECT_PLACEHOLDER"
 
@@ -168,15 +172,26 @@ EOF_LAUNCH
     sed -i "s|RUN_ID_PLACEHOLDER|$RUN_ID|g" "$launcher_script"
     sed -i "s|PROJECT_PLACEHOLDER|$PROJECT|g" "$launcher_script"
     sed -i "s|NODE_ID_PLACEHOLDER|$node_id|g" "$launcher_script"
+    if [ -n "$auth_profile" ]; then
+      sed -i "s|AUTH_PROFILE_PLACEHOLDER|export KNOT_AUTH_PROFILE=\"$auth_profile\"|g" "$launcher_script"
+    else
+      sed -i "/AUTH_PROFILE_PLACEHOLDER/d" "$launcher_script"
+    fi
     chmod +x "$launcher_script"
 
     if [ "$node_id" = "$LOCAL_NODE" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$LOCAL_HOST" ]; then
       cp "$pfile" "$MISSIONS_DIR/prompt.md"
       cp "$launcher_script" "$MISSIONS_DIR/launch.sh"
-    elif [ "$LAUNCH" -eq 1 ]; then
-      "$KNOT_BIN" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
-      cat "$pfile" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
-      cat "$launcher_script" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/launch.sh && chmod +x ~/.config/knot/missions/$RUN_ID/launch.sh"
+    else
+      if [ ! -f "$MISSIONS_DIR/launch.sh" ]; then
+        cp "$pfile" "$MISSIONS_DIR/prompt.md"
+        cp "$launcher_script" "$MISSIONS_DIR/launch.sh"
+      fi
+      if [ "$LAUNCH" -eq 1 ]; then
+        "$KNOT_BIN" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID"
+        cat "$pfile" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/prompt.md"
+        cat "$launcher_script" | "$KNOT_BIN" exec "$node_id" "cat > ~/.config/knot/missions/$RUN_ID/launch.sh && chmod +x ~/.config/knot/missions/$RUN_ID/launch.sh"
+      fi
     fi
   done
 fi
@@ -236,10 +251,21 @@ case "$MODE" in
       echo "  [•] Spawning Konsole on $node_id screen..."
 
       if [ "$node_id" = "$LOCAL_NODE" ] || [ "$node_id" = "localhost" ] || [ "$node_id" = "$LOCAL_HOST" ]; then
+        w_disp="${WAYLAND_DISPLAY:-}"
+        xdg_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+        if [ -z "$w_disp" ] && [ -d "$xdg_dir" ]; then
+          for cand in "$xdg_dir"/wayland-*; do
+            if [ -S "$cand" ]; then
+              w_disp="$(basename "$cand")"
+              break
+            fi
+          done
+        fi
+        w_disp="${w_disp:-wayland-0}"
         mkdir -p "$MISSIONS_DIR/logs"
-        WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}" DISPLAY="${DISPLAY:-:0}" nohup konsole --hold -e "$MISSIONS_DIR/${node_id}_launch.sh" > "$MISSIONS_DIR/logs/konsole_$node_id.log" 2>&1 &
+        WAYLAND_DISPLAY="$w_disp" DISPLAY="${DISPLAY:-:0}" nohup konsole --hold -e "$MISSIONS_DIR/${node_id}_launch.sh" > "$MISSIONS_DIR/logs/konsole_$node_id.log" 2>&1 &
       else
-        "$KNOT_BIN" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID/logs && WAYLAND_DISPLAY=\"\${WAYLAND_DISPLAY:-wayland-0}\" DISPLAY=\"\${DISPLAY:-:0}\" XDG_RUNTIME_DIR=\"/run/user/\$(id -u)\" nohup konsole --hold -e ~/.config/knot/missions/$RUN_ID/launch.sh > ~/.config/knot/missions/$RUN_ID/logs/konsole.log 2>&1 &"
+        "$KNOT_BIN" exec "$node_id" "mkdir -p ~/.config/knot/missions/$RUN_ID/logs && XDG_DIR=\"/run/user/\$(id -u)\"; W_DISP=\"\"; for s in \"\$XDG_DIR\"/wayland-*; do if [ -S \"\$s\" ]; then W_DISP=\"\$(basename \"\$s\")\"; break; fi; done; if [ -z \"\$W_DISP\" ]; then W_DISP=\"\${WAYLAND_DISPLAY:-wayland-0}\"; fi; WAYLAND_DISPLAY=\"\$W_DISP\" DISPLAY=\"\${DISPLAY:-:0}\" XDG_RUNTIME_DIR=\"\$XDG_DIR\" nohup konsole --hold -e ~/.config/knot/missions/$RUN_ID/launch.sh > ~/.config/knot/missions/$RUN_ID/logs/konsole.log 2>&1 &"
       fi
     done
     echo "[✓] Interactive TUI windows open on fleet displays."

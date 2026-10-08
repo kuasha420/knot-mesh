@@ -414,14 +414,14 @@ NOTIFY_EOF
       chmod 600 "$tls_dir/deskflow.pem"
     else
       knot_log_info "Fetching Deskflow mesh TLS certificate from Anchor..."
-      local hub_addr="${ANCHOR_HOST}:${HUB_PORT:-4242}"
+      local hub_addr="${ANCHOR_HOST:-${anchor_host:-desktop}}:${HUB_PORT:-4242}"
       local fetched=0
       if curl -kfsSL "https://${hub_addr}/dist/deskflow.pem" -o "$tls_dir/deskflow.pem"; then
         fetched=1
         knot_log_ok "Synchronized Deskflow TLS certificate from Anchor Hub."
-      elif [ -n "$KNOT_CLI" ]; then
+      elif [ -n "${KNOT_CLI:-}" ]; then
         local resolved_ip
-        if resolved_ip="$("$KNOT_CLI" resolve "$ANCHOR_TARGET" 4242 2>&1)"; then
+        if resolved_ip="$("${KNOT_CLI}" resolve "${ANCHOR_TARGET:-${anchor_host:-desktop}}" 4242 2>&1)"; then
           if curl -kfsSL "https://${resolved_ip}:4242/dist/deskflow.pem" -o "$tls_dir/deskflow.pem"; then
             fetched=1
             knot_log_ok "Synchronized Deskflow TLS certificate from Anchor IP ($resolved_ip)."

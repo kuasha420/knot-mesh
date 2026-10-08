@@ -9,7 +9,7 @@ The **Swarm Orchestrator** skill formalizes the operational coordination model f
 
 $$\text{Human Operator} \quad \boldsymbol{\longleftrightarrow} \quad \text{Swarm Orchestrator (Anchor Lead Agent)} \quad \boldsymbol{\longleftrightarrow} \quad \text{Swarm Members (Physical Strands)}$$
 
-Codified from real-world campaigns across diverse heterogeneous nodes (Desktop Anchor, Laptop CUDA, ROG Ally APU, Steam Deck APU), this protocol grounds execution directly in Knot Mesh's native tooling ([`docs/CLI_REFERENCE.md`](file:///home/kuasha/Dev/knot-mesh/docs/CLI_REFERENCE.md)), fleet operations architecture ([`docs/SWARM_OPERATIONS.md`](file:///home/kuasha/Dev/knot-mesh/docs/SWARM_OPERATIONS.md)), and swarm roadmap vision ([`docs/SWARM_VISION_AND_ROADMAP.md`](file:///home/kuasha/Dev/knot-mesh/docs/SWARM_VISION_AND_ROADMAP.md)).
+Codified from real-world campaigns across diverse heterogeneous nodes (Desktop Anchor, Laptop CUDA, ROG Ally APU, Steam Deck APU), this protocol grounds execution directly in Knot Mesh's native tooling ([`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md)), fleet operations architecture ([`docs/SWARM_OPERATIONS.md`](docs/SWARM_OPERATIONS.md)), and swarm roadmap vision ([`docs/SWARM_VISION_AND_ROADMAP.md`](docs/SWARM_VISION_AND_ROADMAP.md)).
 
 ---
 
@@ -55,11 +55,11 @@ graph TD
 
 | Skill | Interaction with Swarm Orchestrator | Canonical Path |
 | :--- | :--- | :--- |
-| **`hardware-profiles`** | Used during task staging to inject node-specific system prompts (e.g. CUDA on `@laptop`, heavy compile on `@desktop`, handheld APU on `@steamdeck`). | [`runtime/skills/hardware-profiles/SKILL.md`](file:///home/kuasha/Dev/knot-mesh/runtime/skills/hardware-profiles/SKILL.md) |
-| **`knot-swarm`** | Provides 0-token CLI commands (`knot_exec_command`) and Linda Tuplespace batch fanouts (`knot_task_fanout`). | [`runtime/skills/knot-swarm/SKILL.md`](file:///home/kuasha/Dev/knot-mesh/runtime/skills/knot-swarm/SKILL.md) |
-| **`swarm-council`** | Manages Kitty Confluence spatial multiplexing (`scripts/confluence.py`), delta discussion querying (`scripts/gh_discussion.py`), and prompt delivery (`scripts/deliver.sh`). | [`runtime/skills/swarm-council/SKILL.md`](file:///home/kuasha/Dev/knot-mesh/runtime/skills/swarm-council/SKILL.md) |
-| **`subagent-ladder`** | Invoked inside worker strands when executing complex multi-file SWE tasks to ensure builder/auditor separation. | [`runtime/skills/subagent-ladder/SKILL.md`](file:///home/kuasha/Dev/knot-mesh/runtime/skills/subagent-ladder/SKILL.md) |
-| **`goal-with-lease`** | Binds the campaign to PSL Gold Standard invariants ([`AGENTS.md`](file:///home/kuasha/Dev/knot-mesh/AGENTS.md)) and leased autonomy boundaries. | [`runtime/skills/goal-with-lease/SKILL.md`](file:///home/kuasha/Dev/knot-mesh/runtime/skills/goal-with-lease/SKILL.md) |
+| **`hardware-profiles`** | Used during task staging to inject node-specific system prompts (e.g. CUDA on `@laptop`, heavy compile on `@desktop`, handheld APU on `@steamdeck`). | [`runtime/skills/hardware-profiles/SKILL.md`](../hardware-profiles/SKILL.md) |
+| **`knot-swarm`** | Provides 0-token CLI commands (`knot_exec_command`) and Linda Tuplespace batch fanouts (`knot_task_fanout`). | [`runtime/skills/knot-swarm/SKILL.md`](../knot-swarm/SKILL.md) |
+| **`swarm-council`** | Manages Kitty Confluence spatial multiplexing (`scripts/confluence.py`), delta discussion querying (`scripts/gh_discussion.py`), and prompt delivery (`scripts/deliver.sh`). | [`runtime/skills/swarm-council/SKILL.md`](../swarm-council/SKILL.md) |
+| **`subagent-ladder`** | Invoked inside worker strands when executing complex multi-file SWE tasks to ensure builder/auditor separation. | [`runtime/skills/subagent-ladder/SKILL.md`](../subagent-ladder/SKILL.md) |
+| **`goal-with-lease`** | Binds the campaign to PSL Gold Standard invariants ([`AGENTS.md`](../../../AGENTS.md)) and leased autonomy boundaries. | [`runtime/skills/goal-with-lease/SKILL.md`](../goal-with-lease/SKILL.md) |
 
 ---
 
@@ -102,7 +102,7 @@ graph TD
    - Visual agent cockpits (Kitty Confluence, live terminals) must **never hijack, resize, or obstruct** the operator's primary display. Cockpits are decoupled to secondary worker displays (e.g. `@laptop` `WAYLAND_DISPLAY=wayland-0` or auxiliary handheld displays) or confined to secondary virtual workspaces (`Workspace 2+`).
 2. **Whole-Swarm Sleep Inhibition**:
    - Long-horizon campaigns must continue executing uninterrupted overnight or when the operator steps away.
-   - System sleep, suspend-on-idle, and power-saving dimming must be inhibited across all online nodes on AC power via `knot sleep prevent` ([`docs/CLI_REFERENCE.md:376-383`](file:///home/kuasha/Dev/knot-mesh/docs/CLI_REFERENCE.md#knot-sleep)).
+   - System sleep, suspend-on-idle, and power-saving dimming must be inhibited across all online nodes on AC power via `knot sleep prevent` ([`docs/CLI_REFERENCE.md:376-383`](docs/CLI_REFERENCE.md#knot-sleep)).
 3. **High-Signal Intervention Only**:
    - The operator must not be spammed with routine progress narration or trivial confirmations.
    - Autonomous execution halts and alerts the human operator strictly upon **Tier 1** (breaking architectural decisions) and **Tier 2** (unresolvable environment faults, credential rotation) triggers.
@@ -117,7 +117,7 @@ graph TD
 > - **Failure Escalation**: If all worker strands are offline, disconnected, or quota-exhausted, the Orchestrator **MUST NOT** fall into the trap of becoming a solitary worker. It must halt execution and issue a **Tier 2 Stop-and-Inquire escalation** to the human operator.
 
 ### 2.3 The Swarm Members: Strand Ergonomics & Clean Handoffs
-1. **Hardware-Aligned Workstream Allocation** ([`docs/SWARM_VISION_AND_ROADMAP.md:78-85`](file:///home/kuasha/Dev/knot-mesh/docs/SWARM_VISION_AND_ROADMAP.md)):
+1. **Hardware-Aligned Workstream Allocation** ([`docs/SWARM_VISION_AND_ROADMAP.md:78-85`](docs/SWARM_VISION_AND_ROADMAP.md)):
    - Heavy compilation & memory-intensive workloads $\longrightarrow$ Desktop Anchor or high-core Ryzen APU.
    - PyTorch, CUDA, tensor models, and local LLM offloads $\longrightarrow$ `@laptop` (NVIDIA RTX 3050 CUDA).
    - Handheld UX, Vulkan/RADV testing, and lightweight jobs $\longrightarrow$ `@steamdeck` / `@rog-ally`.
@@ -165,7 +165,7 @@ knot_swarm_topology()
 ```
 
 ### 3.3 Handheld Display Allocation (Steam Deck / ROG Ally)
-Handheld screens (`eDP-1`) provide ideal non-intrusive monitoring surfaces while the operator is away from the workstation ([`docs/SWARM_OPERATIONS.md:178-181`](file:///home/kuasha/Dev/knot-mesh/docs/SWARM_OPERATIONS.md)):
+Handheld screens (`eDP-1`) provide ideal non-intrusive monitoring surfaces while the operator is away from the workstation ([`docs/SWARM_OPERATIONS.md:178-181`](docs/SWARM_OPERATIONS.md)):
 - **Live Compact Quota Visualizer**: Runs `knot quota live --compact` (specifically engineered for $\le 80$ columns).
 - **Live Council Message Board**: Runs `knot council board --compact` or `knot chat read` to display real-time strand communication.
 
@@ -193,7 +193,7 @@ To launch a decoupled cockpit on a worker display without blocking the SSH chann
 # Launch decoupled council cockpit on worker display (e.g. laptop)
 knot exec laptop "nohup env WAYLAND_DISPLAY=wayland-0 kitty -o allow_remote_control=yes --listen-on unix:/tmp/kitty-council-${RUN_ID}.sock </dev/null >/dev/null 2>&1 &"
 ```
-Instead of manual SSH cloning, the Orchestrator provisions isolated worktrees across nodes using Knot's native GitOps module ([`core/gitops.sh:260`](file:///home/kuasha/Dev/knot-mesh/core/gitops.sh) and [`docs/CLI_REFERENCE.md:589`](file:///home/kuasha/Dev/knot-mesh/docs/CLI_REFERENCE.md)):
+Instead of manual SSH cloning, the Orchestrator provisions isolated worktrees across nodes using Knot's native GitOps module ([`core/gitops.sh:260`](core/gitops.sh) and [`docs/CLI_REFERENCE.md:589`](docs/CLI_REFERENCE.md)):
 
 ```bash
 # Provision isolated git worktree across target worker nodes without duplicate clones
@@ -204,7 +204,7 @@ knot worktree list
 ```
 
 ### 4.3 Staged Prompt Delivery via `knot council steer`
-The Orchestrator dispatches prompts using `knot council steer` ([`core/modules/council.sh:430-520`](file:///home/kuasha/Dev/knot-mesh/core/modules/council.sh)), which natively handles stdin piping, target socket routing, and return key buffer submission:
+The Orchestrator dispatches prompts using `knot council steer` ([`core/modules/council.sh:430-520`](core/modules/council.sh)), which natively handles stdin piping, target socket routing, and return key buffer submission:
 
 ```bash
 # Step 1: Stage prompt markdown file on disk
@@ -261,7 +261,7 @@ $$\text{Activity Urgency} \quad \Longrightarrow \quad \Delta t_{\text{cadence}}$
 ```
 
 ### 5.1 Wayland Multi-Screen Captures via Spectacle
-Capture raw screen state across physical nodes headlessly matching Knot Hub's screenshot engine ([`core/hub/hub.py:395-431`](file:///home/kuasha/Dev/knot-mesh/core/hub/hub.py)):
+Capture raw screen state across physical nodes headlessly matching Knot Hub's screenshot engine ([`core/hub/hub.py:395-431`](core/hub/hub.py)):
 
 ```bash
 # Capture remote worker screen (e.g. laptop) without waking physical monitor backlights
@@ -365,7 +365,7 @@ Immediately after merging a PR into `main`, the Orchestrator executes a swarm-wi
 
 ```bash
 # Fleet-wide eager sync across all online physical nodes (docs/CLI_REFERENCE.md:209)
-knot exec --all "cd /home/kuasha/Dev/knot-mesh && git checkout main && git pull origin main"
+knot exec --all "cd \"\$HOME/Dev/knot-mesh\" && git checkout main && git pull origin main"
 ```
 
 This guarantees zero branch divergence or merge collisions when downstream tasks branch from `main`.
@@ -475,7 +475,7 @@ The ledger must adhere strictly to the following pinned structure:
 
 ## 9. 4-Stage Crash, Power Loss & Quota Recovery
 
-During multi-day campaigns, unforeseen power dropouts, node reboots, or network partitions will occur. The Orchestrator follows a rigorous **4-Stage Swarm Reconciliation & Recovery Sequence** leveraging Knot's self-healing modules ([`docs/SWARM_OPERATIONS.md:186-242`](file:///home/kuasha/Dev/knot-mesh/docs/SWARM_OPERATIONS.md)):
+During multi-day campaigns, unforeseen power dropouts, node reboots, or network partitions will occur. The Orchestrator follows a rigorous **4-Stage Swarm Reconciliation & Recovery Sequence** leveraging Knot's self-healing modules ([`docs/SWARM_OPERATIONS.md:186-242`](docs/SWARM_OPERATIONS.md)):
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -507,7 +507,7 @@ knot sync --all
 knot status
 
 # Stage 2: Inspect recovered strand worktree
-knot exec laptop "cd /home/kuasha/Dev/knot-mesh && git status && git log -1 --stat"
+knot exec laptop "cd \"\$HOME/Dev/knot-mesh\" && git status && git log -1 --stat"
 
 # Stage 3: Resume council session (docs/CLI_REFERENCE.md:393)
 knot council resume "$RUN_ID"
@@ -562,7 +562,7 @@ Track campaign lifecycle using this comprehensive checklist:
 ## 11. Canonical Documentation References
 
 For in-depth operational mechanics, refer to the authoritative manuals in the repository:
-- **CLI Reference Guide**: [`docs/CLI_REFERENCE.md`](file:///home/kuasha/Dev/knot-mesh/docs/CLI_REFERENCE.md) — Comprehensive documentation of all Tier 0 to Tier 3 subcommands (`knot sleep`, `knot quota`, `knot auth`, `knot worktree`, `knot screen`, `knot council`).
-- **Fleet Operations Manual**: [`docs/SWARM_OPERATIONS.md`](file:///home/kuasha/Dev/knot-mesh/docs/SWARM_OPERATIONS.md) — Declarative swarm architecture, network roaming guards, PAM sudo gates, multi-tenant profile sandboxing (`knot auth`), and full-mesh KDE Connect clipboard synchronization.
-- **Vision & Roadmap**: [`docs/SWARM_VISION_AND_ROADMAP.md`](file:///home/kuasha/Dev/knot-mesh/docs/SWARM_VISION_AND_ROADMAP.md) — Architectural roadmap covering decoupled cockpits (Knot Kommand Kafe), subscription-native multi-agent coordination, and hardware plane routing.
-- **Engineering Governance**: [`AGENTS.md`](file:///home/kuasha/Dev/knot-mesh/AGENTS.md) — PSL Gold Standard, 5 Ground Rules of Engineering Integrity, and Leased Autonomy Contracts.
+- **CLI Reference Guide**: [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) — Comprehensive documentation of all Tier 0 to Tier 3 subcommands (`knot sleep`, `knot quota`, `knot auth`, `knot worktree`, `knot screen`, `knot council`).
+- **Fleet Operations Manual**: [`docs/SWARM_OPERATIONS.md`](docs/SWARM_OPERATIONS.md) — Declarative swarm architecture, network roaming guards, PAM sudo gates, multi-tenant profile sandboxing (`knot auth`), and full-mesh KDE Connect clipboard synchronization.
+- **Vision & Roadmap**: [`docs/SWARM_VISION_AND_ROADMAP.md`](docs/SWARM_VISION_AND_ROADMAP.md) — Architectural roadmap covering decoupled cockpits (Knot Kommand Kafe), subscription-native multi-agent coordination, and hardware plane routing.
+- **Engineering Governance**: [`AGENTS.md`](AGENTS.md) — PSL Gold Standard, 5 Ground Rules of Engineering Integrity, and Leased Autonomy Contracts.

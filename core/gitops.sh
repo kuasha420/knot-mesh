@@ -163,44 +163,116 @@ gitops_worktree_add() {
     return 1
   fi
 
+  local no_psl_link=0
+  if [ "${5:-0}" = "1" ] || [ "${5:-}" = "--no-psl-link" ] || [ "${4:-}" = "--no-psl-link" ] || [ "${3:-}" = "--no-psl-link" ]; then
+    no_psl_link=1
+    if [ "${3:-}" = "--no-psl-link" ]; then
+      branch=""
+    fi
+    if [ "${4:-}" = "--no-psl-link" ]; then
+      base_ref="HEAD"
+    fi
+  fi
+
   # Check if worktree already registered
+  local already_exists=0
   local existing_list
   if existing_list="$(git -C "$toplevel" worktree list --porcelain 2>&1)"; then
     if echo "$existing_list" | grep -q "worktree $wt_path"; then
-      knot_log_ok "Git worktree already provisioned at $wt_path (shared clone)."
-      echo "$wt_path"
-      return 0
+      already_exists=1
     fi
   fi
 
-  mkdir -p "$(dirname "$wt_path")"
+  if [ "$already_exists" -eq 0 ]; then
+    mkdir -p "$(dirname "$wt_path")"
 
-  # Branch existence check
-  local branch_exists=0
-  local b_check=""
-  if b_check="$(git -C "$toplevel" rev-parse --verify "refs/heads/$branch" 2>&1)"; then
-    branch_exists=1
-  elif b_check="$(git -C "$toplevel" rev-parse --verify "$branch" 2>&1)"; then
-    branch_exists=1
-  fi
+    # Branch existence check
+    local branch_exists=0
+    local b_check=""
+    if b_check="$(git -C "$toplevel" rev-parse --verify "refs/heads/$branch" 2>&1)"; then
+      branch_exists=1
+    elif b_check="$(git -C "$toplevel" rev-parse --verify "$branch" 2>&1)"; then
+      branch_exists=1
+    fi
 
-  local add_out=""
-  if [ "$branch_exists" -eq 1 ]; then
-    if ! add_out="$(git -C "$toplevel" worktree add "$wt_path" "$branch" 2>&1)"; then
-      knot_log_err "Failed to add git worktree: $add_out"
-      return 1
+    local add_out=""
+    if [ "$branch_exists" -eq 1 ]; then
+      if ! add_out="$(git -C "$toplevel" worktree add "$wt_path" "$branch" 2>&1)"; then
+        knot_log_err "Failed to add git worktree: $add_out"
+        return 1
+      fi
+    else
+      if ! add_out="$(git -C "$toplevel" worktree add -b "$branch" "$wt_path" "$base_ref" 2>&1)"; then
+        knot_log_err "Failed to add git worktree: $add_out"
+        return 1
+      fi
+    fi
+
+    if [ -f "$wt_path/.git" ]; then
+      knot_log_ok "Provisioned git worktree at $wt_path (branch: $branch, shared storage zero-clone)."
+    else
+      knot_log_warn "Worktree provisioned at $wt_path."
     fi
   else
-    if ! add_out="$(git -C "$toplevel" worktree add -b "$branch" "$wt_path" "$base_ref" 2>&1)"; then
-      knot_log_err "Failed to add git worktree: $add_out"
-      return 1
+    knot_log_ok "Git worktree already provisioned at $wt_path (shared clone)."
+  fi
+
+  # Configure .git/info/exclude in common gitdir and worktree gitdir (Issue #69)
+  local common_gitdir=""
+  if common_gitdir="$(git -C "$wt_path" rev-parse --git-common-dir 2>&1)"; then
+    if [[ "$common_gitdir" != /* ]]; then
+      common_gitdir="$(cd "$wt_path" && cd "$common_gitdir" && pwd)"
     fi
   fi
 
-  if [ -f "$wt_path/.git" ]; then
-    knot_log_ok "Provisioned git worktree at $wt_path (branch: $branch, shared storage zero-clone)."
-  else
-    knot_log_warn "Worktree provisioned at $wt_path."
+  local wt_gitdir=""
+  if wt_gitdir="$(git -C "$wt_path" rev-parse --git-dir 2>&1)"; then
+    if [[ "$wt_gitdir" != /* ]]; then
+      wt_gitdir="$(cd "$wt_path" && cd "$wt_gitdir" && pwd)"
+    fi
+  fi
+
+  local exclude_targets=()
+  if [ -n "$common_gitdir" ] && [ -d "$common_gitdir" ]; then
+    exclude_targets+=("$common_gitdir/info/exclude")
+  fi
+  if [ -n "$wt_gitdir" ] && [ -d "$wt_gitdir" ] && [ "$wt_gitdir" != "$common_gitdir" ]; then
+    exclude_targets+=("$wt_gitdir/info/exclude")
+  fi
+
+  local psl_excludes=(
+    ".agents"
+    ".agents/"
+    ".psl"
+    ".psl/"
+    ".gemini"
+    ".gemini/"
+    ".cache"
+    ".cache/"
+    "scratch"
+    "scratch/"
+  )
+
+  for ex_target in "${exclude_targets[@]}"; do
+    mkdir -p "$(dirname "$ex_target")"
+    [ -f "$ex_target" ] || touch "$ex_target"
+    for pat in "${psl_excludes[@]}"; do
+      if ! grep -qxF "$pat" "$ex_target"; then
+        echo "$pat" >> "$ex_target"
+      fi
+    done
+  done
+
+  # Link PSL project configurations into new worktree (Issue #69)
+  if [ "$no_psl_link" -eq 0 ]; then
+    if [ -d "$toplevel/.agents" ] && [ ! -e "$wt_path/.agents" ] && [ ! -L "$wt_path/.agents" ]; then
+      ln -s "$toplevel/.agents" "$wt_path/.agents"
+      knot_log_ok "Linked PSL .agents/ into $wt_path."
+    fi
+    if [ -d "$toplevel/.psl" ] && [ ! -e "$wt_path/.psl" ] && [ ! -L "$wt_path/.psl" ]; then
+      ln -s "$toplevel/.psl" "$wt_path/.psl"
+      knot_log_ok "Linked PSL .psl/ into $wt_path."
+    fi
   fi
 
   echo "$wt_path"
@@ -211,7 +283,11 @@ gitops_worktree_add() {
 gitops_worktree_remove() {
   local repo_input="$1"
   local wt_name_or_path="$2"
-  local force="${3:-0}"
+  local force_arg="${3:-0}"
+  local force=0
+  if [ "$force_arg" = "1" ] || [ "$force_arg" = "--force" ] || [ "$force_arg" = "-f" ]; then
+    force=1
+  fi
 
   local toplevel
   if ! toplevel="$(gitops_find_repo "$repo_input")"; then
@@ -263,6 +339,14 @@ gitops_provision_worktree_mesh() {
   local branch="${3:-$wt_name}"
   local nodes_arg="${4:-}"
   local base_ref="${5:-HEAD}"
+  local no_psl_link_arg="${6:-0}"
+  local no_psl_link=0
+  if [ "$base_ref" = "--no-psl-link" ] || [ "$no_psl_link_arg" = "1" ] || [ "$no_psl_link_arg" = "--no-psl-link" ]; then
+    if [ "$base_ref" = "--no-psl-link" ]; then
+      base_ref="HEAD"
+    fi
+    no_psl_link=1
+  fi
 
   local nodes=()
   if [ -z "$nodes_arg" ] || [ "$nodes_arg" = "--all" ]; then
@@ -300,9 +384,12 @@ gitops_provision_worktree_mesh() {
         knot_log_err "Base clone for '$repo_name' not found on local node ($node)!"
         continue
       fi
-      gitops_worktree_add "$local_repo" "$wt_name" "$branch" "$base_ref"
+      gitops_worktree_add "$local_repo" "$wt_name" "$branch" "$base_ref" "$no_psl_link"
     else
       local remote_cmd="knot worktree add \"$repo_name\" \"$wt_name\" --branch \"$branch\" --base \"$base_ref\""
+      if [ "$no_psl_link" -eq 1 ]; then
+        remote_cmd="$remote_cmd --no-psl-link"
+      fi
       if ! knot exec "$node" "$remote_cmd"; then
         knot_log_warn "Failed to provision worktree on $node"
       fi

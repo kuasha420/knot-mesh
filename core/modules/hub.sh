@@ -86,6 +86,10 @@ EOF
 }
 
 cmd_hub() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot hub <start|stop|restart|status|logs>"
+    return 0
+  fi
   local action="${1:-status}"
   if [ $# -gt 0 ]; then shift; fi
 
@@ -131,14 +135,22 @@ cmd_hub() {
     logs)
       journalctl --user -u knot-hub.service -n 50 -f
       ;;
-    *)
+    -h|--help)
       echo "Usage: knot hub <start|stop|restart|status|logs>"
-      exit 1
+      return 0
+      ;;
+    *)
+      echo "Usage: knot hub <start|stop|restart|status|logs>" >&2
+      return 1
       ;;
   esac
 }
 
 cmd_agent() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot agent <start|stop|restart|status|logs>"
+    return 0
+  fi
   local action="${1:-status}"
   if [ $# -gt 0 ]; then shift; fi
 
@@ -169,14 +181,22 @@ cmd_agent() {
     logs)
       journalctl --user -u knot-agent.service -n 50 -f
       ;;
-    *)
+    -h|--help)
       echo "Usage: knot agent <start|stop|restart|status|logs>"
-      exit 1
+      return 0
+      ;;
+    *)
+      echo "Usage: knot agent <start|stop|restart|status|logs>" >&2
+      return 1
       ;;
   esac
 }
 
 cmd_task() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot task <post|list|batch|get|wait|watch>"
+    return 0
+  fi
   local action="${1:-list}"
   if [ $# -gt 0 ]; then shift; fi
 
@@ -397,14 +417,22 @@ cmd_task() {
       done
       ;;
 
-    *)
+    -h|--help)
       echo "Usage: knot task <post|list|batch|get|wait|watch>"
-      exit 1
+      return 0
+      ;;
+    *)
+      echo "Usage: knot task <post|list|batch|get|wait|watch>" >&2
+      return 1
       ;;
   esac
 }
 
 cmd_project() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot project <list|get|sync|worktree>"
+    return 0
+  fi
   local action="${1:-list}"
   if [ $# -gt 0 ]; then shift; fi
   local hub_url
@@ -456,14 +484,22 @@ cmd_project() {
     worktree)
       cmd_worktree "$@"
       ;;
-    *)
+    -h|--help)
       echo "Usage: knot project <list|get|sync|worktree>"
-      exit 1
+      return 0
+      ;;
+    *)
+      echo "Usage: knot project <list|get|sync|worktree>" >&2
+      return 1
       ;;
   esac
 }
 
 cmd_chat() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot chat <channels|create|post|read>"
+    return 0
+  fi
   local action="${1:-read}"
   if [ $# -gt 0 ]; then shift; fi
   local hub_url
@@ -586,14 +622,22 @@ cmd_chat() {
         echo "$resp"
       fi
       ;;
-    *)
+    -h|--help)
       echo "Usage: knot chat <channels|create|post|read>"
-      exit 1
+      return 0
+      ;;
+    *)
+      echo "Usage: knot chat <channels|create|post|read>" >&2
+      return 1
       ;;
   esac
 }
 
 cmd_artifact() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot artifact <list|lock|release>"
+    return 0
+  fi
   local action="${1:-list}"
   if [ $# -gt 0 ]; then shift; fi
   local hub_url
@@ -664,14 +708,22 @@ cmd_artifact() {
         exit 1
       fi
       ;;
-    *)
+    -h|--help)
       echo "Usage: knot artifact <list|lock|release>"
-      exit 1
+      return 0
+      ;;
+    *)
+      echo "Usage: knot artifact <list|lock|release>" >&2
+      return 1
       ;;
   esac
 }
 
 cmd_web() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot kafe [open|desktop|build-desktop|dev|build|install|typecheck]"
+    return 0
+  fi
   local action="${1:-open}"
   if [ $# -gt 0 ]; then shift; fi
 
@@ -754,14 +806,23 @@ cmd_web() {
     typecheck)
       pnpm --dir "$web_dir" typecheck
       ;;
-    *)
+    -h|--help)
       echo "Usage: knot kafe [open|desktop|build-desktop|dev|build|install|typecheck]"
-      exit 1
+      return 0
+      ;;
+    *)
+      echo "Usage: knot kafe [open|desktop|build-desktop|dev|build|install|typecheck]" >&2
+      return 1
       ;;
   esac
 }
 
 cmd_sleep() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot sleep <status|prevent [mins]|allow>"
+    echo "Aliases: knot power <status|prevent [mins]|allow>"
+    return 0
+  fi
   local action="${1:-status}"
   if [ $# -gt 0 ]; then shift; fi
 
@@ -850,10 +911,15 @@ cmd_sleep() {
         return 1
       fi
       ;;
-    *)
+    -h|--help)
       echo "Usage: knot sleep <status|prevent [mins]|allow>"
       echo "Aliases: knot power <status|prevent [mins]|allow>"
-      exit 1
+      return 0
+      ;;
+    *)
+      echo "Usage: knot sleep <status|prevent [mins]|allow>" >&2
+      echo "Aliases: knot power <status|prevent [mins]|allow>" >&2
+      return 1
       ;;
   esac
 }

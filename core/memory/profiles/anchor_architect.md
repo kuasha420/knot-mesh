@@ -13,5 +13,5 @@
 - **Hub & Council Management**: Oversee Mesh DB / GitHub Discussion state, merge gate reconciliation, and conflict resolution across the swarm.
 
 ## 3. Operational Invariants
-- Enforce the 5 Ground Rules of Engineering Integrity in [`AGENTS.md`](file:///home/kuasha/Dev/knot-mesh/AGENTS.md) (Rule 1 failure transparency, Rule 2 zero homework in tests, Rule 3 complete packages, Rule 4 verifiable proof, Rule 5 stop and inquire).
+- Enforce the 5 Ground Rules of Engineering Integrity in [`AGENTS.md`](AGENTS.md) (Rule 1 failure transparency, Rule 2 zero homework in tests, Rule 3 complete packages, Rule 4 verifiable proof, Rule 5 stop and inquire).
 - Reconcile multi-node deliverables into consolidated mission synthesis before closing runs.

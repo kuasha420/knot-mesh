@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 script_dir = os.path.dirname(os.path.realpath(__file__))
 knot_root = os.path.realpath(os.environ.get("KNOT_ROOT", os.path.join(script_dir, "../../../..")))
@@ -237,6 +238,7 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
                     ps.write('done\n')
                     ps.write('exec bash\n')
                 else:
+                    agy_flags = "--dangerously-skip-permissions -c" if resume else "--dangerously-skip-permissions"
                     remote_cmd = (
                         f"trap '' HUP; "
                         f"export KNOT_NODE_ID='{node}' KNOT_COUNCIL_RUN_ID='{run_id}' KNOT_COUNCIL_DB='mesh' KNOT_PROJECT='{project_name}' KNOT_PEERS='{','.join(nodes)}' PATH=\"\\$HOME/.local/bin:/usr/local/bin:/usr/bin:\\$PATH\"; "
@@ -248,7 +250,7 @@ def generate_session_conf(run_id, nodes, missions_dir, knot_root, project_name="
                         f"echo -e '\\033[1;36m║\\033[0m  Mode:      \\033[32m{mode_label}\\033[0m'; "
                         f"echo -e '\\033[1;36m║\\033[0m  Commands:  \\033[32mknot council reply\\033[0m | \\033[32mknot council status\\033[0m'; "
                         f"echo -e '\\033[1;36m╚══════════════════════════════════════════════════════════════════════╝\\033[0m'; "
-                        f"echo ''; exec agy --project \\\"{project_name}\\\" --dangerously-skip-permissions -c"
+                        f'echo ""; exec agy --project "{project_name}" {agy_flags}'
                     )
                     ps.write('while true; do\n')
                     ps.write(f'  "{knot_bin}" exec -tt {node} "{remote_cmd}"\n')
@@ -369,7 +371,7 @@ def main():
         env = os.environ.copy()
         env.setdefault("DISPLAY", ":0")
         env.setdefault("WAYLAND_DISPLAY", "wayland-0")
-        subprocess.Popen(
+        proc = subprocess.Popen(
             [
                 "kitty",
                 "--start-as=fullscreen",
@@ -388,6 +390,35 @@ def main():
             stderr=subprocess.DEVNULL,
             start_new_session=True
         )
+
+        # Synchronously validate socket creation and process liveness (up to 3 seconds)
+        sock_ready = False
+        start_wait = time.time()
+        while time.time() - start_wait < 3.0:
+            if proc.poll() is not None:
+                # Process exited prematurely
+                break
+            if os.path.exists(socket_path):
+                sock_ready = True
+                break
+            time.sleep(0.1)
+
+        if not sock_ready:
+            exit_code = proc.poll()
+            log_details = ""
+            conf_log = os.path.join(missions_dir, "confluence.log")
+            if os.path.exists(conf_log):
+                try:
+                    with open(conf_log, "r", errors="replace") as f:
+                        log_details = f.read().strip()
+                except Exception as _log_err:
+                    sys.stderr.write(f"Notice: [confluence] Could not read log: {_log_err}\n")
+            err_msg = f"Error: Kitty Confluence cockpit failed to initialize (Process exit: {exit_code}, Socket: {socket_path})\n"
+            if log_details:
+                err_msg += f"Log excerpt:\n{log_details}\n"
+            sys.stderr.write(err_msg)
+            sys.exit(1 if exit_code is None or exit_code == 0 else exit_code)
+
         print(f"Launched fullscreen Kitty Confluence cockpit (Socket: {socket_path}).")
 
 

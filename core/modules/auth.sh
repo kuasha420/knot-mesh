@@ -96,6 +96,10 @@ auth_link_upstream_token() {
 # Switch active profile atomically using symlink swap
 auth_switch() {
   local alias="${1:-}"
+  if [ "$alias" = "-h" ] || [ "$alias" = "--help" ]; then
+    echo "Usage: knot auth switch <profile-alias>"
+    return 0
+  fi
   if [ -z "$alias" ]; then
     knot_log_err "Usage: knot auth switch <profile-alias>"
     return 1
@@ -169,11 +173,19 @@ auth_switch() {
 
 # List all local profiles in the sandbox
 auth_list() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot auth list"
+    return 0
+  fi
   auth_ensure_dirs
   local active_alias=""
-  local active_symlink="$KNOT_AUTH_DIR/active_profile"
-  if [ -L "$active_symlink" ]; then
-    active_alias="$(basename "$(readlink -f "$active_symlink")")"
+  if [ -n "${KNOT_AUTH_PROFILE:-}" ]; then
+    active_alias="$KNOT_AUTH_PROFILE"
+  else
+    local active_symlink="$KNOT_AUTH_DIR/active_profile"
+    if [ -L "$active_symlink" ]; then
+      active_alias="$(basename "$(readlink -f "$active_symlink")")"
+    fi
   fi
 
   echo -e "${C_BOLD}--- Knot Local Authentication Profiles ---${C_RESET}"
@@ -216,6 +228,10 @@ auth_list() {
 
 # Inspect active authentication status and return JSON or human-readable format
 auth_status() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot auth status [--json]"
+    return 0
+  fi
   local json_mode=0
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -226,9 +242,13 @@ auth_status() {
 
   auth_ensure_dirs
   local active_alias=""
-  local active_symlink="$KNOT_AUTH_DIR/active_profile"
-  if [ -L "$active_symlink" ]; then
-    active_alias="$(basename "$(readlink -f "$active_symlink")")"
+  if [ -n "${KNOT_AUTH_PROFILE:-}" ]; then
+    active_alias="$KNOT_AUTH_PROFILE"
+  else
+    local active_symlink="$KNOT_AUTH_DIR/active_profile"
+    if [ -L "$active_symlink" ]; then
+      active_alias="$(basename "$(readlink -f "$active_symlink")")"
+    fi
   fi
 
   local email="null"
@@ -631,8 +651,12 @@ META_EOF
 # Remove a local profile from the sandbox
 auth_remove() {
   local alias="${1:-}"
-  if [ -z "$alias" ] || [ "$alias" = "-h" ] || [ "$alias" = "--help" ]; then
+  if [ "$alias" = "-h" ] || [ "$alias" = "--help" ]; then
     echo "Usage: knot auth remove <profile-alias>"
+    return 0
+  fi
+  if [ -z "$alias" ]; then
+    knot_log_err "Usage: knot auth remove <profile-alias>"
     return 1
   fi
 
@@ -643,18 +667,39 @@ auth_remove() {
     return 1
   fi
 
-  local active_symlink="$KNOT_AUTH_DIR/active_profile"
-  if [ -L "$active_symlink" ]; then
-    local active_target
-    active_target="$(basename "$(readlink -f "$active_symlink")")"
-    if [ "$active_target" = "$alias" ]; then
-      knot_log_err "Cannot remove profile '$alias' because it is currently the active profile. Switch to another profile first."
-      return 1
-    fi
+  local active_target=""
+  if [ -n "${KNOT_AUTH_PROFILE:-}" ]; then
+    active_target="$KNOT_AUTH_PROFILE"
+  elif [ -L "$KNOT_AUTH_DIR/active_profile" ]; then
+    active_target="$(basename "$(readlink -f "$KNOT_AUTH_DIR/active_profile")")"
+  fi
+  if [ "$active_target" = "$alias" ]; then
+    knot_log_err "Cannot remove profile '$alias' because it is currently the active profile. Switch to another profile first."
+    return 1
   fi
 
   rm -rf "$profile_dir"
   knot_log_ok "Profile '$alias' removed."
+}
+
+# Returns path to active OAuth token file, prioritizing KNOT_AUTH_PROFILE override
+auth_token_file() {
+  local alias=""
+  if [ -n "${KNOT_AUTH_PROFILE:-}" ]; then
+    alias="$KNOT_AUTH_PROFILE"
+  elif [ -L "$KNOT_AUTH_DIR/active_profile" ]; then
+    alias="$(basename "$(readlink -f "$KNOT_AUTH_DIR/active_profile")")"
+  fi
+  if [ -n "$alias" ] && [ -f "$KNOT_AUTH_DIR/profiles/$alias/oauth-token.json" ]; then
+    echo "$KNOT_AUTH_DIR/profiles/$alias/oauth-token.json"
+    return 0
+  fi
+  if [ -f "$UPSTREAM_CLI_TOKEN_FILE" ]; then
+    echo "$UPSTREAM_CLI_TOKEN_FILE"
+    return 0
+  fi
+  knot_log_err "No active authentication token found."
+  return 1
 }
 
 # Check if a target node refers to the local machine
@@ -1052,6 +1097,9 @@ cmd_auth() {
         auth_status "$@"
       fi
       ;;
+    token|token-path)
+      auth_token_file
+      ;;
     switch)
       auth_switch "$@"
       ;;
@@ -1093,6 +1141,11 @@ cmd_auth() {
       return 0
       ;;
     *)
+      if [[ "$sub" == -* ]]; then
+        echo "Error: Unknown auth action or option '$sub'" >&2
+        echo "Run 'knot auth --help' for usage." >&2
+        return 1
+      fi
       antigravity_swarm_auth "$sub" "$@"
       ;;
   esac

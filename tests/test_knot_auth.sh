@@ -236,13 +236,76 @@ echo "  [PASS] knot auth status --all schema and table output verified."
 # ------------------------------------------------------------------------------
 # Test 11: Fleet Profile List Sweep (--all)
 # ------------------------------------------------------------------------------
-echo "--- [11/11] Testing fleet profile list sweep (knot auth list --all) ---"
+echo "--- [11/13] Testing fleet profile list sweep (knot auth list --all) ---"
 all_list_out="$(knot auth list --all)"
 echo "$all_list_out" | grep -q "==="
 echo "$all_list_out" | grep -q "alpha"
 echo "  [PASS] knot auth list --all multi-node output verified."
 
+# ------------------------------------------------------------------------------
+# Test 12: Mission-Scoped Profile Stickiness (KNOT_AUTH_PROFILE - Issue #76)
+# ------------------------------------------------------------------------------
+echo "--- [12/13] Testing mission-scoped profile stickiness (KNOT_AUTH_PROFILE) ---"
+synth_token_gamma="$TEST_SANDBOX/token_gamma.json"
+create_synthetic_token "$synth_token_gamma" "gamma@mission.org" "tok_gamma_999"
+knot auth import gamma "$synth_token_gamma" >/dev/null
+
+# Re-activate alpha globally
+knot auth switch alpha >/dev/null
+global_status="$(knot auth status --json)"
+echo "$global_status" | jq -e '.active_profile == "alpha"' >/dev/null
+echo "$global_status" | jq -e '.email == "alpha@work.com"' >/dev/null
+
+# Process with KNOT_AUTH_PROFILE=gamma must resolve to gamma
+gamma_status="$(KNOT_AUTH_PROFILE=gamma knot auth status --json)"
+echo "$gamma_status" | jq -e '.active_profile == "gamma"' >/dev/null
+echo "$gamma_status" | jq -e '.email == "gamma@mission.org"' >/dev/null
+
+# Global active symlink must remain untouched (alpha)
+resolved_active="$(readlink "$KNOT_TEST_AUTH_DIR/active_profile")"
+if [ "$resolved_active" != "profiles/alpha" ]; then
+  echo "Error: KNOT_AUTH_PROFILE mutated global symlink to $resolved_active"
+  exit 1
+fi
+
+# knot auth token must resolve to gamma token when KNOT_AUTH_PROFILE is set
+gamma_token_path="$(KNOT_AUTH_PROFILE=gamma knot auth token)"
+if [ "$gamma_token_path" != "$KNOT_TEST_AUTH_DIR/profiles/gamma/oauth-token.json" ]; then
+  echo "Error: KNOT_AUTH_PROFILE did not isolate token file path: $gamma_token_path"
+  exit 1
+fi
+
+# Deleting gamma while KNOT_AUTH_PROFILE=gamma must be rejected
+del_gamma_rc=0
+KNOT_AUTH_PROFILE=gamma knot auth remove gamma 2>&1 || del_gamma_rc=$?
+if [ $del_gamma_rc -eq 0 ]; then
+  echo "Error: knot auth remove gamma succeeded while KNOT_AUTH_PROFILE=gamma was active."
+  exit 1
+fi
+echo "  [PASS] Mission-scoped profile stickiness and isolation verified."
+
+# ------------------------------------------------------------------------------
+# Test 13: Mission meta.json Profile Pinning (knot council start --auth-profile)
+# ------------------------------------------------------------------------------
+echo "--- [13/13] Testing council start --auth-profile meta.json pinning ---"
+council_dry="$(knot council start --dry-run --db mesh --auth-profile gamma 2>&1)"
+echo "$council_dry" | grep -q "Dry run completed successfully"
+run_id="$(echo "$council_dry" | grep -o 'run_[0-9_]*[a-zA-Z0-9]*' | head -n1)"
+
+if [ -z "$run_id" ] || [ ! -f "$HOME/.config/knot/missions/$run_id/meta.json" ]; then
+  echo "Error: Failed to find mission meta.json for run_id: '$run_id'"
+  exit 1
+fi
+pinned_prof="$(jq -r '.auth_profile // empty' "$HOME/.config/knot/missions/$run_id/meta.json")"
+if [ "$pinned_prof" != "gamma" ]; then
+  echo "Error: Expected meta.json auth_profile to be 'gamma', got '$pinned_prof'"
+  rm -rf "$HOME/.config/knot/missions/$run_id"
+  exit 1
+fi
+rm -rf "$HOME/.config/knot/missions/$run_id"
+echo "  [PASS] Council mission auth_profile pinning verified."
+
 echo "================================================================================"
-echo ">>> All 11 Issue #60 Auth Sandboxing & Multi-Node Tests Passed 100% Green!"
+echo ">>> All 13 Issue #60 & #76 Auth Sandboxing & Stickiness Tests Passed 100% Green!"
 echo "================================================================================"
 

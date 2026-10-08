@@ -4,6 +4,10 @@ set -euo pipefail
 # Knot - Multi-Screen Topology & Visual Spatial Reasoning Module
 
 topology_show() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot topology show"
+    return 0
+  fi
   local active_swarm
   active_swarm="$(knot_get_active_swarm)"
   local user_home
@@ -114,6 +118,10 @@ for src, dirs in layout.items():
 }
 
 topology_refresh() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot topology refresh --photo <img.jpg> [--mode auto|swarm|offline] [--apply]"
+    return 0
+  fi
   local photo_path=""
   local mode="auto"
   local apply_layout=0
@@ -260,6 +268,10 @@ print('Updated ' + '$topo_file')
 }
 
 topology_align_internal() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot topology align-internal"
+    return 0
+  fi
   local home
   home="$(knot_detect_user_home)"
   local active_swarm
@@ -315,6 +327,10 @@ with open('$target_mf', 'w') as f:
 }
 
 topology_identify() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot topology identify [--all] [--bg white|black|neon] [--duration <sec>]"
+    return 0
+  fi
   local bg="white"
   local duration="15"
   local broadcast_all=0
@@ -474,17 +490,20 @@ cmd_topology() {
     identify|calibrate|flash)
       topology_identify "$@"
       ;;
-    guide|help)
+    -h|--help|guide|help)
       topology_guide
+      return 0
       ;;
     *)
-      echo -e "${C_BOLD}Knot Topology Management${C_RESET}"
-      echo "Usage:"
-      echo "  knot topology show                  Show current 2D screen spatial layout"
-      echo "  knot topology refresh --photo <img.jpg> [--mode auto|swarm|offline] [--apply]"
-      echo "  knot topology align-internal        Align multi-display outputs (e.g. ROG Ally eDP-1)"
-      echo "  knot topology identify [--all]      Flash high-contrast display identification overlay"
-      echo "  knot topology guide                 Print photography & alignment best practices"
+      echo "Error: Unknown topology subcommand '$sub'" >&2
+      echo -e "${C_BOLD}Knot Topology Management${C_RESET}" >&2
+      echo "Usage:" >&2
+      echo "  knot topology show                  Show current 2D screen spatial layout" >&2
+      echo "  knot topology refresh --photo <img.jpg> [--mode auto|swarm|offline] [--apply]" >&2
+      echo "  knot topology align-internal        Align multi-display outputs (e.g. ROG Ally eDP-1)" >&2
+      echo "  knot topology identify [--all]      Flash high-contrast display identification overlay" >&2
+      echo "  knot topology guide                 Print photography & alignment best practices" >&2
+      return 1
       ;;
   esac
 }

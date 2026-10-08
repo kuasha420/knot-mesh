@@ -186,6 +186,10 @@ screen_status_raw() {
 
 screen_status() {
   local target="${1:-local}"
+  if [ "$target" = "-h" ] || [ "$target" = "--help" ]; then
+    echo "Usage: knot screen status [node|--all|local]"
+    return 0
+  fi
 
   if [ "$target" = "--all" ]; then
     echo -e "${C_BOLD}--- Knot Screen & Lock Status ---${C_RESET}"
@@ -266,6 +270,10 @@ screen_status() {
 
 screen_unlock() {
   local target="${1:-local}"
+  if [ "$target" = "-h" ] || [ "$target" = "--help" ]; then
+    echo "Usage: knot screen unlock [node|--all|local]"
+    return 0
+  fi
   if [ "$target" = "--all" ]; then
     local my_host
     my_host="$(knot_detect_hostname)"
@@ -311,6 +319,10 @@ screen_unlock() {
 
 screen_lock() {
   local target="${1:-local}"
+  if [ "$target" = "-h" ] || [ "$target" = "--help" ]; then
+    echo "Usage: knot screen lock [node|--all|local]"
+    return 0
+  fi
   if [ "$target" = "--all" ]; then
     local my_host
     my_host="$(knot_detect_hostname)"
@@ -356,6 +368,10 @@ screen_lock() {
 
 screen_login() {
   local target="${1:-local}"
+  if [ "$target" = "-h" ] || [ "$target" = "--help" ]; then
+    echo "Usage: knot screen login [node|--all|local]"
+    return 0
+  fi
   source "$KNOT_ROOT/core/modules/autologin.sh"
 
   if [ "$target" = "--all" ]; then

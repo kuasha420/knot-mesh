@@ -28,6 +28,10 @@ source "$KNOT_ROOT/core/modules/council.sh"
 
 cmd_onboard() {
   local node_id="${1:-}"
+  if [ "$node_id" = "-h" ] || [ "$node_id" = "--help" ]; then
+    echo "Usage: knot onboard [node_id]"
+    return 0
+  fi
   if [ -z "$node_id" ]; then
     local default_host
     default_host="$(knot_detect_hostname)"
@@ -313,6 +317,11 @@ cmd_resolve() {
 }
 
 cmd_status() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot status"
+    echo "Show live status of all mesh nodes."
+    return 0
+  fi
   local active_swarm
   active_swarm="$(knot_get_active_swarm)"
   echo -e "${C_BOLD}--- Knot Mesh Status (${active_swarm:-standalone}) ---${C_RESET}"
@@ -408,6 +417,10 @@ cmd_status() {
 
 
 cmd_exec() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot exec [-t] <node_id|--all> <command>"
+    return 0
+  fi
   local tty_opts=()
   while [ "${1:-}" = "-t" ] || [ "${1:-}" = "-tt" ]; do
     tty_opts=("$1")
@@ -526,6 +539,10 @@ cmd_exec() {
 }
 
 cmd_kvm() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot kvm <restart|status|lock|unlock|lock-toggle>"
+    return 0
+  fi
   local action="${1:-status}"
   [ $# -gt 0 ] && shift
 
@@ -638,8 +655,13 @@ cmd_kvm() {
       knot_log_info "KVM Auto-Unlock daemon status across the mesh:"
       cmd_exec --all "systemctl --user show knot-autounlock -p ActiveState,SubState --value | tr '\n' ' '; echo"
       ;;
-    *)
+    -h|--help)
       echo "Usage: knot kvm <restart|status|lock|unlock|lock-toggle>"
+      return 0
+      ;;
+    *)
+      echo "Usage: knot kvm <restart|status|lock|unlock|lock-toggle>" >&2
+      return 1
       ;;
   esac
 }
@@ -666,6 +688,10 @@ cmd_repair() {
 }
 
 cmd_council() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot council <start|resume|status|reply|list|attach|reconcile|steer|challenge|db|board|heal|copy|clean|kill|audit|sync> [options]"
+    return 0
+  fi
   local action="${1:-start}"
   if [ $# -gt 0 ]; then shift; fi
 
@@ -687,8 +713,13 @@ cmd_council() {
     heal) council_heal "$@" ;;
     audit) bash "$KNOT_ROOT/runtime/skills/swarm-council/scripts/audit_tools.sh" "$@" ;;
     sync) bash "$KNOT_ROOT/runtime/skills/swarm-council/scripts/project_sync.sh" "$@" ;;
-    *)
+    -h|--help)
       echo "Usage: knot council <start|resume|status|reply|list|attach|reconcile|steer|challenge|db|board|heal|copy|clean|kill|audit|sync> [options]"
+      return 0
+      ;;
+    *)
+      echo "Usage: knot council <start|resume|status|reply|list|attach|reconcile|steer|challenge|db|board|heal|copy|clean|kill|audit|sync> [options]" >&2
+      return 1
       ;;
   esac
 }
@@ -698,15 +729,23 @@ cmd_color() {
 }
 
 cmd_swarm() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot swarm <status|quota [node|--all]|auth [node|--gui]|color [node]|test [node|--all]|exec <node> \"<prompt>\"|switch <swarm_id>>"
+    return 0
+  fi
   local action="${1:-status}"
   if [ $# -gt 0 ]; then shift; fi
 
   case "$action" in
     switch|use)
       local target_swarm="${1:-}"
+      if [ "$target_swarm" = "-h" ] || [ "$target_swarm" = "--help" ]; then
+        echo "Usage: knot swarm switch <swarm_id>"
+        return 0
+      fi
       if [ -z "$target_swarm" ]; then
         knot_log_err "Usage: knot swarm switch <swarm_id>"
-        exit 1
+        return 1
       fi
 
       local user_home
@@ -798,9 +837,13 @@ cmd_swarm() {
       antigravity_swarm_test "$@"
       ;;
     exec)
+      if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+        echo "Usage: knot swarm exec <node> \"<prompt>\" [extra_flags]"
+        return 0
+      fi
       if [ $# -lt 2 ]; then
         knot_log_err "Usage: knot swarm exec <node> \"<prompt>\" [extra_flags]"
-        exit 1
+        return 1
       fi
       local target="$1"
       local prompt="$2"
@@ -813,15 +856,23 @@ cmd_swarm() {
     color|colors|palette)
       cmd_color "$@"
       ;;
+    -h|--help)
+      echo "Usage: knot swarm <status|quota [node|--all]|auth [node|--gui]|color [node]|test [node|--all]|exec <node> \"<prompt>\"|switch <swarm_id>>"
+      return 0
+      ;;
     *)
-      echo "Usage: knot swarm <status|quota [node|--all]|auth [node|--gui]|color [node]|test [node|--all]|exec <node> \"<prompt>\">"
-      exit 1
+      echo "Usage: knot swarm <status|quota [node|--all]|auth [node|--gui]|color [node]|test [node|--all]|exec <node> \"<prompt>\"|switch <swarm_id>>" >&2
+      return 1
       ;;
   esac
 }
 
 
 cmd_kdeconnect() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot kdeconnect <status [--all]|sync [--all]|pair [<node_id>|--all]|reconcile|vmon <status|start|stop>|share --target <node> [<payload>]|sync-clipboard [--all|<node>]|test-clipboard [--all|<node>]|prune-stale>"
+    return 0
+  fi
   local action="${1:-status}"
   [ $# -gt 0 ] && shift
 
@@ -867,6 +918,10 @@ cmd_kdeconnect() {
       kdeconnect_set_clipboard "$@"
       ;;
     vmon|virtual-monitor)
+      if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+        echo "Usage: knot kdeconnect vmon <status [<node>]|start <node>|stop [<node>]>"
+        return 0
+      fi
       local vmon_action="${1:-status}"
       [ $# -gt 0 ] && shift
       case "$vmon_action" in
@@ -879,19 +934,32 @@ cmd_kdeconnect() {
         stop)
           kdeconnect_vmon_stop "$@"
           ;;
-        *)
+        -h|--help)
           echo "Usage: knot kdeconnect vmon <status [<node>]|start <node>|stop [<node>]>"
-          exit 1
+          return 0
+          ;;
+        *)
+          echo "Usage: knot kdeconnect vmon <status [<node>]|start <node>|stop [<node>]>" >&2
+          return 1
           ;;
       esac
       ;;
-    *)
+    -h|--help)
       echo "Usage: knot kdeconnect <status [--all]|sync [--all]|pair [<node_id>|--all]|reconcile|vmon <status|start|stop>|share --target <node> [<payload>]|sync-clipboard [--all|<node>]|test-clipboard [--all|<node>]|prune-stale>"
+      return 0
+      ;;
+    *)
+      echo "Usage: knot kdeconnect <status [--all]|sync [--all]|pair [<node_id>|--all]|reconcile|vmon <status|start|stop>|share --target <node> [<payload>]|sync-clipboard [--all|<node>]|test-clipboard [--all|<node>]|prune-stale>" >&2
+      return 1
       ;;
   esac
 }
 
 cmd_display() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|toggle-kvm [<node>]>"
+    return 0
+  fi
   local action="${1:-status}"
   [ $# -gt 0 ] && shift
 
@@ -908,14 +976,22 @@ cmd_display() {
     toggle-kvm|kvm-toggle|toggle)
       deskflow_toggle_mute_node "$@"
       ;;
-    *)
+    -h|--help)
       echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|toggle-kvm [<node>]>"
-      exit 1
+      return 0
+      ;;
+    *)
+      echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|toggle-kvm [<node>]>" >&2
+      return 1
       ;;
   esac
 }
 
 cmd_autologin() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot autologin [status|check|doctor|migrate-dm|local|reconcile|purge-stale|configure-timer|fix-kwallet]"
+    return 0
+  fi
   local action="${1:-status}"
   [ $# -gt 0 ] && shift
 
@@ -947,6 +1023,10 @@ cmd_autologin() {
     fix-kwallet|kwallet)
       autologin_fix_kwallet "$@"
       ;;
+    -h|--help)
+      echo "Usage: knot autologin [status|check|doctor|migrate-dm|local|reconcile|purge-stale|configure-timer|fix-kwallet]"
+      return 0
+      ;;
     *)
       autologin_trigger_remote "$action" "$@"
       ;;
@@ -954,6 +1034,10 @@ cmd_autologin() {
 }
 
 cmd_screen() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot screen <status|unlock|lock|login> [node|--all]"
+    return 0
+  fi
   local action="${1:-status}"
   [ $# -gt 0 ] && shift
 
@@ -973,8 +1057,13 @@ cmd_screen() {
     login)
       screen_login "$@"
       ;;
-    *)
+    -h|--help)
       echo "Usage: knot screen <status|unlock|lock|login> [node|--all]"
+      return 0
+      ;;
+    *)
+      echo "Usage: knot screen <status|unlock|lock|login> [node|--all]" >&2
+      return 1
       ;;
   esac
 }
@@ -1082,6 +1171,10 @@ cmd_shutdown() {
 }
 
 cmd_mcp() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot mcp [sync [--all]|test|list]"
+    return 0
+  fi
   local action="${1:-status}"
   [ $# -gt 0 ] && shift
 
@@ -1128,6 +1221,10 @@ tools = gw._handle_tools_list({})['tools']
 for i, t in enumerate(tools, 1):
     print(f'  {i:2d}. {t[\"name\"]:24s} - {t[\"description\"]}')
 "
+      ;;
+    -h|--help)
+      echo "Usage: knot mcp [sync [--all]|test|list]"
+      return 0
       ;;
     *)
       knot_log_err "Usage: knot mcp [sync [--all]|test|list]"
@@ -1689,22 +1786,32 @@ cmd_update() {
 }
 
 cmd_worktree() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot worktree <add|remove|list|normalize|provision> [args]"
+    return 0
+  fi
   local action="${1:-list}"
   if [ $# -gt 0 ]; then shift; fi
 
   case "$action" in
     add)
+      if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+        echo "Usage: knot worktree add <repo_or_project> <worktree_name> [--branch <branch>] [--base <ref>] [--nodes <node1,node2>] [--no-psl-link]"
+        return 0
+      fi
       local repo_name=""
       local wt_name=""
       local branch=""
       local base_ref="HEAD"
       local nodes=""
+      local no_psl_link=0
 
       while [ $# -gt 0 ]; do
         case "$1" in
           --branch|-b) branch="$2"; shift 2 ;;
           --base) base_ref="$2"; shift 2 ;;
           --nodes) nodes="$2"; shift 2 ;;
+          --no-psl-link) no_psl_link=1; shift ;;
           *)
             if [ -z "$repo_name" ]; then
               repo_name="$1"
@@ -1717,22 +1824,26 @@ cmd_worktree() {
       done
 
       if [ -z "$repo_name" ] || [ -z "$wt_name" ]; then
-        knot_log_err "Usage: knot worktree add <repo_or_project> <worktree_name> [--branch <branch>] [--base <ref>] [--nodes <node1,node2>]"
+        knot_log_err "Usage: knot worktree add <repo_or_project> <worktree_name> [--branch <branch>] [--base <ref>] [--nodes <node1,node2>] [--no-psl-link]"
         return 1
       fi
 
       if [ -n "$nodes" ]; then
-        gitops_provision_worktree_mesh "$repo_name" "$wt_name" "$branch" "$nodes" "$base_ref"
+        gitops_provision_worktree_mesh "$repo_name" "$wt_name" "$branch" "$nodes" "$base_ref" "$no_psl_link"
       else
         local repo_dir
         if ! repo_dir="$(gitops_find_repo "$repo_name")"; then
           knot_log_err "Repository or project '$repo_name' not found."
           return 1
         fi
-        gitops_worktree_add "$repo_dir" "$wt_name" "$branch" "$base_ref"
+        gitops_worktree_add "$repo_dir" "$wt_name" "$branch" "$base_ref" "$no_psl_link"
       fi
       ;;
     remove|rm)
+      if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+        echo "Usage: knot worktree remove <repo_or_project> <worktree_name> [--force]"
+        return 0
+      fi
       local repo_name="${1:-}"
       local wt_name="${2:-}"
       local force=0
@@ -1761,6 +1872,10 @@ cmd_worktree() {
       gitops_worktree_remove "$repo_dir" "$wt_name" "$force"
       ;;
     list)
+      if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+        echo "Usage: knot worktree list [repo_or_project]"
+        return 0
+      fi
       local repo_name="${1:-}"
       local repo_dir=""
       if [ -n "$repo_name" ]; then
@@ -1774,6 +1889,10 @@ cmd_worktree() {
       gitops_worktree_list "$repo_dir"
       ;;
     normalize)
+      if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+        echo "Usage: knot worktree normalize <path> [target_home]"
+        return 0
+      fi
       local path_to_norm="${1:-}"
       local target_h="${2:-}"
       if [ -z "$path_to_norm" ]; then
@@ -1783,10 +1902,18 @@ cmd_worktree() {
       knot_path_normalize "$path_to_norm" "$target_h"
       ;;
     provision)
+      if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+        echo "Usage: knot worktree provision <repo_name> <wt_name> <branch> <nodes> [base_ref]"
+        return 0
+      fi
       gitops_provision_worktree_mesh "$@"
       ;;
-    *)
+    -h|--help)
       echo "Usage: knot worktree <add|remove|list|normalize|provision> [args]"
+      return 0
+      ;;
+    *)
+      echo "Usage: knot worktree <add|remove|list|normalize|provision> [args]" >&2
       return 1
       ;;
   esac
@@ -1821,7 +1948,8 @@ case "${1:-}" in
     cmd_resolve "$@"
     ;;
   status)
-    cmd_status
+    shift
+    cmd_status "$@"
     ;;
   exec)
     shift
@@ -1925,7 +2053,10 @@ case "${1:-}" in
     ;;
   restart)
     shift
-    if [ "${1:-}" = "kvm" ] || [ -z "${1:-}" ]; then
+    if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+      echo "Usage: knot restart [kvm]"
+      exit 0
+    elif [ "${1:-}" = "kvm" ] || [ -z "${1:-}" ]; then
       cmd_kvm restart
     else
       knot_log_err "Unknown restart target: $1"
@@ -1944,7 +2075,7 @@ case "${1:-}" in
     shift
     cmd_topology "$@"
     ;;
-  *)
+  -h|--help|help|"")
     echo -e "${C_BOLD}Knot - Multi-Device Mesh Orchestrator${C_RESET}"
     echo "Usage:"
     echo "  knot update [--all|<node_id>] [--dev] Update Knot binaries & core modules (or dev git pull)"
@@ -1978,5 +2109,10 @@ case "${1:-}" in
     echo "  knot kdeconnect <status|sync|pair|reconcile|vmon|share|sync-clipboard|test-clipboard|prune-stale> Manage KDE Connect mesh clipboard & virtual displays"
     echo "  knot display <status|extend|stop> [node_id] Dynamic Wayland virtual display extension (RDP/KRDC)"
     exit 0
+    ;;
+  *)
+    echo "Error: Unknown command '$1'" >&2
+    echo "Run 'knot --help' for usage." >&2
+    exit 1
     ;;
 esac

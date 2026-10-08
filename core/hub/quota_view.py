@@ -189,13 +189,36 @@ def main():
         st_color = green if not is_offline else "\033[1;31m"
         st_badge = f"{st_color}[{status}]{reset}"
 
+        # Resolve profile alias
+        profile_alias = (
+            account.get("profile")
+            or account.get("profile_alias")
+            or account.get("active_profile")
+            or n.get("active_profile")
+            or n.get("profile")
+            or qdata.get("active_profile")
+            or qdata.get("profile")
+        )
+        if not profile_alias:
+            is_local = nid in (os.environ.get("KNOT_NODE_ID"), "local", "localhost", os.uname().nodename)
+            if is_local:
+                profile_alias = os.environ.get("KNOT_AUTH_PROFILE")
+                if not profile_alias:
+                    active_sym = os.path.expanduser("~/.config/knot/auth/active_profile")
+                    if os.path.islink(active_sym):
+                        try:
+                            profile_alias = os.path.basename(os.readlink(active_sym))
+                        except (OSError, ValueError):
+                            profile_alias = None
+
         # Account display string
+        prof_tag = f"{cyan}[profile: {profile_alias}]{reset} " if profile_alias else ""
         if user_name and email != "unlinked":
-            user_display = f"{bold}{user_name}{reset} {dim}<{email}>{reset}"
+            user_display = f"{prof_tag}{bold}{user_name}{reset} {dim}<{email}>{reset}"
         elif email != "unlinked":
-            user_display = f"{dim}<{email}>{reset}"
+            user_display = f"{prof_tag}{dim}<{email}>{reset}"
         else:
-            user_display = f"{yellow}No Google Account Linked{reset}"
+            user_display = f"{prof_tag}{yellow}No Google Account Linked{reset}"
 
         # Header line for node
         print(f"{bullet} {bold}{nid}{reset} {st_badge}  •  {user_display}")

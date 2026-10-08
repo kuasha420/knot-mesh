@@ -231,7 +231,10 @@ if [ -n "$run_id_found" ]; then
   fi
   rm -rf "$HOME/.config/knot/missions/$run_id_found"
   if [ -f "$HOME/.config/knot/hub.db" ]; then
-    sqlite3 "$HOME/.config/knot/hub.db" "DELETE FROM council_messages WHERE run_id='$run_id_found';"
+    has_table="$(sqlite3 "$HOME/.config/knot/hub.db" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='council_messages';")"
+    if [ "$has_table" -gt 0 ]; then
+      sqlite3 "$HOME/.config/knot/hub.db" "DELETE FROM council_messages WHERE run_id='$run_id_found';"
+    fi
   fi
 fi
 echo "PASSED"
@@ -568,5 +571,136 @@ fi
 rm -rf "$tui_stage_dir"
 echo "PASSED"
 
+# 22. Delimiter Flushing & Execution Buffer Verification (Issue #73)
+echo -n "22. Testing council_steer delimiter sanitization and buffer submission... "
+steer_test_run="test_steer_$$"
+steer_missions_dir="$HOME/.config/knot/missions/$steer_test_run"
+mkdir -p "$steer_missions_dir"
+mock_steer_sock="/tmp/kitty_steer_$$.sock"
+python3 -c "import socket; s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.bind('$mock_steer_sock')"
+
+cat <<EOF > "$steer_missions_dir/meta.json"
+{
+  "run_id": "$steer_test_run",
+  "socket": "$mock_steer_sock",
+  "status": "ACTIVE"
+}
+EOF
+
+mock_bin_dir="$steer_missions_dir/bin"
+mkdir -p "$mock_bin_dir"
+mock_steer_log="$steer_missions_dir/steer.log"
+raw_payload_file="$steer_missions_dir/received_payload.bin"
+
+cat <<'EOF' > "$mock_bin_dir/kitty"
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = "@" ]; then
+  shift
+  cmd="${1:-}"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      send-text)
+        cat > "$PAYLOAD_FILE"
+        echo "SEND_TEXT_CALLED" >> "$MOCK_LOG"
+        exit 0
+        ;;
+      send-key)
+        shift
+        key_name=""
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --match) shift 2 ;;
+            *) key_name="$1"; shift ;;
+          esac
+        done
+        echo "KEY: $key_name" >> "$MOCK_LOG"
+        exit 0
+        ;;
+      get-text)
+        echo "BUFFER: prompt processed" >> "$MOCK_LOG"
+        echo "agy> Turn completed"
+        exit 0
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+fi
+exit 0
+EOF
+chmod +x "$mock_bin_dir/kitty"
+
+# Send a prompt containing Windows CRLF delimiters \r\n
+raw_crlf_prompt=$'test line 1\r\ntest line 2\r\n'
+MOCK_LOG="$mock_steer_log" PAYLOAD_FILE="$raw_payload_file" PATH="$mock_bin_dir:$PATH" "$KNOT_ROOT/bin/knot" council steer desktop "$raw_crlf_prompt" "$steer_test_run" >/dev/null
+
+if [ ! -f "$mock_steer_log" ]; then
+  echo "FAILED (Mock kitty log was not created)"
+  rm -rf "$steer_missions_dir" "$mock_steer_sock"
+  exit 1
+fi
+
+if ! grep -q "KEY: return" "$mock_steer_log"; then
+  echo "FAILED (kitty send-key return was not dispatched)"
+  rm -rf "$steer_missions_dir" "$mock_steer_sock"
+  exit 1
+fi
+
+if ! grep -q "BUFFER: prompt processed" "$mock_steer_log"; then
+  echo "FAILED (kitty get-text buffer check was not queried)"
+  rm -rf "$steer_missions_dir" "$mock_steer_sock"
+  exit 1
+fi
+
+# Verify payload is stripped of \r and ends with \n
+if ! python3 -c "
+with open('$raw_payload_file', 'rb') as f:
+    data = f.read()
+if b'\r' in data:
+    raise ValueError('Found carriage return 0x0D in payload')
+if not data.endswith(b'\n'):
+    raise ValueError('Payload does not terminate with trailing newline')
+"; then
+  echo "FAILED (Delimiter normalization failed)"
+  rm -rf "$steer_missions_dir" "$mock_steer_sock"
+  exit 1
+fi
+
+rm -rf "$steer_missions_dir" "$mock_steer_sock"
+echo "PASSED"
+
+# 23. Confluence Synchronous Socket Validation & Crash Transparency (Issue #74)
+echo -n "23. Testing confluence.py synchronous socket failure transparency... "
+conf_fail_run="test_conf_fail_$$"
+conf_fail_dir="$HOME/.config/knot/missions/$conf_fail_run"
+mkdir -p "$conf_fail_dir/bin"
+cat <<'EOF' > "$conf_fail_dir/bin/kitty"
+#!/usr/bin/env bash
+echo "Wayland compositor connection refused" >&2
+exit 1
+EOF
+chmod +x "$conf_fail_dir/bin/kitty"
+
+fail_out=""
+fail_rc=0
+fail_out="$(PATH="$conf_fail_dir/bin:$PATH" python3 "$COUNCIL_SCRIPTS/confluence.py" --run-id "$conf_fail_run" --nodes desktop --project knot-mesh 2>&1)" || fail_rc=$?
+
+if [ $fail_rc -eq 0 ]; then
+  echo "FAILED (confluence.py should exit non-zero when Kitty crashes on start)"
+  rm -rf "$conf_fail_dir"
+  exit 1
+fi
+
+if ! echo "$fail_out" | grep -q "Kitty Confluence cockpit failed to initialize"; then
+  echo "FAILED (Expected error message on Kitty failure, got: $fail_out)"
+  rm -rf "$conf_fail_dir"
+  exit 1
+fi
+
+rm -rf "$conf_fail_dir"
+echo "PASSED"
+
 echo ""
-echo "=== All 21 Swarm Council Tests PASSED Successfully! ==="
+echo "=== All 23 Swarm Council Tests PASSED Successfully! ==="

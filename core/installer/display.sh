@@ -130,6 +130,19 @@ display_parse_xrandr() {
 display_detect_specs() {
   local detected=""
 
+  local xdg_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  if [ -d "$xdg_dir" ]; then
+    export XDG_RUNTIME_DIR="$xdg_dir"
+    if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+      for cand in "$xdg_dir"/wayland-*; do
+        if [ -S "$cand" ]; then
+          export WAYLAND_DISPLAY="$(basename "$cand")"
+          break
+        fi
+      done
+    fi
+  fi
+
   if command -v kscreen-doctor >/dev/null; then
     local kout=""
     if kout="$(kscreen-doctor -o 2>&1)"; then

@@ -13,7 +13,7 @@ The **`/goal-with-lease`** paradigm enables Antigravity agents across the Knot h
 
 When operating under `/goal-with-lease`:
 1. **Delegation Scope**: The agent is granted full autonomy to create files, execute tests, refactor code, and coordinate with peer nodes within the explicit workstream boundaries.
-2. **Lease Invariants**: Every code modification must adhere unconditionally to the **PSL Gold Standard** ([`AGENTS.md`](file:///home/kuasha/Dev/knot-mesh/AGENTS.md)):
+2. **Lease Invariants**: Every code modification must adhere unconditionally to the **PSL Gold Standard** ([`AGENTS.md`](AGENTS.md)):
    - **Rule 1 (Zero Error Swallowing & Strict Failure Transparency)**: `set -euo pipefail`, zero silent error suppression (`2>/dev/null`, `|| true`).
    - **Rule 2 (No Product Homework in Tests)**: Product code must directly execute and be validated by tests without artificial bypasses or mocks.
    - **Rule 3 (Complete Package Deliveries)**: Production code + strict types/shell hygiene + automated tests + updated documentation.

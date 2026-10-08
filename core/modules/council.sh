@@ -14,6 +14,10 @@ SCRIPTS_DIR="$SKILL_DIR/scripts"
 
 council_clean() {
   local days="${1:-7}"
+  if [ "$days" = "-h" ] || [ "$days" = "--help" ]; then
+    echo "Usage: knot council clean [days]"
+    return 0
+  fi
   local missions_dir="$HOME/.config/knot/missions"
   if [ -d "$missions_dir" ]; then
     find "$missions_dir" -mindepth 1 -maxdepth 1 -mtime "+$days" -exec rm -rf {} +
@@ -22,6 +26,10 @@ council_clean() {
 }
 
 council_copy() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot council copy"
+    return 0
+  fi
   local staged_file="$HOME/.config/knot/missions/staged/active_prompt.md"
   if [ ! -f "$staged_file" ]; then
     knot_log_err "No staged prompt found at $staged_file."
@@ -55,6 +63,7 @@ council_start() {
   local resume_id=""
   local tiling="grid"
   local dry_run=0
+  local auth_profile="${KNOT_AUTH_PROFILE:-}"
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -77,6 +86,7 @@ council_start() {
         ;;
       --tiling) tiling="$2"; shift 2 ;;
       --dry-run) dry_run=1; shift ;;
+      --auth-profile|--profile) auth_profile="$2"; shift 2 ;;
       -h|--help)
         echo "Usage: knot council start [options]"
         echo ""
@@ -88,6 +98,7 @@ council_start() {
         echo "  --nodes <list>       Comma-separated nodes (default: all online)"
         echo "  --project <name>     Target project name (default: auto-detected)"
         echo "  --db <ghd|mesh>      Registry backend: ghd (GitHub Discussions, default) or mesh (Mesh DB)"
+        echo "  --auth-profile <al>  Pin mission permanently to specific auth profile"
         echo "  --interactive        Launch zero-token Confluence cockpit with all nodes connected in agy standby"
         echo "  --resume [run_id]    Resume active or specified interactive council session"
         echo "  --tiling <layout>    Cockpit layout: grid (default), sidebyside, splits, tall, fat, stacked"
@@ -155,6 +166,38 @@ council_start() {
     knot_log_err "Project sync returned invalid JSON output: $jq_err"
     echo "$sync_out"
     return 1
+  fi
+
+  if [ -z "$nodes" ]; then
+    local syn_nodes=""
+    if syn_nodes="$(echo "$sync_out" | jq -r '[.nodes | to_entries[]? | select(.value.status == "SYNCED") | .key] | join(",")' 2>&1)"; then
+      [ -n "$syn_nodes" ] && nodes="$syn_nodes"
+    fi
+  fi
+  if [ -z "$nodes" ]; then
+    local online_nodes=()
+    local ndir=""
+    if ndir="$(knot_get_nodes_dir 2>&1)" && [ -d "$ndir" ]; then
+      for mf in "$ndir"/*.json; do
+        [ -e "$mf" ] || continue
+        local nid=""
+        nid="$(awk -F'"' '/"id":/ {print $4}' "$mf")"
+        [ -n "$nid" ] && online_nodes+=("$nid")
+      done
+    fi
+    if [ ${#online_nodes[@]} -gt 0 ]; then
+      nodes="$(IFS=,; echo "${online_nodes[*]}")"
+    else
+      local my_n=""
+      if ! my_n="$(knot_detect_node_id 2>&1)"; then
+        if command -v hostname >/dev/null; then
+          my_n="$(hostname -s)"
+        else
+          my_n="desktop"
+        fi
+      fi
+      nodes="$my_n"
+    fi
   fi
 
   local proj_name proj_folder
@@ -263,12 +306,15 @@ All node checkpoints and final audit deliverables will be posted here."
     local tmp_meta
     tmp_meta="$(mktemp)"
     jq --arg disc_id "$disc_id" --arg disc_url "$disc_url" --arg mode "$mode" --arg project "$proj_name" --arg db "$db" --arg tiling "$tiling" --argjson interactive "$interactive" \
-      '. + {disc_id: $disc_id, disc_url: $disc_url, mode: $mode, project: $project, db: $db, tiling: $tiling, interactive: $interactive, status: "ACTIVE"}' \
+      --arg auth_profile "$auth_profile" \
+      '. + {disc_id: $disc_id, disc_url: $disc_url, mode: $mode, project: $project, db: $db, tiling: $tiling, interactive: $interactive, auth_profile: (if $auth_profile != "" then $auth_profile else (.auth_profile // null) end), status: "ACTIVE"}' \
       "$missions_dir/meta.json" > "$tmp_meta" && mv "$tmp_meta" "$missions_dir/meta.json"
   else
     local local_node
     local_node="$(knot_detect_node_id)"
-    echo "{\"run_id\":\"$run_id\",\"disc_id\":\"$disc_id\",\"disc_url\":\"$disc_url\",\"mode\":\"$mode\",\"project\":\"$proj_name\",\"db\":\"$db\",\"tiling\":\"$tiling\",\"pack\":\"$pack\",\"anchor\":\"$local_node\",\"opening_node\":\"$local_node\",\"interactive\":$interactive,\"nodes\":\"$nodes\",\"status\":\"ACTIVE\",\"created_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$missions_dir/meta.json"
+    local auth_prof_json="null"
+    if [ -n "$auth_profile" ]; then auth_prof_json="\"$auth_profile\""; fi
+    echo "{\"run_id\":\"$run_id\",\"disc_id\":\"$disc_id\",\"disc_url\":\"$disc_url\",\"mode\":\"$mode\",\"project\":\"$proj_name\",\"db\":\"$db\",\"tiling\":\"$tiling\",\"pack\":\"$pack\",\"anchor\":\"$local_node\",\"opening_node\":\"$local_node\",\"interactive\":$interactive,\"nodes\":\"$nodes\",\"auth_profile\":$auth_prof_json,\"status\":\"ACTIVE\",\"created_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$missions_dir/meta.json"
   fi
 
   if [ $dry_run -eq 1 ]; then
@@ -304,6 +350,10 @@ All node checkpoints and final audit deliverables will be posted here."
 
 council_status() {
   local run_id="${1:-}"
+  if [ "$run_id" = "-h" ] || [ "$run_id" = "--help" ]; then
+    echo "Usage: knot council status [run_id]"
+    return 0
+  fi
   local missions_dir="$HOME/.config/knot/missions"
 
   if [ -z "$run_id" ]; then
@@ -346,6 +396,10 @@ council_status() {
 
 council_reply() {
   local run_id="${1:-}"
+  if [ "$run_id" = "-h" ] || [ "$run_id" = "--help" ]; then
+    echo "Usage: knot council reply <run_id> [--node <id>] [--status <status>] [--body <text>]"
+    return 0
+  fi
   if [ -z "$run_id" ]; then
     echo "Usage: knot council reply <run_id> [--node <id>] [--status <status>] [--body <text>]"
     return 1
@@ -404,6 +458,15 @@ council_reply() {
 }
 
 council_steer() {
+  local arg
+  for arg in "$@"; do
+    if [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
+      echo "Usage: knot council steer [--wait-ack [sec]] <node> \"<prompt>\" [run_id]"
+      echo "       echo \"<prompt>\" | knot council steer [--wait-ack [sec]] <node> [run_id]"
+      return 0
+    fi
+  done
+
   local wait_ack=0
   local ack_timeout=30
   local positional=()
@@ -445,6 +508,12 @@ council_steer() {
     return 1
   fi
 
+  # Normalize payload: strip carriage returns and guarantee trailing newline delimiter
+  prompt_text="$(printf '%s' "$prompt_text" | tr -d '\r')"
+  if [[ "$prompt_text" != *$'\n' ]]; then
+    prompt_text="${prompt_text}"$'\n'
+  fi
+
   local missions_dir="$HOME/.config/knot/missions"
   if [ -z "$run_id" ]; then
     local latest=""
@@ -483,7 +552,7 @@ council_steer() {
     if [ "$my_h" != "$target_host" ] && command -v knot >/dev/null; then
       if knot exec "$target_host" "test -S /tmp/kitty-council-$run_id.sock"; then
         local relay_err=""
-        if relay_err="$(printf '%s\r' "$prompt_text" | knot exec "$target_host" "kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-text --match 'title:.*${node}.*' --stdin && sleep 0.2 && kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-key --match 'title:.*${node}.*' return" 2>&1)"; then
+        if relay_err="$(printf '%s' "$prompt_text" | knot exec "$target_host" "kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-text --match 'title:.*${node}.*' --stdin && sleep 0.2 && kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-key --match 'title:.*${node}.*' return" 2>&1)"; then
           knot_log_ok "Steered node '@$node' via Cockpit Bridge Relay to @$target_host (Run: $run_id)"
           return 0
         else
@@ -509,7 +578,7 @@ council_steer() {
         done < <(echo "$mesh_status" | awk 'NR>2 {print $1}')
         if [ -n "$cand_node" ]; then
           local relay_err=""
-          if relay_err="$(printf '%s\r' "$prompt_text" | knot exec "$cand_node" "kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-text --match 'title:.*${node}.*' --stdin && sleep 0.2 && kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-key --match 'title:.*${node}.*' return" 2>&1)"; then
+          if relay_err="$(printf '%s' "$prompt_text" | knot exec "$cand_node" "kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-text --match 'title:.*${node}.*' --stdin && sleep 0.2 && kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-key --match 'title:.*${node}.*' return" 2>&1)"; then
             knot_log_ok "Steered node '@$node' via Cockpit Bridge Relay to @$cand_node (Run: $run_id)"
             return 0
           else
@@ -527,11 +596,27 @@ council_steer() {
   # Send text to target node's pane via Kitty remote control socket using stdin
   # Matches window title containing the node name (e.g. title:.*laptop.*)
   local steer_err=""
-  if steer_err="$(printf '%s\r' "$prompt_text" | kitty @ --to "unix:$sock" send-text --match "title:.*${node}.*" --stdin 2>&1)"; then
+  if steer_err="$(printf '%s' "$prompt_text" | kitty @ --to "unix:$sock" send-text --match "title:.*${node}.*" --stdin 2>&1)"; then
     sleep 0.2
     local key_err=""
     if ! key_err="$(kitty @ --to "unix:$sock" send-key --match "title:.*${node}.*" return 2>&1)"; then
       knot_log_warn "Notice: kitty send-key return failed: $key_err"
+    fi
+
+    # Execution state verification: query window buffer via get-text
+    sleep 0.2
+    local win_buf=""
+    if win_buf="$(kitty @ --to "unix:$sock" get-text --match "title:.*${node}.*" 2>&1)"; then
+      local first_line=""
+      first_line="$(printf '%s' "$prompt_text" | head -n1)"
+      if [ -n "$first_line" ] && echo "$win_buf" | tail -n2 | grep -Fq "$first_line"; then
+        knot_log_warn "Prompt appears unsubmitted in node '@$node' window buffer. Re-attempting return key dispatch..."
+        local retry_key_err="" retry_key_rc=0
+        retry_key_err="$(kitty @ --to "unix:$sock" send-key --match "title:.*${node}.*" return 2>&1)" || retry_key_rc=$?
+        if [ $retry_key_rc -ne 0 ]; then
+          knot_log_warn "Notice: retry kitty send-key return failed ($retry_key_rc): $retry_key_err"
+        fi
+      fi
     fi
     knot_log_ok "Steered node '@$node' via Cockpit Bridge (Run: $run_id)"
 
@@ -577,6 +662,10 @@ council_challenge() {
 
 council_db() {
   local action="${1:-inspect}"
+  if [ "$action" = "-h" ] || [ "$action" = "--help" ]; then
+    echo "Usage: knot council db <inspect|tail|list> [run_id] [options]"
+    return 0
+  fi
   [ $# -gt 0 ] && shift
   local run_id="${1:-}"
   [ $# -gt 0 ] && shift
@@ -610,8 +699,12 @@ council_db() {
     list)
       python3 "$script" list
       ;;
-    *)
+    -h|--help)
       echo "Usage: knot council db <inspect|tail|list> [run_id] [options]"
+      return 0
+      ;;
+    *)
+      echo "Usage: knot council db <inspect|tail|list> [run_id] [options]" >&2
       return 1
       ;;
   esac
@@ -629,6 +722,10 @@ _council_list_runs() {
 
 council_list() {
   local filter="${1:-}"
+  if [ "$filter" = "-h" ] || [ "$filter" = "--help" ]; then
+    echo "Usage: knot council list [interactive|mesh|ghd|active]"
+    return 0
+  fi
   echo -e "${C_BOLD}--- Knot Swarm Council Missions ---${C_RESET}"
   local missions_dir="$HOME/.config/knot/missions"
   if [ -d "$missions_dir" ]; then
@@ -689,6 +786,10 @@ council_list() {
 
 council_resume() {
   local run_id="${1:-}"
+  if [ "$run_id" = "-h" ] || [ "$run_id" = "--help" ]; then
+    echo "Usage: knot council resume [run_id]"
+    return 0
+  fi
   local missions_dir="$HOME/.config/knot/missions"
 
   if [ -z "$run_id" ]; then
@@ -736,6 +837,11 @@ council_attach() {
   local node_id="${1:-}"
   local run_id="${2:-}"
 
+  if [ "$node_id" = "-h" ] || [ "$node_id" = "--help" ]; then
+    echo "Usage: knot council attach <node_id> [run_id]"
+    return 0
+  fi
+
   if [ -z "$node_id" ]; then
     echo "Usage: knot council attach <node_id> [run_id]"
     return 1
@@ -782,6 +888,10 @@ council_attach() {
 
 council_reconcile() {
   local run_id="${1:-}"
+  if [ "$run_id" = "-h" ] || [ "$run_id" = "--help" ]; then
+    echo "Usage: knot council reconcile [run_id]"
+    return 0
+  fi
   local missions_dir="$HOME/.config/knot/missions"
 
   if [ -z "$run_id" ]; then
@@ -820,6 +930,10 @@ council_reconcile() {
 
 council_kill() {
   local run_id="${1:-}"
+  if [ "$run_id" = "-h" ] || [ "$run_id" = "--help" ]; then
+    echo "Usage: knot council kill <run_id>"
+    return 0
+  fi
   if [ -z "$run_id" ]; then
     echo "Usage: knot council kill <run_id>"
     return 1
@@ -853,6 +967,10 @@ council_kill() {
 
 council_heal() {
   local run_id="${1:-}"
+  if [ "$run_id" = "-h" ] || [ "$run_id" = "--help" ]; then
+    echo "Usage: knot council heal [run_id]"
+    return 0
+  fi
   local missions_dir="$HOME/.config/knot/missions"
 
   if [ -z "$run_id" ]; then
