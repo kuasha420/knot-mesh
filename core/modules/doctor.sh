@@ -688,21 +688,17 @@ doctor_check_local() {
   echo -e "\n${C_BOLD}[Terminal Emulation & Terminfo Parity]${C_RESET}"
   local cur_term="${TERM:-xterm-256color}"
   if command -v infocmp >/dev/null; then
-    local t_err=""
-    if infocmp "$cur_term" >/tmp/.knot_ti_chk 2>&1; then
+    local t_out=""
+    if t_out="$(infocmp "$cur_term" 2>&1)"; then
       doc_ok "Local terminfo definition for '$cur_term' verified"
-      rm -f /tmp/.knot_ti_chk
     else
-      rm -f /tmp/.knot_ti_chk
       doc_warn "Local terminfo missing definition for active terminal '$cur_term' (remedy with 'knot sync --terminfo')"
       warnings=$((warnings + 1))
     fi
 
-    if infocmp "xterm-256color" >/tmp/.knot_ti_chk2 2>&1; then
+    if t_out="$(infocmp "xterm-256color" 2>&1)"; then
       doc_ok "Standard fallback terminfo 'xterm-256color' verified"
-      rm -f /tmp/.knot_ti_chk2
     else
-      rm -f /tmp/.knot_ti_chk2
       doc_warn "Missing fallback terminfo 'xterm-256color' (install ncurses)"
       warnings=$((warnings + 1))
     fi

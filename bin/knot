@@ -525,7 +525,7 @@ cmd_exec() {
   if [ -n "${KNOT_COUNCIL_RUN_ID:-}" ]; then
     council_env="export KNOT_RUN_ID=\"$KNOT_COUNCIL_RUN_ID\"; export KNOT_COUNCIL_RUN_ID=\"$KNOT_COUNCIL_RUN_ID\";"
   fi
-  local term_env='TERM_CAND="${TERM:-xterm-256color}"; if ! infocmp "$TERM_CAND" >/dev/null 2>/tmp/.knot_ti_err; then rm -f /tmp/.knot_ti_err; TERM_CAND="xterm-256color"; else rm -f /tmp/.knot_ti_err; fi; export TERM="$TERM_CAND"; export COLORTERM="${COLORTERM:-truecolor}";'
+  local term_env='TERM_CAND="${TERM:-xterm-256color}"; if ! _ti="$(infocmp "$TERM_CAND" 2>&1)"; then TERM_CAND="xterm-256color"; fi; unset _ti; export TERM="$TERM_CAND"; export COLORTERM="${COLORTERM:-truecolor}";'
 
 
   if [ "$target" = "--all" ]; then

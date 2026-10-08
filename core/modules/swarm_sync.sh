@@ -655,7 +655,7 @@ swarm_sync_mirrors() {
   for node in "${nodes_to_sync[@]}"; do
     knot_log_info "Distributing optimized mirrorlist to Strand '$node'..."
     local ssh_err=""
-    if ! ssh_err="$(ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new "$node" "sudo -n tee /etc/pacman.d/mirrorlist >/dev/null || sudo tee /etc/pacman.d/mirrorlist >/dev/null" < "$mirrorlist_src" 2>&1)"; then
+    if ! ssh_err="$(ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new "$node" "sudo -n tee /etc/pacman.d/mirrorlist >/dev/null" < "$mirrorlist_src" 2>&1)"; then
       knot_log_err "Failed to push mirrorlist to '$node': $ssh_err"
     else
       knot_log_ok "Mirrorlist synchronized to Strand '$node'."
@@ -663,8 +663,16 @@ swarm_sync_mirrors() {
     fi
   done
 
-  knot_log_ok "Pacman mirrorlist synchronization complete ($sync_success/${#nodes_to_sync[@]} strands updated)."
-  return 0
+  if [ $sync_success -eq 0 ]; then
+    knot_log_err "Pacman mirrorlist synchronization failed on all strands (0/${#nodes_to_sync[@]} updated)."
+    return 1
+  elif [ $sync_success -lt ${#nodes_to_sync[@]} ]; then
+    knot_log_warn "Pacman mirrorlist synchronization partially completed ($sync_success/${#nodes_to_sync[@]} strands updated)."
+    return 1
+  else
+    knot_log_ok "Pacman mirrorlist synchronization complete ($sync_success/${#nodes_to_sync[@]} strands updated)."
+    return 0
+  fi
 }
 
 # ------------------------------------------------------------------------------
@@ -701,7 +709,9 @@ swarm_sync_terminfo() {
 
   local nodes_to_sync=()
   if [ -n "$target" ] && [ "$target" != "--all" ] && [ "$target" != "all" ]; then
-    nodes_to_sync=("$target")
+    if [ "$target" != "$anchor_id" ] && [ "$target" != "$anchor_host" ] && [ "$target" != "$my_host" ]; then
+      nodes_to_sync=("$target")
+    fi
   else
     local nodes_dir=""
     if nodes_dir="$(knot_get_nodes_dir)"; then

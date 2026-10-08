@@ -59,6 +59,26 @@ if [ "$INTERACTIVE" != "1" ] && [ "$INTERACTIVE" != "true" ]; then
     opening_node="$LOCAL_NODE"
   fi
 
+  resolved_hub="${KNOT_HUB_URL:-}"
+  if [ -z "$resolved_hub" ] && command -v hub_resolve_url >/dev/null; then
+    r_hub=""
+    if r_hub="$(hub_resolve_url 2>&1)"; then
+      resolved_hub="$r_hub"
+    fi
+  fi
+  if [ -z "$resolved_hub" ]; then
+    resolved_hub="https://desktop:4242"
+  fi
+
+  anchor_node="desktop"
+  if command -v knot_get_active_swarm >/dev/null; then
+    active_swarm=""
+    active_swarm="$(knot_get_active_swarm)"
+    if command -v knot_load_swarm_profile >/dev/null && knot_load_swarm_profile "$active_swarm"; then
+      anchor_node="${ANCHOR_ID:-${ANCHOR_HOST:-desktop}}"
+    fi
+  fi
+
   for pfile in "$MISSIONS_DIR"/*_prompt.md; do
     [ -f "$pfile" ] || continue
     node_id="$(basename "$pfile" | sed 's/_prompt.md//')"
@@ -70,6 +90,10 @@ if [ "$INTERACTIVE" != "1" ] && [ "$INTERACTIVE" != "true" ]; then
 trap '' HUP
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:$PATH"
 export KNOT_NODE_ID="NODE_ID_PLACEHOLDER"
+export KNOT_RUN_ID="RUN_ID_PLACEHOLDER"
+export KNOT_COUNCIL_RUN_ID="RUN_ID_PLACEHOLDER"
+export KNOT_HUB_URL="HUB_URL_PLACEHOLDER"
+export KNOT_MESH_ANCHOR="ANCHOR_PLACEHOLDER"
 AUTH_PROFILE_PLACEHOLDER
 PROJECT_NAME="PROJECT_PLACEHOLDER"
 
@@ -116,7 +140,7 @@ echo -e "\033[1;36m║\033[0m  Commands:  \033[32mknot council reply\033[0m | \0
 echo -e "\033[1;36m╚══════════════════════════════════════════════════════════════════════╝\033[0m"
 echo ""
 if [ -n "${KNOT_HUB_URL:-}" ] && command -v curl >/dev/null; then
-  curl -s -o /dev/null -X POST "$KNOT_HUB_URL/strand/event" -H "Content-Type: application/json" -d "{\"run_id\":\"RUN_ID_PLACEHOLDER\",\"node_id\":\"NODE_ID_PLACEHOLDER\",\"event\":\"TURN_START\",\"details\":{\"mode\":\"standby\"}}" || echo "Notice: event bus report error" >&2
+  curl -k -sS -o /dev/null -X POST "$KNOT_HUB_URL/strand/event" -H "Content-Type: application/json" -d "{\"run_id\":\"RUN_ID_PLACEHOLDER\",\"node_id\":\"NODE_ID_PLACEHOLDER\",\"event\":\"TURN_START\",\"details\":{\"mode\":\"standby\"}}" 2>&1 || echo "Notice: event bus report error" >&2
 fi
 exec agy --project "$PROJECT_NAME" --dangerously-skip-permissions
 EOF_LAUNCH
@@ -126,6 +150,10 @@ EOF_LAUNCH
 trap '' HUP
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:$PATH"
 export KNOT_NODE_ID="NODE_ID_PLACEHOLDER"
+export KNOT_RUN_ID="RUN_ID_PLACEHOLDER"
+export KNOT_COUNCIL_RUN_ID="RUN_ID_PLACEHOLDER"
+export KNOT_HUB_URL="HUB_URL_PLACEHOLDER"
+export KNOT_MESH_ANCHOR="ANCHOR_PLACEHOLDER"
 AUTH_PROFILE_PLACEHOLDER
 PROMPT_FILE="$HOME/.config/knot/missions/RUN_ID_PLACEHOLDER/prompt.md"
 PROJECT_NAME="PROJECT_PLACEHOLDER"
@@ -166,7 +194,7 @@ if [ -d "$PROJECT_DIR" ]; then
 fi
 
 if [ -n "${KNOT_HUB_URL:-}" ] && command -v curl >/dev/null; then
-  curl -s -o /dev/null -X POST "$KNOT_HUB_URL/strand/event" -H "Content-Type: application/json" -d "{\"run_id\":\"RUN_ID_PLACEHOLDER\",\"node_id\":\"NODE_ID_PLACEHOLDER\",\"event\":\"TURN_START\",\"details\":{\"mode\":\"mission\"}}" || echo "Notice: event bus report error" >&2
+  curl -k -sS -o /dev/null -X POST "$KNOT_HUB_URL/strand/event" -H "Content-Type: application/json" -d "{\"run_id\":\"RUN_ID_PLACEHOLDER\",\"node_id\":\"NODE_ID_PLACEHOLDER\",\"event\":\"TURN_START\",\"details\":{\"mode\":\"mission\"}}" 2>&1 || echo "Notice: event bus report error" >&2
 fi
 
 if [ "${1:-}" = "--headless" ] || [ "${1:-}" = "-p" ]; then
@@ -179,6 +207,8 @@ EOF_LAUNCH
     sed -i "s|RUN_ID_PLACEHOLDER|$RUN_ID|g" "$launcher_script"
     sed -i "s|PROJECT_PLACEHOLDER|$PROJECT|g" "$launcher_script"
     sed -i "s|NODE_ID_PLACEHOLDER|$node_id|g" "$launcher_script"
+    sed -i "s|HUB_URL_PLACEHOLDER|$resolved_hub|g" "$launcher_script"
+    sed -i "s|ANCHOR_PLACEHOLDER|$anchor_node|g" "$launcher_script"
     if [ -n "$auth_profile" ]; then
       sed -i "s|AUTH_PROFILE_PLACEHOLDER|export KNOT_AUTH_PROFILE=\"$auth_profile\"|g" "$launcher_script"
     else

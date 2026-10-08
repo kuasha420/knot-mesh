@@ -454,6 +454,13 @@ council_reply() {
   else
     python3 "$SCRIPTS_DIR/gh_discussion.py" reply --discussion-id "$disc_id" --run-id "$run_id" --node-id "$node" --status "$status" --body "$body"
   fi
+  local ev_hub="${KNOT_HUB_URL:-}"
+  if [ -n "$ev_hub" ] && command -v curl >/dev/null; then
+    local curl_out=""
+    if ! curl_out="$(curl -k -sS -X POST "$ev_hub/strand/event" -H "Content-Type: application/json" -d "{\"run_id\":\"$run_id\",\"node_id\":\"$node\",\"event\":\"ACK\",\"details\":{\"status\":\"$status\"}}" 2>&1)"; then
+      knot_log_warn "Notice: Event bus notification skipped: $curl_out"
+    fi
+  fi
   knot_log_ok "Reply posted for node '$node' (Status: $status) to mission $run_id"
 }
 
@@ -627,12 +634,18 @@ council_steer() {
       local ack_received=0
       local events_sock="${KNOT_EVENTS_SOCK:-$HOME/.config/knot/events.sock}"
       local hub_url="${KNOT_HUB_URL:-}"
+      if [ -z "$hub_url" ] && command -v hub_resolve_url >/dev/null; then
+        local r_url=""
+        if r_url="$(hub_resolve_url 2>&1)"; then
+          hub_url="$r_url"
+        fi
+      fi
 
       # 1. Reactive Event Bus subscription via UNIX socket or SSE stream
       if command -v python3 >/dev/null; then
         local reactive_rc=0
         python3 -c '
-import sys, os, socket, json, time, urllib.request
+import sys, os, socket, json, time, urllib.request, urllib.error
 
 sock_path = sys.argv[1]
 node_id = sys.argv[2]
@@ -665,12 +678,12 @@ if sock_path and os.path.exists(sock_path):
                         if d.get("node_id") == node_id and d.get("event") in ("TURN_START", "ACK", "AWAITING_INPUT", "COMPLETED"):
                             if not run_id or not d.get("run_id") or d.get("run_id") == run_id:
                                 sys.exit(0)
-                    except Exception:
-                        pass
+                    except json.JSONDecodeError:
+                        continue
             except socket.timeout:
                 continue
-    except Exception:
-        pass
+    except (ConnectionRefusedError, FileNotFoundError, OSError) as e:
+        sys.stderr.write(f"Notice: UNIX events socket connect/recv notice: {e}\n")
     finally:
         s.close()
 
@@ -693,10 +706,10 @@ if hub_url and time.time() < deadline:
                         if d.get("node_id") == node_id and d.get("event") in ("TURN_START", "ACK", "AWAITING_INPUT", "COMPLETED"):
                             if not run_id or not d.get("run_id") or d.get("run_id") == run_id:
                                 sys.exit(0)
-                    except Exception:
-                        pass
-    except Exception:
-        pass
+                    except json.JSONDecodeError:
+                        continue
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as e:
+        sys.stderr.write(f"Notice: SSE events stream notice: {e}\n")
 
 sys.exit(1)
 ' "$events_sock" "$node" "$run_id" "$ack_timeout" "$hub_url" || reactive_rc=$?

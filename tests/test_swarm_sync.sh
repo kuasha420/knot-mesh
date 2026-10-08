@@ -234,11 +234,11 @@ echo "  -> swarm_sync_strand_pull retrieved topology and node manifests: OK"
 
 echo "=== [Test 4] CLI Help & Option Dispatch Verification ==="
 HELP_OUT="$("$KNOT_ROOT/bin/knot" --help)"
-if ! echo "$HELP_OUT" | grep -q "knot sync"; then
+if ! echo "$HELP_OUT" | grep -F -q "knot sync [--all | <node_id>]"; then
   echo "Error: knot sync usage not found in help text!" >&2
   exit 1
 fi
-echo "  -> CLI usage output contains 'knot sync': OK"
+echo "  -> CLI usage output contains 'knot sync [--all | <node_id>]': OK"
 
 echo "=== [Test 5] knot sync --mirrors Verification (Issue #79) ==="
 export HOME="$TMP_DIR/home"
@@ -246,6 +246,7 @@ MOCK_MIRRORLIST="$TMP_DIR/mirrorlist_test"
 echo "Server = https://mirror.rackspace.com/archlinux/\$repo/os/\$arch" > "$MOCK_MIRRORLIST"
 export KNOT_PACMAN_MIRRORLIST="$MOCK_MIRRORLIST"
 
+# 1. Success case
 swarm_sync_mirrors "laptop"
 if [ ! -f "$MOCK_REMOTE_HOME/etc/pacman.d/mirrorlist" ]; then
   echo "Error: mirrorlist was not pushed to remote strand!" >&2
@@ -255,7 +256,16 @@ if ! grep -q "rackspace" "$MOCK_REMOTE_HOME/etc/pacman.d/mirrorlist"; then
   echo "Error: remote mirrorlist contents do not match source!" >&2
   exit 1
 fi
-echo "  -> swarm_sync_mirrors successfully distributed mirrorlist: OK"
+
+# 2. Failure case: missing mirrorlist source must return non-zero exit code
+KNOT_PACMAN_MIRRORLIST="$TMP_DIR/nonexistent_mirrorlist"
+if swarm_sync_mirrors "laptop"; then
+  echo "Error: swarm_sync_mirrors must exit non-zero when source is missing!" >&2
+  exit 1
+fi
+export KNOT_PACMAN_MIRRORLIST="$MOCK_MIRRORLIST"
+
+echo "  -> swarm_sync_mirrors successfully distributed mirrorlist and enforced failure transparency: OK"
 
 echo "=== [Test 6] knot sync --terminfo Verification (Issue #64) ==="
 swarm_sync_terminfo "laptop"

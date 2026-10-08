@@ -208,6 +208,85 @@ class TestStrandEventBusIntegration(unittest.TestCase):
         self.assertEqual(received_events[0]["event"], "COMPLETED")
         self.assertEqual(received_events[0]["node_id"], "desktop")
 
+    def test_council_reply_publishes_strand_event(self):
+        # Create thread
+        tid = "thread_reply_test"
+        rid = "run_reply_test_99"
+        self.db.create_council_thread(tid, rid, "Reply Test", "Body", "general", f"knot://mesh/council/{tid}")
+
+        # Connect socket to listen for ACK
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(3.0)
+        client.connect(self.sock_path)
+
+        events = []
+        ready = threading.Event()
+
+        def sock_reader():
+            buf = ""
+            while len(events) < 1:
+                try:
+                    chunk = client.recv(4096).decode("utf-8")
+                    if not chunk:
+                        break
+                    buf += chunk
+                    while "\n" in buf:
+                        line, buf = buf.split("\n", 1)
+                        if not line.strip():
+                            continue
+                        d = json.loads(line.strip())
+                        if d.get("event") == "CONNECTED":
+                            ready.set()
+                        elif d.get("run_id") == rid:
+                            events.append(d)
+                except Exception:
+                    break
+
+        t = threading.Thread(target=sock_reader, daemon=True)
+        t.start()
+        self.assertTrue(ready.wait(timeout=2.0))
+
+        # Post reply to /council/threads/{tid}/reply
+        url = f"{self.base_url}/council/threads/{tid}/reply"
+        payload = {
+            "run_id": rid,
+            "node_id": "laptop",
+            "status": "PROGRESS",
+            "body": "Analyzing issue"
+        }
+        req = urllib_request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib_request.urlopen(req, timeout=5.0) as resp:
+            self.assertEqual(resp.status, 201)
+
+        t.join(timeout=2.0)
+        client.close()
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "ACK")
+        self.assertEqual(events[0]["node_id"], "laptop")
+        self.assertEqual(events[0]["run_id"], rid)
+
+    def test_socket_client_abrupt_disconnect(self):
+        # Connect a client and immediately close without reading
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.connect(self.sock_path)
+        time.sleep(0.05)
+        client.close()
+
+        # Publishing must not fail despite dead socket client
+        payload = {
+            "run_id": "run_disconnect_test",
+            "node_id": "steamdeck",
+            "event": "AWAITING_INPUT"
+        }
+        res = publish_strand_event(payload)
+        self.assertEqual(res["event"], "AWAITING_INPUT")
+
 
 if __name__ == "__main__":
     unittest.main()

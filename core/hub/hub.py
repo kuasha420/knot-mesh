@@ -277,8 +277,11 @@ def publish_strand_event(event_data: dict) -> dict:
             if not req_run_id or req_run_id == payload["run_id"]:
                 try:
                     q.put_nowait(sse_line)
-                except Exception:
-                    dead_subs.append(item)
+                except Exception as ex:
+                    if ex.__class__.__name__ == "Full":
+                        logger.debug("Strand subscriber queue full, dropping frame")
+                    else:
+                        dead_subs.append(item)
         for d in dead_subs:
             _strand_subscribers.discard(d)
 
@@ -292,7 +295,8 @@ def publish_strand_event(event_data: dict) -> dict:
         for client_sock in list(_events_socket_clients):
             try:
                 client_sock.sendall(json_line)
-            except Exception:
+            except (BrokenPipeError, ConnectionResetError, OSError) as e:
+                logger.debug("Socket client disconnected during send: %s", e)
                 dead_clients.append(client_sock)
         for dead in dead_clients:
             _events_socket_clients.discard(dead)
@@ -344,10 +348,16 @@ def start_events_socket_server(sock_path: str = None) -> Optional[threading.Thre
                     logger.debug("Socket handshake write notice: %s", e)
             except socket.timeout:
                 continue
-            except OSError:
-                break
-            except Exception:
-                break
+            except OSError as e:
+                if _events_socket_stop_event.is_set():
+                    break
+                logger.warning("UNIX events socket accept error: %s", e)
+                time.sleep(0.05)
+            except Exception as e:
+                if _events_socket_stop_event.is_set():
+                    break
+                logger.warning("UNIX events socket listener notice: %s", e)
+                time.sleep(0.05)
 
     t = threading.Thread(target=socket_listener, daemon=True, name="knot-events-socket")
     t.start()
@@ -3301,7 +3311,7 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                     except queue.Empty:
                         self.wfile.write(b": heartbeat\n\n")
                         self.wfile.flush()
-            except (ConnectionResetError, BrokenPipeError) as e:
+            except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, TimeoutError, OSError) as e:
                 logger.debug("Strand SSE subscriber disconnected: %s", e)
             finally:
                 with _strand_subscribers_lock:
@@ -3829,6 +3839,15 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             mbody = body.get("body", "").strip()
             created_at = body.get("created_at", "").strip()
             res = self.db.post_council_message(msg_id, tid, run_id, node_id, status, mbody, created_at)
+            try:
+                publish_strand_event({
+                    "run_id": run_id,
+                    "node_id": node_id,
+                    "event": "ACK",
+                    "details": {"status": status, "msg_id": msg_id, "thread_id": tid}
+                })
+            except Exception as e:
+                logger.debug("Notice: failed to publish council reply strand event: %s", e)
             self._send_json(res, 201)
 
         elif path == "/artifacts/lock":
