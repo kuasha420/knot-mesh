@@ -27,6 +27,8 @@ optdepends=(
     'krdp: Wayland headless virtual display creation and RDP streaming (host)'
     'krdc: Wayland remote desktop client for Virtual Monitor rendering (client)'
     'freerdp: RDP protocol engine for KRDC'
+    'ncurses: Terminal terminfo compiler and infocmp database tools'
+    'kitty-terminfo: Terminal terminfo definitions for kitty remote control'
 )
 source=("knot-mesh-${pkgver}.tar.gz::https://github.com/kuasha420/knot-mesh/archive/refs/tags/v1.0.0-rc5.tar.gz")
 sha256sums=('SKIP')

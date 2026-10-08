@@ -223,6 +223,7 @@ _subscribers_lock = threading.Lock()
 _subscribers = set()
 
 
+
 def broadcast_event(event_type: str, data: dict):
     payload = f"event: {event_type}\ndata: {json.dumps(data)}\n\n".encode("utf-8")
     with _subscribers_lock:
@@ -234,6 +235,150 @@ def broadcast_event(event_type: str, data: dict):
                 dead.append(q)
         for d in dead:
             _subscribers.discard(d)
+
+
+# -----------------------------------------------------------------------------
+# Reactive Strand Event Bus (Issue #72)
+# -----------------------------------------------------------------------------
+_strand_subscribers_lock = threading.Lock()
+_strand_subscribers = set()
+
+_events_socket_clients_lock = threading.Lock()
+_events_socket_clients = set()
+_events_socket_server = None
+_events_socket_path = None
+_events_socket_stop_event = threading.Event()
+
+
+def publish_strand_event(event_data: dict) -> dict:
+    if not isinstance(event_data, dict):
+        raise ValueError("Event data must be a dictionary")
+
+    event_type = event_data.get("event")
+    if not event_type:
+        raise ValueError("Field 'event' is required")
+
+    payload = {
+        "run_id": str(event_data.get("run_id", "")),
+        "node_id": str(event_data.get("node_id", "unknown")),
+        "event": str(event_type),
+        "timestamp": event_data.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+        "details": event_data.get("details", {})
+    }
+    if not isinstance(payload["details"], dict):
+        payload["details"] = {"raw": payload["details"]}
+
+    # 1. Broadcast to SSE strand event subscribers
+    sse_line = f"event: {payload['event']}\ndata: {json.dumps(payload)}\n\n".encode("utf-8")
+    with _strand_subscribers_lock:
+        dead_subs = []
+        for item in list(_strand_subscribers):
+            q, req_run_id = item
+            if not req_run_id or req_run_id == payload["run_id"]:
+                try:
+                    q.put_nowait(sse_line)
+                except Exception:
+                    dead_subs.append(item)
+        for d in dead_subs:
+            _strand_subscribers.discard(d)
+
+    # 2. Broadcast to global SSE /stream subscribers
+    broadcast_event("strand_event", payload)
+
+    # 3. Broadcast to UNIX domain socket clients
+    json_line = (json.dumps(payload) + "\n").encode("utf-8")
+    with _events_socket_clients_lock:
+        dead_clients = []
+        for client_sock in list(_events_socket_clients):
+            try:
+                client_sock.sendall(json_line)
+            except Exception:
+                dead_clients.append(client_sock)
+        for dead in dead_clients:
+            _events_socket_clients.discard(dead)
+            try:
+                dead.close()
+            except Exception as e:
+                logger.debug("Dead client close notice: %s", e)
+
+    return payload
+
+
+def start_events_socket_server(sock_path: str = None) -> Optional[threading.Thread]:
+    global _events_socket_server, _events_socket_path, _events_socket_stop_event
+    if sock_path is None:
+        sock_path = os.environ.get("KNOT_EVENTS_SOCK", os.path.expanduser("~/.config/knot/events.sock"))
+
+    _events_socket_path = sock_path
+    sock_dir = os.path.dirname(sock_path)
+    if sock_dir:
+        os.makedirs(sock_dir, exist_ok=True)
+
+    if os.path.exists(sock_path):
+        try:
+            os.unlink(sock_path)
+        except OSError as e:
+            logger.debug("Unlink existing socket: %s", e)
+
+    try:
+        server_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server_sock.bind(sock_path)
+        server_sock.listen(16)
+        server_sock.settimeout(0.5)
+        _events_socket_server = server_sock
+        _events_socket_stop_event.clear()
+    except Exception as e:
+        sys.stderr.write(f"Warning: [hub] Failed to bind events UNIX socket at {sock_path}: {e}\n")
+        return None
+
+    def socket_listener():
+        while not _events_socket_stop_event.is_set():
+            try:
+                client, _ = server_sock.accept()
+                with _events_socket_clients_lock:
+                    _events_socket_clients.add(client)
+                try:
+                    init_line = (json.dumps({"event": "CONNECTED", "time": int(time.time())}) + "\n").encode("utf-8")
+                    client.sendall(init_line)
+                except Exception as e:
+                    logger.debug("Socket handshake write notice: %s", e)
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            except Exception:
+                break
+
+    t = threading.Thread(target=socket_listener, daemon=True, name="knot-events-socket")
+    t.start()
+    return t
+
+
+def stop_events_socket_server():
+    global _events_socket_server, _events_socket_path, _events_socket_stop_event
+    _events_socket_stop_event.set()
+    with _events_socket_clients_lock:
+        for client_sock in list(_events_socket_clients):
+            try:
+                client_sock.close()
+            except Exception as e:
+                logger.debug("Client socket close notice: %s", e)
+        _events_socket_clients.clear()
+
+    if _events_socket_server:
+        try:
+            _events_socket_server.close()
+        except Exception as e:
+            logger.debug("Events server close notice: %s", e)
+        _events_socket_server = None
+
+    if _events_socket_path and os.path.exists(_events_socket_path):
+        try:
+            os.unlink(_events_socket_path)
+        except OSError as e:
+            logger.debug("Unlink events socket notice: %s", e)
+        _events_socket_path = None
+
 
 
 KNOT_ROOT = os.path.abspath(
@@ -3127,6 +3272,41 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 with _subscribers_lock:
                     _subscribers.discard(q)
 
+        elif path == "/strand/events":
+            query = parse_qs(parsed.query)
+            target_run_id = query.get("run_id", [""])[0]
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+
+            import queue
+            q = queue.Queue(maxsize=100)
+            sub_entry = (q, target_run_id if target_run_id else None)
+            with _strand_subscribers_lock:
+                _strand_subscribers.add(sub_entry)
+
+            init_msg = f"event: connected\ndata: {json.dumps({'time': int(time.time()), 'run_id': target_run_id})}\n\n".encode("utf-8")
+            try:
+                self.wfile.write(init_msg)
+                self.wfile.flush()
+                while True:
+                    try:
+                        msg = q.get(timeout=15.0)
+                        self.wfile.write(msg)
+                        self.wfile.flush()
+                    except queue.Empty:
+                        self.wfile.write(b": heartbeat\n\n")
+                        self.wfile.flush()
+            except (ConnectionResetError, BrokenPipeError) as e:
+                logger.debug("Strand SSE subscriber disconnected: %s", e)
+            finally:
+                with _strand_subscribers_lock:
+                    _strand_subscribers.discard(sub_entry)
+
         else:
             self._serve_static(path)
 
@@ -3146,6 +3326,20 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             except Exception:
                 self._send_error("Invalid JSON body", 400)
                 return
+
+        if path in ("/strand/event", "/strand/events"):
+            if not isinstance(body, dict):
+                self._send_error("Request body must be a JSON object", 400)
+                return
+            if not body.get("event"):
+                self._send_error("Field 'event' is required", 400)
+                return
+            try:
+                stored = publish_strand_event(body)
+                self._send_json({"status": "ok", "event": stored}, 200)
+            except Exception as e:
+                self._send_error(f"Failed to publish strand event: {e}", 500)
+            return
 
         if path == "/swarm/enroll/invite":
             expires_in = int(body.get("expires_in", 600))
@@ -3936,6 +4130,10 @@ def main():
     print(f"[*] Database: {db_path} (WAL mode active)")
     print(f"[*] Web Cockpit available at: {protocol}://0.0.0.0:{port}/kafe")
 
+    events_sock = os.environ.get("KNOT_EVENTS_SOCK", os.path.expanduser("~/.config/knot/events.sock"))
+    start_events_socket_server(events_sock)
+    print(f"[*] Strand Event Bus UNIX domain socket active at: {events_sock}")
+
     stop_event = threading.Event()
     reaper_thread = threading.Thread(target=lease_reaper_loop, args=(db, stop_event), daemon=True)
     reaper_thread.start()
@@ -3945,6 +4143,7 @@ def main():
     except KeyboardInterrupt:
         print("\n[*] Shutting down Knot Hub...")
     finally:
+        stop_events_socket_server()
         stop_event.set()
         server.server_close()
 

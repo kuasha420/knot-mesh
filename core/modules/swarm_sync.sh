@@ -178,7 +178,10 @@ swarm_sync_anchor_push() {
   fi
   echo "$remote_sync_out"
 
-  # 8. Reload auxiliary daemons if currently active
+  # 8. Synchronize terminfo definitions if missing
+  swarm_sync_terminfo "$target"
+
+  # 9. Reload auxiliary daemons if currently active
   local reload_err=""
   if ! reload_err="$(ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new "$target" "
     if systemctl --user is-active knot-agent.service 2>&1 | grep -q '^active'; then
@@ -595,6 +598,139 @@ swarm_sync_dev() {
   else
     swarm_sync_strand_pull
   fi
+
+  return 0
+}
+
+# ------------------------------------------------------------------------------
+# Pacman Mirrorlist Synchronization (Issue #79)
+# ------------------------------------------------------------------------------
+swarm_sync_mirrors() {
+  local target="${1:-}"
+  local mirrorlist_src="${KNOT_PACMAN_MIRRORLIST:-/etc/pacman.d/mirrorlist}"
+
+  if [ ! -r "$mirrorlist_src" ]; then
+    knot_log_err "Local mirrorlist source not found or not readable: $mirrorlist_src"
+    return 1
+  fi
+
+  local active_swarm
+  active_swarm="$(knot_get_active_swarm)"
+  local my_host
+  my_host="$(knot_detect_hostname)"
+  local anchor_id="desktop"
+  local anchor_host="desktop"
+
+  if knot_load_swarm_profile "$active_swarm"; then
+    anchor_id="${ANCHOR_ID:-desktop}"
+    anchor_host="${ANCHOR_HOST:-desktop}"
+  fi
+
+  local nodes_to_sync=()
+  if [ -n "$target" ] && [ "$target" != "--all" ] && [ "$target" != "all" ]; then
+    nodes_to_sync=("$target")
+  else
+    local nodes_dir=""
+    if nodes_dir="$(knot_get_nodes_dir)"; then
+      for manifest in "$nodes_dir/"*.json; do
+        [ -e "$manifest" ] || continue
+        local id host role
+        id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+        host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+        role="$(awk -F'"' '/"role":/ {print $4}' "$manifest")"
+        if [ "$id" = "$anchor_id" ] || [ "$host" = "$anchor_host" ] || [ "$id" = "$my_host" ] || [ "$host" = "$my_host" ] || [ "$role" = "anchor" ]; then
+          continue
+        fi
+        nodes_to_sync+=("$id")
+      done
+    fi
+  fi
+
+  if [ ${#nodes_to_sync[@]} -eq 0 ]; then
+    knot_log_warn "No eligible remote Strands found to synchronize mirrorlist to."
+    return 0
+  fi
+
+  local sync_success=0
+  for node in "${nodes_to_sync[@]}"; do
+    knot_log_info "Distributing optimized mirrorlist to Strand '$node'..."
+    local ssh_err=""
+    if ! ssh_err="$(ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new "$node" "sudo -n tee /etc/pacman.d/mirrorlist >/dev/null || sudo tee /etc/pacman.d/mirrorlist >/dev/null" < "$mirrorlist_src" 2>&1)"; then
+      knot_log_err "Failed to push mirrorlist to '$node': $ssh_err"
+    else
+      knot_log_ok "Mirrorlist synchronized to Strand '$node'."
+      sync_success=$((sync_success + 1))
+    fi
+  done
+
+  knot_log_ok "Pacman mirrorlist synchronization complete ($sync_success/${#nodes_to_sync[@]} strands updated)."
+  return 0
+}
+
+# ------------------------------------------------------------------------------
+# Automated Terminfo Synchronization (Issue #64)
+# ------------------------------------------------------------------------------
+swarm_sync_terminfo() {
+  local target="${1:-}"
+  local cur_term="${TERM:-xterm-256color}"
+
+  # Verify local infocmp availability
+  if ! command -v infocmp >/dev/null; then
+    knot_log_warn "Notice: infocmp not found on local system. Skipping terminfo sync."
+    return 0
+  fi
+
+  # Query local terminfo definition
+  local terminfo_dump=""
+  if ! terminfo_dump="$(infocmp -x "$cur_term" 2>&1)"; then
+    knot_log_warn "Notice: Unable to extract local terminfo definition for '$cur_term': $terminfo_dump"
+    return 0
+  fi
+
+  local active_swarm
+  active_swarm="$(knot_get_active_swarm)"
+  local my_host
+  my_host="$(knot_detect_hostname)"
+  local anchor_id="desktop"
+  local anchor_host="desktop"
+
+  if knot_load_swarm_profile "$active_swarm"; then
+    anchor_id="${ANCHOR_ID:-desktop}"
+    anchor_host="${ANCHOR_HOST:-desktop}"
+  fi
+
+  local nodes_to_sync=()
+  if [ -n "$target" ] && [ "$target" != "--all" ] && [ "$target" != "all" ]; then
+    nodes_to_sync=("$target")
+  else
+    local nodes_dir=""
+    if nodes_dir="$(knot_get_nodes_dir)"; then
+      for manifest in "$nodes_dir/"*.json; do
+        [ -e "$manifest" ] || continue
+        local id host role
+        id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
+        host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
+        role="$(awk -F'"' '/"role":/ {print $4}' "$manifest")"
+        if [ "$id" = "$anchor_id" ] || [ "$host" = "$anchor_host" ] || [ "$id" = "$my_host" ] || [ "$host" = "$my_host" ] || [ "$role" = "anchor" ]; then
+          continue
+        fi
+        nodes_to_sync+=("$id")
+      done
+    fi
+  fi
+
+  for node in "${nodes_to_sync[@]}"; do
+    local probe_out=""
+    if ! probe_out="$(ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new "$node" "infocmp -x '$cur_term' >/dev/null" 2>&1)"; then
+      knot_log_info "Terminfo '$cur_term' missing on Strand '$node'; compiling to remote ~/.terminfo..."
+      local tic_err=""
+      if ! tic_err="$(printf '%s' "$terminfo_dump" | ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new "$node" "mkdir -p \$HOME/.terminfo && tic -x -" 2>&1)"; then
+        knot_log_warn "Notice: Failed to compile terminfo on '$node': $tic_err"
+      else
+        knot_log_ok "Terminfo '$cur_term' successfully compiled on Strand '$node'."
+      fi
+    fi
+  done
 
   return 0
 }

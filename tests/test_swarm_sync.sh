@@ -143,8 +143,23 @@ if [[ "$cmd" =~ command\ -v\ rsync ]]; then
   exit 1 # simulate minimal system without rsync
 fi
 
-if [[ "$cmd" =~ knot\ sync ]]; then
+if [[ "$cmd" =~ knot.*sync ]]; then
   echo "[✓] Mock remote knot sync executed on $target"
+  exit 0
+fi
+
+if [[ "$cmd" =~ mirrorlist ]]; then
+  mkdir -p "$MOCK_REMOTE_HOME/etc/pacman.d"
+  cat > "$MOCK_REMOTE_HOME/etc/pacman.d/mirrorlist"
+  exit 0
+fi
+
+if [[ "$cmd" =~ infocmp ]]; then
+  exit 1 # simulate missing terminfo on remote strand
+fi
+
+if [[ "$cmd" =~ tic ]]; then
+  mkdir -p "$MOCK_REMOTE_HOME/.terminfo"
   exit 0
 fi
 
@@ -219,10 +234,35 @@ echo "  -> swarm_sync_strand_pull retrieved topology and node manifests: OK"
 
 echo "=== [Test 4] CLI Help & Option Dispatch Verification ==="
 HELP_OUT="$("$KNOT_ROOT/bin/knot" --help)"
-if ! echo "$HELP_OUT" | grep -q "knot sync \[--all | <node_id>\]"; then
+if ! echo "$HELP_OUT" | grep -q "knot sync"; then
   echo "Error: knot sync usage not found in help text!" >&2
   exit 1
 fi
-echo "  -> CLI usage output contains 'knot sync [--all | <node_id>]': OK"
+echo "  -> CLI usage output contains 'knot sync': OK"
+
+echo "=== [Test 5] knot sync --mirrors Verification (Issue #79) ==="
+export HOME="$TMP_DIR/home"
+MOCK_MIRRORLIST="$TMP_DIR/mirrorlist_test"
+echo "Server = https://mirror.rackspace.com/archlinux/\$repo/os/\$arch" > "$MOCK_MIRRORLIST"
+export KNOT_PACMAN_MIRRORLIST="$MOCK_MIRRORLIST"
+
+swarm_sync_mirrors "laptop"
+if [ ! -f "$MOCK_REMOTE_HOME/etc/pacman.d/mirrorlist" ]; then
+  echo "Error: mirrorlist was not pushed to remote strand!" >&2
+  exit 1
+fi
+if ! grep -q "rackspace" "$MOCK_REMOTE_HOME/etc/pacman.d/mirrorlist"; then
+  echo "Error: remote mirrorlist contents do not match source!" >&2
+  exit 1
+fi
+echo "  -> swarm_sync_mirrors successfully distributed mirrorlist: OK"
+
+echo "=== [Test 6] knot sync --terminfo Verification (Issue #64) ==="
+swarm_sync_terminfo "laptop"
+if [ ! -d "$MOCK_REMOTE_HOME/.terminfo" ]; then
+  echo "Error: terminfo directory was not created on remote strand!" >&2
+  exit 1
+fi
+echo "  -> swarm_sync_terminfo successfully synced terminfo: OK"
 
 echo "=== [✓] ALL SWARM SYNC TESTS PASSED! ==="

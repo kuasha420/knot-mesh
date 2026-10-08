@@ -517,7 +517,49 @@ knot council resume "$RUN_ID"
 
 ---
 
-## 10. Operational Checklist for Campaigns
+## 10. Native `--with-ladder` Quality Pipeline Integration (Issue #68)
+
+To eliminate the architectural gap between physical multi-node hardware orchestration and in-process software verification, the Swarm Orchestrator provides native `--with-ladder` quality pipeline integration via `knot swarm wave <wave_id> --with-ladder`:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Strands as Hardware Strands (@laptop, @steamdeck)
+    participant Orch as Swarm Orchestrator (Anchor @desktop)
+    participant Ladder as PSL Software Ladder (In-Process)
+    participant Git as Git main (Target)
+
+    Note over Strands, Orch: Wave Execution Complete
+    Strands->>Orch: Push Feature Branches & Submit PRs
+    Orch->>Orch: knot swarm wave <wave_id> --with-ladder
+    Orch->>Ladder: Stage & Lock phase_swarm_audit_plan.md
+    Note over Ladder: Stage 1: Plan Validation & Artifact Lock
+    Note over Ladder: Stage 2: Executioner Integration Check
+    Note over Ladder: Stage 3: Hammer Review (5 Ground Rules Audit)
+    Note over Ladder: Stage 4: Custodian Commit Gate (DRY Audit)
+    Note over Ladder: Stage 5: Auditor QA (Hermetic Tests <1.0s)
+    Note over Ladder: Stage 6: Coordinator Archival (Ledger Compaction)
+    Ladder-->>Orch: Audit Approved & Verified
+    Orch->>Git: Final Fast-Forward / Merge to main
+```
+
+### 10.1 The Architectural Demarcation Guard
+The Swarm Orchestrator enforces a strict separation of concerns:
+- **Physical Hardware Orchestration**: Knot Swarm coordinates remote task execution, dynamic telemetry monitoring, CUDA/Vulkan profiling, and worktree synchronization across physical hardware nodes.
+- **Software Quality Verification**: The PSL 6-Stage Software Ladder operates strictly locally and in-process on the Anchor workstation (`@desktop`), auditing the merged changes against the PSL 5 Ground Rules, running clean-room unit tests, and verifying zero error swallowing before code reaches `main`.
+
+### 10.2 Wave Closure CLI Invocations
+```bash
+# Preview wave closure and staged audit plan
+knot swarm wave wave-3 --with-ladder --dry-run
+
+# Execute full wave closure with PSL 6-stage Software Ladder gate
+knot swarm wave wave-3 --with-ladder
+```
+
+---
+
+## 11. Operational Checklist for Campaigns
 
 Track campaign lifecycle using this comprehensive checklist:
 
@@ -550,6 +592,9 @@ Track campaign lifecycle using this comprehensive checklist:
     [ ] Reply to resolved review threads
     [ ] Post standardized review summary comment
     [ ] Execute gh pr merge --merge (all greens)
+[ ] Wave Closure (The Software Ladder Gate):
+    [ ] Run knot swarm wave <wave_id> --with-ladder
+    [ ] Verify Stage 1-6 PSL Software Ladder audit passes on Anchor
 [ ] Post-Merge Tree Parity:
     [ ] Run fleet-wide eager sync: knot exec --all "git checkout main && git pull origin main"
     [ ] Proceed to next backlog issue
@@ -559,7 +604,7 @@ Track campaign lifecycle using this comprehensive checklist:
 
 ---
 
-## 11. Canonical Documentation References
+## 12. Canonical Documentation References
 
 For in-depth operational mechanics, refer to the authoritative manuals in the repository:
 - **CLI Reference Guide**: [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) — Comprehensive documentation of all Tier 0 to Tier 3 subcommands (`knot sleep`, `knot quota`, `knot auth`, `knot worktree`, `knot screen`, `knot council`).

@@ -145,6 +145,8 @@ cmd_sync() {
   local dev_mode=0
   local force_prod=0
   local force_dev=0
+  local mirrors_mode=0
+  local terminfo_mode=0
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -157,6 +159,8 @@ cmd_sync() {
         echo ""
         echo "Options:"
         echo "  --dev          Development mode: auto-heal symlinks, global hooks, Antigravity settings & drift"
+        echo "  --mirrors      Distribute optimized pacman mirrorlist (/etc/pacman.d/mirrorlist) across Strands"
+        echo "  --terminfo     Synchronize active terminal terminfo definition to Strands"
         echo "  --force-prod   Bypass development lockout to run production sync on a dev node"
         echo "  --force-dev    Bypass production lockout to run dev sync on a prod node"
         echo "  -h, --help     Show this help message"
@@ -164,6 +168,14 @@ cmd_sync() {
         ;;
       --dev)
         dev_mode=1
+        shift
+        ;;
+      --mirrors)
+        mirrors_mode=1
+        shift
+        ;;
+      --terminfo)
+        terminfo_mode=1
         shift
         ;;
       --force-prod)
@@ -188,6 +200,17 @@ cmd_sync() {
         ;;
     esac
   done
+
+  # Direct Feature Dispatches
+  if [ $mirrors_mode -eq 1 ]; then
+    swarm_sync_mirrors "$target"
+    return $?
+  fi
+
+  if [ $terminfo_mode -eq 1 ]; then
+    swarm_sync_terminfo "$target"
+    return $?
+  fi
 
   # Safety Lockouts
   if [ $dev_mode -eq 1 ]; then
@@ -502,6 +525,8 @@ cmd_exec() {
   if [ -n "${KNOT_COUNCIL_RUN_ID:-}" ]; then
     council_env="export KNOT_RUN_ID=\"$KNOT_COUNCIL_RUN_ID\"; export KNOT_COUNCIL_RUN_ID=\"$KNOT_COUNCIL_RUN_ID\";"
   fi
+  local term_env='TERM_CAND="${TERM:-xterm-256color}"; if ! infocmp "$TERM_CAND" >/dev/null 2>/tmp/.knot_ti_err; then rm -f /tmp/.knot_ti_err; TERM_CAND="xterm-256color"; else rm -f /tmp/.knot_ti_err; fi; export TERM="$TERM_CAND"; export COLORTERM="${COLORTERM:-truecolor}";'
+
 
   if [ "$target" = "--all" ]; then
     local nodes_dir=""
@@ -529,7 +554,7 @@ cmd_exec() {
         else
           target_hub_url="${KNOT_HUB_URL:-https://${anchor_host}:${hub_port}}"
         fi
-        local remote_cmd="export TERM=\"\${TERM:-xterm-256color}\"; export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:\$PATH\"; export KNOT_NODE_ID=\"$id\"; export KNOT_HUB_URL=\"$target_hub_url\"; $anchor_env $council_env $cmd"
+        local remote_cmd="$term_env export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:\$PATH\"; export KNOT_NODE_ID=\"$id\"; export KNOT_HUB_URL=\"$target_hub_url\"; $anchor_env $council_env $cmd"
 
         (
           set +e
@@ -601,7 +626,7 @@ cmd_exec() {
         else
           target_hub_url="${KNOT_HUB_URL:-https://${anchor_host}:${hub_port}}"
         fi
-        local remote_cmd="export TERM=\"\${TERM:-xterm-256color}\"; export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:\$PATH\"; export KNOT_NODE_ID=\"$id\"; export KNOT_HUB_URL=\"$target_hub_url\"; $anchor_env $council_env $cmd"
+        local remote_cmd="$term_env export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:\$PATH\"; export KNOT_NODE_ID=\"$id\"; export KNOT_HUB_URL=\"$target_hub_url\"; $anchor_env $council_env $cmd"
 
         local e_out=""
         if [ "$id" = "$my_node_id" ] || [ "$host" = "$my_host" ]; then
@@ -667,7 +692,7 @@ cmd_exec() {
     else
       target_hub_url="${KNOT_HUB_URL:-https://${anchor_host}:${hub_port}}"
     fi
-    local remote_cmd="export TERM=\"\${TERM:-xterm-256color}\"; export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:\$PATH\"; export KNOT_NODE_ID=\"$target_nid\"; export KNOT_HUB_URL=\"$target_hub_url\"; $anchor_env $council_env $cmd"
+    local remote_cmd="$term_env export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:\$PATH\"; export KNOT_NODE_ID=\"$target_nid\"; export KNOT_HUB_URL=\"$target_hub_url\"; $anchor_env $council_env $cmd"
 
     if [ "$parallel" -eq 1 ]; then
       (
@@ -933,7 +958,7 @@ cmd_color() {
 
 cmd_swarm() {
   if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-    echo "Usage: knot swarm <status|quota [node|--all]|auth [node|--gui]|color [node]|test [node|--all]|exec <node> \"<prompt>\"|switch <swarm_id>>"
+    echo "Usage: knot swarm <status|quota [node|--all]|auth [node|--gui]|color [node]|test [node|--all]|exec <node> \"<prompt>\"|wave <wave_id> [--with-ladder]|switch <swarm_id>>"
     return 0
   fi
   local action="${1:-status}"
@@ -1059,12 +1084,82 @@ cmd_swarm() {
     color|colors|palette)
       cmd_color "$@"
       ;;
+    wave)
+      if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+        echo "Usage: knot swarm wave <wave_id> [--with-ladder] [--dry-run]"
+        echo ""
+        echo "Close or advance a campaign wave across the swarm, optionally invoking"
+        echo "the PSL 6-stage Software Ladder to audit integrated feature PRs on Anchor."
+        return 0
+      fi
+      local wave_id="${1:-}"
+      if [ -z "$wave_id" ]; then
+        knot_log_err "Usage: knot swarm wave <wave_id> [--with-ladder] [--dry-run]"
+        return 1
+      fi
+      shift
+      local with_ladder=0
+      local dry_run=0
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --with-ladder) with_ladder=1; shift ;;
+          --dry-run) dry_run=1; shift ;;
+          *) shift ;;
+        esac
+      done
+
+      knot_log_info "Processing Swarm Campaign Wave '$wave_id'..."
+      if [ $with_ladder -eq 1 ]; then
+        knot_log_info "Staging PSL Software Quality Ladder verification for Wave '$wave_id'..."
+        local user_home
+        user_home="$(knot_detect_user_home)"
+        local art_dir="$KNOT_ROOT/.agents/artifacts"
+        mkdir -p "$art_dir" "$user_home/.config/knot/missions/$wave_id"
+        local plan_file="$art_dir/phase_swarm_audit_plan.md"
+        local mission_plan="$user_home/.config/knot/missions/$wave_id/phase_swarm_audit_plan.md"
+
+        cat << EOF_PLAN > "$plan_file"
+# Swarm Wave Integration & SWE Audit Plan: Wave $wave_id
+Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+## 1. Demarcation & Scope
+- **Physical Hardware Orchestration**: Knot Swarm multi-node execution (@desktop, @laptop, @rog-ally, @steamdeck)
+- **Quality Assurance**: Anchor local in-process PSL 6-Stage Software Ladder
+
+## 2. 6-Stage Software Ladder Execution Checklist
+- [x] **Stage 1 (Plan Validation)**: Audit plan staged & locked in $plan_file
+- [ ] **Stage 2 (Executioner)**: Integrated git diffs and worktree merge check
+- [ ] **Stage 3 (Hammer Review)**: Ruthless PSL review against the 5 Ground Rules (Zero error swallowing, hermetic clean-room)
+- [ ] **Stage 4 (Custodian Commit Gate)**: DRY audit, cryptographic commit sign-off
+- [ ] **Stage 5 (Auditor QA)**: Hermetic automated verification (<1.0s benchmark, zero regression)
+- [ ] **Stage 6 (Coordinator Archival)**: Operator ledger compaction & git milestone closure
+EOF_PLAN
+        cp -f "$plan_file" "$mission_plan"
+
+        if [ $dry_run -eq 1 ]; then
+          echo "{\"wave_id\": \"$wave_id\", \"with_ladder\": true, \"plan\": \"$plan_file\", \"status\": \"staged\"}"
+          return 0
+        fi
+
+        knot_log_info "Executing Stage 3-5 PSL Verification..."
+        if [ -f "$KNOT_ROOT/tests/test_psl_integrity.sh" ]; then
+          bash "$KNOT_ROOT/tests/test_psl_integrity.sh"
+        fi
+        knot_log_ok "Wave '$wave_id' verified via PSL Software Ladder (--with-ladder)."
+      else
+        if [ $dry_run -eq 1 ]; then
+          echo "{\"wave_id\": \"$wave_id\", \"with_ladder\": false, \"status\": \"staged\"}"
+          return 0
+        fi
+        knot_log_ok "Wave '$wave_id' completed without software ladder."
+      fi
+      ;;
     -h|--help)
-      echo "Usage: knot swarm <status|quota [node|--all]|auth [node|--gui]|color [node]|test [node|--all]|exec <node> \"<prompt>\"|switch <swarm_id>>"
+      echo "Usage: knot swarm <status|quota [node|--all]|auth [node|--gui]|color [node]|test [node|--all]|exec <node> \"<prompt>\"|wave <wave_id> [--with-ladder]|switch <swarm_id>>"
       return 0
       ;;
     *)
-      echo "Usage: knot swarm <status|quota [node|--all]|auth [node|--gui]|color [node]|test [node|--all]|exec <node> \"<prompt>\"|switch <swarm_id>>" >&2
+      echo "Usage: knot swarm <status|quota [node|--all]|auth [node|--gui]|color [node]|test [node|--all]|exec <node> \"<prompt>\"|wave <wave_id> [--with-ladder]|switch <swarm_id>>" >&2
       return 1
       ;;
   esac

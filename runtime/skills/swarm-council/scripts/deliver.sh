@@ -115,6 +115,9 @@ echo -e "\033[1;36m║\033[0m  Mode:      \033[32mZero-Token Standby (Awaiting c
 echo -e "\033[1;36m║\033[0m  Commands:  \033[32mknot council reply\033[0m | \033[32mknot council steer\033[0m"
 echo -e "\033[1;36m╚══════════════════════════════════════════════════════════════════════╝\033[0m"
 echo ""
+if [ -n "${KNOT_HUB_URL:-}" ] && command -v curl >/dev/null; then
+  curl -s -o /dev/null -X POST "$KNOT_HUB_URL/strand/event" -H "Content-Type: application/json" -d "{\"run_id\":\"RUN_ID_PLACEHOLDER\",\"node_id\":\"NODE_ID_PLACEHOLDER\",\"event\":\"TURN_START\",\"details\":{\"mode\":\"standby\"}}" || echo "Notice: event bus report error" >&2
+fi
 exec agy --project "$PROJECT_NAME" --dangerously-skip-permissions
 EOF_LAUNCH
     else
@@ -160,6 +163,10 @@ print(res or os.getcwd())
 
 if [ -d "$PROJECT_DIR" ]; then
   cd "$PROJECT_DIR"
+fi
+
+if [ -n "${KNOT_HUB_URL:-}" ] && command -v curl >/dev/null; then
+  curl -s -o /dev/null -X POST "$KNOT_HUB_URL/strand/event" -H "Content-Type: application/json" -d "{\"run_id\":\"RUN_ID_PLACEHOLDER\",\"node_id\":\"NODE_ID_PLACEHOLDER\",\"event\":\"TURN_START\",\"details\":{\"mode\":\"mission\"}}" || echo "Notice: event bus report error" >&2
 fi
 
 if [ "${1:-}" = "--headless" ] || [ "${1:-}" = "-p" ]; then

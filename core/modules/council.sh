@@ -621,21 +621,109 @@ council_steer() {
     knot_log_ok "Steered node '@$node' via Cockpit Bridge (Run: $run_id)"
 
     if [ "$wait_ack" -eq 1 ]; then
-      knot_log_info "Awaiting turn-state acknowledgement from @$node in Mesh DB (timeout: ${ack_timeout}s)..."
+      knot_log_info "Awaiting turn-state acknowledgement from @$node (timeout: ${ack_timeout}s)..."
       local start_t
       start_t="$(date +%s)"
       local ack_received=0
-      local poll_script="$SCRIPTS_DIR/mesh_db.py"
-      while [ $(( $(date +%s) - start_t )) -lt "$ack_timeout" ]; do
-        sleep 2
-        local latest_msg
-        latest_msg="$(python3 "$poll_script" get_thread --discussion-id "$run_id" 2>&1)"
-        if echo "$latest_msg" | grep -q "\"author\": {\"login\": \"$node\"}"; then
+      local events_sock="${KNOT_EVENTS_SOCK:-$HOME/.config/knot/events.sock}"
+      local hub_url="${KNOT_HUB_URL:-}"
+
+      # 1. Reactive Event Bus subscription via UNIX socket or SSE stream
+      if command -v python3 >/dev/null; then
+        local reactive_rc=0
+        python3 -c '
+import sys, os, socket, json, time, urllib.request
+
+sock_path = sys.argv[1]
+node_id = sys.argv[2]
+run_id = sys.argv[3]
+timeout = float(sys.argv[4])
+hub_url = sys.argv[5] if len(sys.argv) > 5 else ""
+
+deadline = time.time() + timeout
+
+# 1. Try UNIX domain socket first
+if sock_path and os.path.exists(sock_path):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.connect(sock_path)
+        s.settimeout(min(1.0, timeout))
+        buffer = ""
+        while time.time() < deadline:
+            try:
+                chunk = s.recv(4096).decode("utf-8")
+                if not chunk:
+                    break
+                buffer += chunk
+                while "\n" in buffer:
+                    line, buffer = buffer.split("\n", 1)
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        d = json.loads(line)
+                        if d.get("node_id") == node_id and d.get("event") in ("TURN_START", "ACK", "AWAITING_INPUT", "COMPLETED"):
+                            if not run_id or not d.get("run_id") or d.get("run_id") == run_id:
+                                sys.exit(0)
+                    except Exception:
+                        pass
+            except socket.timeout:
+                continue
+    except Exception:
+        pass
+    finally:
+        s.close()
+
+# 2. Try SSE endpoint if hub_url provided and time remains
+if hub_url and time.time() < deadline:
+    try:
+        url = f"{hub_url}/strand/events"
+        if run_id:
+            url += f"?run_id={run_id}"
+        req = urllib.request.Request(url, headers={"Accept": "text/event-stream"})
+        rem_timeout = max(0.5, deadline - time.time())
+        with urllib.request.urlopen(req, timeout=rem_timeout) as resp:
+            for raw_line in resp:
+                if time.time() >= deadline:
+                    break
+                line = raw_line.decode("utf-8").strip()
+                if line.startswith("data:"):
+                    try:
+                        d = json.loads(line[5:].strip())
+                        if d.get("node_id") == node_id and d.get("event") in ("TURN_START", "ACK", "AWAITING_INPUT", "COMPLETED"):
+                            if not run_id or not d.get("run_id") or d.get("run_id") == run_id:
+                                sys.exit(0)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+sys.exit(1)
+' "$events_sock" "$node" "$run_id" "$ack_timeout" "$hub_url" || reactive_rc=$?
+
+        if [ $reactive_rc -eq 0 ]; then
           ack_received=1
-          knot_log_ok "Received acknowledgement from @$node in Mesh DB"
-          break
+          knot_log_ok "Received acknowledgement from @$node via reactive Event Bus"
         fi
-      done
+      fi
+
+      # 2. Fallback to Mesh DB thread query if event bus did not report
+      if [ "$ack_received" -eq 0 ]; then
+        local poll_script="$SCRIPTS_DIR/mesh_db.py"
+        if [ -f "$poll_script" ]; then
+          while [ $(( $(date +%s) - start_t )) -lt "$ack_timeout" ]; do
+            local latest_msg
+            latest_msg="$(python3 "$poll_script" get_thread --discussion-id "$run_id" 2>&1)"
+            if echo "$latest_msg" | grep -q "\"author\": {\"login\": \"$node\"}"; then
+              ack_received=1
+              knot_log_ok "Received acknowledgement from @$node in Mesh DB"
+              break
+            fi
+            sleep 1
+          done
+        fi
+      fi
+
       if [ "$ack_received" -eq 0 ]; then
         knot_log_warn "Timeout waiting for acknowledgement from @$node after ${ack_timeout}s"
       fi
