@@ -706,5 +706,19 @@ The pruning plan is specifically engineered to guarantee that **zero core worksp
 5. **OpenSSH ControlMaster Multiplexing Invariant:**
    - Socket creation, status inspection, and cleanup (`core/modules/ssh.sh`, `core/resolver.sh`, `bin/knot:cmd_socket`) remain 100% untouched.
 
-By executing this rationalization, Knot Mesh will eliminate over 2,500 lines of dead code and speculative vibe bloat, resolve hidden daemon crash risks, dramatically reduce maintenance overhead, and present a hardened, coherent, enterprise-grade CLI interface.
+By executing this rationalization, Knot Mesh eliminated over 13,750 lines of dead code and speculative vibe bloat across 127 files, resolved hidden daemon crash risks, dramatically reduced maintenance overhead, and established a hardened, coherent, enterprise-grade CLI interface.
+
+---
+
+### 12.7 Subagent Ladder Audit & Final Certification Record
+- **Review Cycle**: Subagent Ladder (`/subagent-ladder`)
+- **Sealed Commit**: `4ceeb7b` (`refactor(core): purge dead code, slop subsystems and rationalize CLI surface across sweeps 1-2`)
+- **Impact**: 127 files changed, 1,138 insertions(+), 13,758 deletions(-)
+- **Ladder Pipeline**:
+  1. *Stage 1 (Planning)*: Interactive `/grill-me` alignment, implementation plan locked in.
+  2. *Stage 2 (Execution)*: DeepCoder executed Sweeps 1 & 2 slop purging, file migrations, and daemon decoupling.
+  3. *Stage 3 (Hammer Review)*: Hammer identified 2 defects in `web/` (`useKnotSSE.ts` unlogged catches, dead npm packages). Executioner remediated; Hammer issued formal **PASS**.
+  4. *Stage 4 (Custodian Commit Gate)*: Custodian conducted Macro Architectural Review & DRY deduplication audit, confirmed clean porcelain tree, and sealed commit `4ceeb7b`.
+  5. *Stage 5 (Auditor Certification)*: Auditor independently tested HEAD on `4ceeb7b`: 44/44 pytest passed, 191/191 CLI help passed, 21/21 virtual monitor passed, 22/22 council passed, 10/10 bugbash passed, 5/5 council steer passed, PSL integrity passed (0 defects). Verdict: **PASS**.
+- **Certification Status**: Verified, sealed, and archived.
 
