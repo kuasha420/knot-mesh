@@ -7,6 +7,100 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KNOT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COUNCIL_SCRIPTS="$KNOT_ROOT/runtime/skills/swarm-council/scripts"
 
+# Hermetic isolation: avoid live SSH connections and external LLM API calls
+export KNOT_AUDIT_NODES="desktop,laptop,rog-ally,steamdeck"
+MOCK_HERMETIC_BIN="$(mktemp -d)"
+
+cleanup_hermetic() {
+  rm -rf "$MOCK_HERMETIC_BIN"
+  rm -f "/tmp/test_council_$$.db"*
+  rm -rf "$HOME/.config/knot/missions/unit_test_tourn_$$"
+}
+trap cleanup_hermetic EXIT
+
+# Mock SSH: handles remote commands locally or returns instant simulated answers
+cat << 'MOCK_SSH_EOF' > "$MOCK_HERMETIC_BIN/ssh"
+#!/usr/bin/env bash
+set -euo pipefail
+target=""
+cmd=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o|-p|-i)
+      shift 2 ;;
+    -t|-tt|-q|-v|-n|-N|-f|-s|-X|-x|-Y|-C|-4|-6|-A|-a)
+      shift ;;
+    -*)
+      shift ;;
+    *)
+      if [ -z "$target" ]; then
+        target="$1"
+        shift
+      else
+        cmd="$*"
+        break
+      fi
+      ;;
+  esac
+done
+
+if [[ "$cmd" =~ echo[[:space:]]+"\$HOME" ]] || [[ "$cmd" =~ 'echo "$HOME"' ]]; then
+  echo "$HOME"
+  exit 0
+elif [[ "$cmd" =~ git[[:space:]]+rev-parse ]]; then
+  echo "main"
+  echo "218d86c"
+  echo "$HOME/Dev/knot-mesh"
+  exit 0
+elif [[ "$cmd" =~ command[[:space:]]+-v ]] || [[ "$cmd" =~ \-x[[:space:]]+~/.local/bin ]]; then
+  exit 0
+elif [[ "$cmd" =~ gh[[:space:]]+auth ]]; then
+  echo "Logged in to github.com"
+  exit 0
+elif [[ "$cmd" =~ agy[[:space:]]+--version ]]; then
+  echo "antigravity 1.0.0"
+  exit 0
+elif [[ "$cmd" =~ mkdir ]] || [[ "$cmd" =~ cat[[:space:]]+">" ]]; then
+  if [ ! -t 0 ]; then
+    cat > /dev/null
+  fi
+  exit 0
+else
+  if [ ! -t 0 ]; then
+    cat > /dev/null
+  fi
+  exit 0
+fi
+MOCK_SSH_EOF
+chmod +x "$MOCK_HERMETIC_BIN/ssh"
+
+# Mock agy: provides deterministic responses for local AI inference in classifier
+cat << 'MOCK_AGY_EOF' > "$MOCK_HERMETIC_BIN/agy"
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = "--version" ]; then
+  echo "antigravity 1.0.0"
+  exit 0
+fi
+for arg in "$@"; do
+  if [[ "$arg" =~ "Audit" ]] || [[ "$arg" =~ "fleet" ]] || [[ "$arg" =~ "parallel" ]]; then
+    echo '{"response": "{\"mode\": \"confluence\", \"rationale\": \"multi-node audit\"}"}'
+    exit 0
+  elif [[ "$arg" =~ "Tailwind" ]] || [[ "$arg" =~ "frontend" ]] || [[ "$arg" =~ "dashboard" ]]; then
+    echo '{"response": "{\"mode\": \"gui\", \"rationale\": \"frontend UI\"}"}'
+    exit 0
+  elif [[ "$arg" =~ "nightly" ]] || [[ "$arg" =~ "batch" ]] || [[ "$arg" =~ "midnight" ]]; then
+    echo '{"response": "{\"mode\": \"headless\", \"rationale\": \"nightly batch\"}"}'
+    exit 0
+  fi
+done
+echo '{"response": "{\"mode\": \"confluence\", \"rationale\": \"default\"}"}'
+exit 0
+MOCK_AGY_EOF
+chmod +x "$MOCK_HERMETIC_BIN/agy"
+
+export PATH="$MOCK_HERMETIC_BIN:$PATH"
+
 echo "=== Running Swarm Council Test Suite ==="
 
 # 1. Zero Error Swallowing Audit
@@ -126,7 +220,6 @@ echo "PASSED"
 # 8. Isolated Mesh DB CRUD & Delta Polling
 echo -n "8. Testing Mesh DB engine (create, reply, delta, get_thread)... "
 test_db="/tmp/test_council_$$.db"
-trap 'rm -f "$test_db" "$test_db-wal" "$test_db-shm"' EXIT
 
 create_res="$(python3 "$COUNCIL_SCRIPTS/mesh_db.py" --db-path "$test_db" create --title "Unit Test Mission" --body "Mission Body" --run-id "test_mesh_$$")"
 t_id="$(echo "$create_res" | jq -r '.id')"
@@ -362,7 +455,6 @@ fi
 # Test tournament launcher delivery for active server vs standby
 test_tourn_run="unit_test_tourn_$$"
 mkdir -p "$HOME/.config/knot/missions/$test_tourn_run"
-trap 'rm -rf "$HOME/.config/knot/missions/$test_tourn_run"' EXIT
 
 python3 "$COUNCIL_SCRIPTS/scaffolder.py" --run-id "$test_tourn_run" --pack tournament --db mesh --nodes "$resolved_nid,mock-peer" --project-dir "$KNOT_ROOT" >/dev/null
 

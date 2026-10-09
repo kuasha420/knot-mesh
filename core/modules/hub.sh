@@ -46,14 +46,16 @@ hub_ensure_services() {
   local user_systemd="$HOME/.config/systemd/user"
   mkdir -p "$user_systemd"
 
-  cat << EOF > "$user_systemd/knot-hub.service"
+  # Unlink existing symlinks/files first to prevent writing through symlink into git repo
+  rm -f "$user_systemd/knot-hub.service"
+  cat << 'EOF' > "$user_systemd/knot-hub.service"
 [Unit]
 Description=Knot Swarm Blackboard Hub Daemon
 After=network.target default.target
 
 [Service]
 Type=simple
-ExecStart=$KNOT_ROOT/core/hub/hub.py
+ExecStart=%h/.local/bin/knot-hub
 Restart=always
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1
@@ -64,14 +66,15 @@ StandardError=journal
 WantedBy=default.target
 EOF
 
-  cat << EOF > "$user_systemd/knot-agent.service"
+  rm -f "$user_systemd/knot-agent.service"
+  cat << 'EOF' > "$user_systemd/knot-agent.service"
 [Unit]
 Description=Knot Swarm Worker Agent Daemon
 After=network.target default.target
 
 [Service]
 Type=simple
-ExecStart=$KNOT_ROOT/core/hub/agent.py
+ExecStart=%h/.local/bin/knot-agent
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1

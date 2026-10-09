@@ -10,7 +10,7 @@ source "$KNOT_ROOT/core/modules/hub.sh"
 
 telemetry_get_local_power() {
   python3 -c '
-import os, glob, json
+import os, glob, json, sys
 
 ac_online = True
 has_ac_record = False
@@ -27,8 +27,8 @@ for p in glob.glob("/sys/class/power_supply/*"):
                     has_ac_record = True
                     with open(on_file) as f:
                         ac_online = (f.read().strip() == "1")
-        except Exception:
-            pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [telemetry] Power supply read notice: {_err}\n")
 
 bat_pct = None
 bat_status = "AC"
@@ -42,8 +42,8 @@ for p in glob.glob("/sys/class/power_supply/BAT*"):
                 bat_pct = int(f.read().strip())
             with open(st_file) as f:
                 bat_status = f.read().strip()
-        except Exception:
-            pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [telemetry] Battery cap read notice: {_err}\n")
 
 if bat_pct is None:
     bat_status = "Full" if ac_online else "Discharging"
@@ -161,9 +161,10 @@ try:
         raw = json.loads(r.read().decode("utf-8"))
         res = {n.get("id"): n for n in raw if isinstance(n, dict) and "id" in n}
         print(json.dumps(res))
-except Exception:
+except Exception as _err:
+    sys.stderr.write(f"Notice: [telemetry] Hub nodes query exception: {_err}\n")
     print("{}")
-' 2>&1)"; then
+' )"; then
       hub_nodes_json="$curl_out"
     fi
   fi

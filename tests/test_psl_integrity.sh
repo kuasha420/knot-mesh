@@ -15,7 +15,7 @@ echo -e "\033[1;34m============================================================\
 # Section 1: Zero Error Swallowing Code Audit
 # -------------------------------------------------------------
 echo -e "\n\033[1m[Audit 1/5] Scanning for Forbidden Error-Swallowing Patterns...\033[0m"
-FORBIDDEN_PATTERN='(2>/dev/null|&>/dev/null|> */dev/null *2>&1|\|\| *true|\|\| *:)'
+FORBIDDEN_PATTERN='(2>/dev/null|&>/dev/null|> */dev/null *2>&1|\|\| *true|\|\| *:|subprocess\.DEVNULL)'
 AUDIT_TARGETS=(
   "$KNOT_ROOT/bin"
   "$KNOT_ROOT/core"
@@ -211,8 +211,9 @@ for root_dir in [os.path.join(knot_root, d) for d in ["bin", "core", "runtime", 
                                 elif len(h.body) == 1 and isinstance(h.body[0], ast.Expr) and isinstance(h.body[0].value, ast.Constant) and h.body[0].value.value is ...:
                                     sys.stderr.write(f"FAIL_EXCEPTION: Swallowed exception (ellipsis) at {fpath}:{h.lineno}\n")
                                     failures += 1
-                except SyntaxError:
-                    pass
+                except SyntaxError as e:
+                    sys.stderr.write(f"FAIL_SYNTAX: Syntax error in {fpath}: {e}\n")
+                    failures += 1
                 except (IOError, OSError) as e:
                     sys.stderr.write(f"FAIL_READ: {fpath}: {e}\n")
                     failures += 1

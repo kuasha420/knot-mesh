@@ -40,14 +40,16 @@ def resolve_project_dir(project_target=None):
                     except Exception as _err:
                         sys.stderr.write(f"Notice: [resolve_project] Handled exception: {_err}\n")
             try:
-                top = subprocess.check_output(
+                res = subprocess.run(
                     ["git", "rev-parse", "--show-toplevel"],
                     cwd=target_dir,
-                    text=True,
-                    stderr=subprocess.DEVNULL
-                ).strip()
-                if top and os.path.isdir(top):
-                    return top
+                    capture_output=True,
+                    text=True
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    top = res.stdout.strip()
+                    if os.path.isdir(top):
+                        return top
             except Exception as _err:
                 sys.stderr.write(f"Notice: [resolve_project] Handled exception: {_err}\n")
             return target_dir
@@ -109,13 +111,15 @@ def resolve_project_dir(project_target=None):
 
     # 3. Fallback to git toplevel or CWD
     try:
-        top = subprocess.check_output(
+        res = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
-            text=True,
-            stderr=subprocess.DEVNULL
-        ).strip()
-        if top and os.path.isdir(top):
-            return top
+            capture_output=True,
+            text=True
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            top = res.stdout.strip()
+            if os.path.isdir(top):
+                return top
     except Exception as _err:
         sys.stderr.write(f"Notice: [resolve_project] Handled exception: {_err}\n")
 

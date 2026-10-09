@@ -176,12 +176,14 @@ def resolve_repo(owner="", repo=""):
     if owner and repo:
         return owner, repo
     try:
-        url = subprocess.check_output(["git", "config", "--get", "remote.origin.url"], text=True, stderr=subprocess.DEVNULL).strip()
-        import re
-        m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)(?:\.git)?", url)
-        if m:
-            det_owner, det_repo = m.group(1), m.group(2)
-            return owner or det_owner, repo or det_repo
+        res = subprocess.run(["git", "config", "--get", "remote.origin.url"], capture_output=True, text=True)
+        url = res.stdout.strip() if res.returncode == 0 else ""
+        if url:
+            import re
+            m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)(?:\.git)?", url)
+            if m:
+                det_owner, det_repo = m.group(1), m.group(2)
+                return owner or det_owner, repo or det_repo
     except Exception as _err:
         sys.stderr.write(f"Notice: [gh_discussion] Handled exception: {_err}\n")
     return owner or "kuasha420", repo or "knot-mesh"

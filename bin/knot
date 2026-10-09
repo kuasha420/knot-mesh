@@ -415,22 +415,38 @@ cmd_status() {
           fi
         fi
 
-        local kvm_status="${C_YELLOW}DISCONNECTED${C_RESET}"
-        if [ "$id" = "$anchor_id" ] || [ "$host" = "$anchor_host" ]; then
-          local count=0
-          if [ -n "$established_kvm_ips" ]; then
-            count="$(echo "$established_kvm_ips" | grep -v '^$' | wc -l)"
+        local ssh_reachable=0
+        local probe_out=""
+        if command -v nc >/dev/null; then
+          if probe_out="$(nc -z -w 1 "$resolved_ip" "$port" 2>&1)"; then
+            ssh_reachable=1
           fi
-          kvm_status="${C_GREEN}SERVER ($count connected)${C_RESET}"
         else
-          if [ -n "$established_kvm_ips" ] && echo "$established_kvm_ips" | grep -q "$resolved_ip"; then
-            kvm_status="${C_GREEN}CONNECTED${C_RESET}"
-          else
-            kvm_status="${C_YELLOW}DISCONNECTED${C_RESET}"
+          if probe_out="$(timeout 1 bash -c "cat < /dev/null > /dev/tcp/$resolved_ip/$port" 2>&1)"; then
+            ssh_reachable=1
           fi
         fi
 
-        printf "%-12s %-10s %-6s %-16s ${C_GREEN}%-8s${C_RESET} %-8s %-20b\n" "$id" "$user" "$port" "$resolved_ip" "ONLINE" "$ping_time" "$kvm_status"
+        if [ "$ssh_reachable" -eq 1 ]; then
+          local kvm_status="${C_YELLOW}DISCONNECTED${C_RESET}"
+          if [ "$id" = "$anchor_id" ] || [ "$host" = "$anchor_host" ]; then
+            local count=0
+            if [ -n "$established_kvm_ips" ]; then
+              count="$(echo "$established_kvm_ips" | grep -v '^$' | wc -l)"
+            fi
+            kvm_status="${C_GREEN}SERVER ($count connected)${C_RESET}"
+          else
+            if [ -n "$established_kvm_ips" ] && echo "$established_kvm_ips" | grep -q "$resolved_ip"; then
+              kvm_status="${C_GREEN}CONNECTED${C_RESET}"
+            else
+              kvm_status="${C_YELLOW}DISCONNECTED${C_RESET}"
+            fi
+          fi
+
+          printf "%-12s %-10s %-6s %-16s ${C_GREEN}%-8s${C_RESET} %-8s %-20b\n" "$id" "$user" "$port" "$resolved_ip" "ONLINE" "$ping_time" "$kvm_status"
+        else
+          printf "%-12s %-10s %-6s %-16s ${C_RED}%-8s${C_RESET} %-8s %-20b\n" "$id" "$user" "$port" "$resolved_ip" "OFFLINE" "$ping_time" "${C_RED}OFFLINE${C_RESET}"
+        fi
       else
         printf "%-12s %-10s %-6s %-16s ${C_RED}%-8s${C_RESET} %-8s %-20b\n" "$id" "$user" "$port" "${ip_hint:-(unknown)}" "OFFLINE" "-" "${C_RED}OFFLINE${C_RESET}"
       fi
@@ -1255,10 +1271,13 @@ cmd_kdeconnect() {
 
 cmd_display() {
   if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-    echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|toggle-kvm [<node>]|launch <node> <preset|cmd>|capture-fleet [--node <node|--all>]>"
+    echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|vmon <status|start|stop>|toggle-kvm [<node>]|launch <node> <preset|cmd>|capture-fleet [--node <node|--all>]>"
     return 0
   fi
   source "$KNOT_ROOT/core/modules/display.sh"
+  if [ -f "$KNOT_ROOT/core/modules/vmon.sh" ]; then
+    source "$KNOT_ROOT/core/modules/vmon.sh"
+  fi
   local action="${1:-status}"
   [ $# -gt 0 ] && shift
 
@@ -1269,24 +1288,51 @@ cmd_display() {
     capture-fleet|capture)
       display_capture_fleet "$@"
       ;;
+    vmon|virtual-monitor)
+      if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+        echo "Usage: knot display vmon <status [<node>]|start <node>|stop [<node>]>"
+        return 0
+      fi
+      local vmon_action="${1:-status}"
+      [ $# -gt 0 ] && shift
+      case "$vmon_action" in
+        status)
+          vmon_status "$@"
+          ;;
+        start)
+          vmon_start "$@"
+          ;;
+        stop)
+          vmon_stop "$@"
+          ;;
+        -h|--help)
+          echo "Usage: knot display vmon <status [<node>]|start <node>|stop [<node>]>"
+          return 0
+          ;;
+        *)
+          echo "Usage: knot display vmon <status [<node>]|start <node>|stop [<node>]>" >&2
+          return 1
+          ;;
+      esac
+      ;;
     extend)
-      kdeconnect_vmon_start "$@"
+      vmon_start "$@"
       ;;
     stop)
-      kdeconnect_vmon_stop "$@"
+      vmon_stop "$@"
       ;;
     status)
-      kdeconnect_vmon_status "$@"
+      vmon_status "$@"
       ;;
     toggle-kvm|kvm-toggle|toggle)
       deskflow_toggle_mute_node "$@"
       ;;
     -h|--help)
-      echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|toggle-kvm [<node>]|launch <node> <preset|cmd>|capture-fleet [--node <node|--all>]>"
+      echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|vmon <status|start|stop>|toggle-kvm [<node>]|launch <node> <preset|cmd>|capture-fleet [--node <node|--all>]>"
       return 0
       ;;
     *)
-      echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|toggle-kvm [<node>]|launch <node> <preset|cmd>|capture-fleet [--node <node|--all>]>" >&2
+      echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|vmon <status|start|stop>|toggle-kvm [<node>]|launch <node> <preset|cmd>|capture-fleet [--node <node|--all>]>" >&2
       return 1
       ;;
   esac
@@ -2430,7 +2476,7 @@ case "${1:-}" in
     echo "  knot resolve <node_id> [port] Resolve active IP across 3 tiers"
     echo "  knot status                   Show live status of all mesh nodes"
     echo "  knot ledger generate [--json] Deterministic machine-readable cluster health ledger"
-    echo "  knot council <start|resume|status|reply|list|attach|reconcile|copy|clean|kill> Out-of-band multi-agent swarm coordination"
+    echo "  knot council <start|resume|status|reply|list|attach|reconcile|steer|challenge|db|board|heal|copy|clean|kill|audit|sync> Out-of-band multi-agent swarm coordination"
     echo "  knot swarm [status|quota|test|exec|auth] Manage Antigravity AI agents across the mesh"
     echo "  knot quota [node|--all]       Show real-time 5h & weekly model quota limits"
     echo "  knot auth [<node_id>|--all] <login|import|list|status|switch|remove|test-lock> Manage profiles & authentication"
@@ -2441,20 +2487,27 @@ case "${1:-}" in
     echo "  knot project <list|get|sync|worktree> Manage native Antigravity multi-folder projects"
     echo "  knot worktree <add|remove|list|normalize|provision|rebase-mesh> Cross-node git worktrees & parallel landing arbiter"
     echo "  knot chat <channels|create|post|read> Manage Swarm Konversations channels"
+    echo "  knot artifact <list|lease|release|upload|pull> Manage Swarm Artifact lifecycle & leases"
     echo "  knot sleep <status|prevent|allow> Enforce wholesale prevent-sleep on AC power"
     echo "  knot kafe [open|dev|build]    Boot / open Knot Kommand Kafe cockpit"
     echo "  knot web [dev|build|install]  Manage React & @assistant-ui Web Cockpit"
     echo "  knot doctor [node|--all]      Diagnose mesh, KVM, and portal health"
     echo "  knot repair [node|--all]      Auto-repair KVM dropout and mesh state"
+    echo "  knot restart [kvm]            Restart software KVM or mesh services"
     echo "  knot shutdown [target] [opt]  Graceful swarm-wide shutdown or reboot (--all, -d, -r, -c)"
     echo "  knot reboot [target] [opt]    Graceful swarm-wide reboot alias"
     echo "  knot exec [-P] <target|--all> <cmd> Run commands across mesh nodes (supports -P/--parallel)"
     echo "  knot socket <status|cleanup>  Manage OpenSSH ControlMaster multiplexing sockets"
     echo "  knot kvm <restart|status>     Manage software KVM across the mesh"
     echo "  knot screen <status|unlock|lock|login> Manage screen lock/login states"
+    echo "  knot unlock                   Convenience alias to unlock current screen"
+    echo "  knot lock                     Convenience alias to lock current screen"
+    echo "  knot login                    Convenience alias to auto-login display manager"
     echo "  knot autologin [status|check|doctor|migrate-dm|local|reconcile|fix-kwallet|purge-stale|configure-timer] Manage auto-login"
     echo "  knot kdeconnect <status|sync|pair|reconcile|vmon|share|sync-clipboard|test-clipboard|prune-stale> Manage KDE Connect mesh clipboard & virtual displays"
     echo "  knot display <status|extend|stop|launch|capture-fleet> Manage Wayland cockpits & headless fleet captures"
+    echo "  knot mcp <gateway|sync|status> Manage Model Context Protocol (MCP) server & gateway"
+    echo "  knot color [get|set|list]     Manage terminal colors and node palette"
     exit 0
     ;;
   *)

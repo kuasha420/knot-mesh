@@ -88,6 +88,8 @@ SUBCOMMANDS=(
   "reboot"
   "topology"
   "mcp"
+  "socket"
+  "ledger"
 )
 
 for sub in "${SUBCOMMANDS[@]}"; do
@@ -96,7 +98,20 @@ for sub in "${SUBCOMMANDS[@]}"; do
 done
 
 echo ""
-echo "--- 3. Nested Subcommand Help (Exit 0) ---"
+echo "--- 3. Root Help Documentation Coverage (Exit 0) ---"
+HELP_OUTPUT="$("$KNOT_BIN" --help)"
+for sub in "${SUBCOMMANDS[@]}"; do
+  test_total=$((test_total + 1))
+  if echo "$HELP_OUTPUT" | grep -qE "knot $sub[ \[]"; then
+    test_passed=$((test_passed + 1))
+    echo "  [PASS] knot --help documents 'knot $sub'"
+  else
+    echo "  [FAIL] knot --help missing documentation for 'knot $sub'"
+  fi
+done
+
+echo ""
+echo "--- 4. Nested Subcommand Help (Exit 0) ---"
 NESTED_COMMANDS=(
   "council start"
   "council steer"
@@ -111,10 +126,13 @@ NESTED_COMMANDS=(
   "council heal"
   "council clean"
   "council copy"
+  "council challenge"
+  "council board"
   "swarm switch"
   "swarm exec"
   "swarm test"
   "kdeconnect vmon"
+  "display vmon"
   "auth login"
   "auth import"
   "auth switch"
@@ -144,13 +162,14 @@ for nested in "${NESTED_COMMANDS[@]}"; do
 done
 
 echo ""
-echo "--- 4. Invalid Commands & Subcommands (Exit 1) ---"
+echo "--- 5. Invalid Commands & Subcommands (Exit 1) ---"
 assert_exit_code 1 "knot unknown-root-cmd" "$KNOT_BIN" unknown-root-cmd
 assert_exit_code 1 "knot council unknown-action" "$KNOT_BIN" council unknown-action
 assert_exit_code 1 "knot swarm unknown-action" "$KNOT_BIN" swarm unknown-action
 assert_exit_code 1 "knot kdeconnect unknown-action" "$KNOT_BIN" kdeconnect unknown-action
 assert_exit_code 1 "knot kdeconnect vmon unknown-action" "$KNOT_BIN" kdeconnect vmon unknown-action
 assert_exit_code 1 "knot display unknown-action" "$KNOT_BIN" display unknown-action
+assert_exit_code 1 "knot display vmon unknown-action" "$KNOT_BIN" display vmon unknown-action
 assert_exit_code 1 "knot screen unknown-action" "$KNOT_BIN" screen unknown-action
 assert_exit_code 1 "knot worktree unknown-action" "$KNOT_BIN" worktree unknown-action
 assert_exit_code 1 "knot hub unknown-action" "$KNOT_BIN" hub unknown-action
@@ -165,7 +184,7 @@ assert_exit_code 1 "knot restart unknown-target" "$KNOT_BIN" restart unknown-tar
 assert_exit_code 1 "knot topology unknown-sub" "$KNOT_BIN" topology unknown-sub
 
 echo ""
-echo "--- 5. Unknown Flags (Exit 1) ---"
+echo "--- 6. Unknown Flags (Exit 1) ---"
 assert_exit_code 1 "knot --unknown-flag" "$KNOT_BIN" --unknown-flag
 assert_exit_code 1 "knot council --unknown-flag" "$KNOT_BIN" council --unknown-flag
 assert_exit_code 1 "knot worktree --unknown-flag" "$KNOT_BIN" worktree --unknown-flag

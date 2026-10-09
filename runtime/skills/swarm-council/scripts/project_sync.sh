@@ -5,6 +5,7 @@ set -euo pipefail
 # Discovers Antigravity project, extracts declared folders, and verifies fleet mirrors
 
 SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+export SCRIPT_DIR
 export KNOT_ROOT="${KNOT_ROOT:-$(cd -P "$SCRIPT_DIR/../../../.." && pwd -P)}"
 
 python3 - "$@" << 'PYEOF'
@@ -70,22 +71,26 @@ if target_project:
                             matched_project = data
                             matched_folders = f_list
                             break
-                except Exception:
-                    pass
+                except Exception as _err:
+                    sys.stderr.write(f"Notice: [project_sync] Failed reading project {f}: {_err}\n")
                 if matched_project:
                     break
         if not matched_folders:
             try:
-                toplevel = subprocess.check_output(
+                res = subprocess.run(
                     ["git", "rev-parse", "--show-toplevel"],
                     cwd=target_dir,
-                    text=True,
-                    stderr=subprocess.DEVNULL
-                ).strip()
-                if toplevel and os.path.isdir(toplevel):
-                    matched_folders = [toplevel]
-            except Exception:
-                pass
+                    capture_output=True,
+                    text=True
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    toplevel = res.stdout.strip()
+                    if os.path.isdir(toplevel):
+                        matched_folders = [toplevel]
+                elif res.returncode != 0 and "not a git repository" not in res.stderr.lower():
+                    sys.stderr.write(f"Notice: [project_sync] git rev-parse notice: {res.stderr.strip()}\n")
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [project_sync] git rev-parse exception: {_err}\n")
         if not matched_folders and os.path.isdir(target_dir):
             matched_folders = [target_dir]
     else:
@@ -103,8 +108,8 @@ if target_project:
                             matched_project = data
                             matched_folders = f_list
                             break
-                except Exception:
-                    pass
+                except Exception as _err:
+                    sys.stderr.write(f"Notice: [project_sync] Failed reading project {f}: {_err}\n")
         if not matched_folders:
             for cand in [
                 os.path.join(home, "Dev", target_project),
@@ -122,8 +127,8 @@ if target_project:
                                     matched_project = data
                                     matched_folders = f_list
                                     break
-                            except Exception:
-                                pass
+                            except Exception as _err:
+                                sys.stderr.write(f"Notice: [project_sync] Failed reading project {f}: {_err}\n")
                             if matched_project:
                                 break
                     if not matched_folders:
@@ -143,37 +148,41 @@ if not matched_folders and os.path.isdir(projects_dir):
                     matched_project = data
                     matched_folders = f_list
                     break
-        except Exception:
-            pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [project_sync] Failed reading project {f}: {_err}\n")
         if matched_project:
             break
 
 # 3. If CWD is inside a git repository, check if it matches a project or treat as standalone repo
 if not matched_folders:
     try:
-        toplevel = subprocess.check_output(
+        res = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
             cwd=cwd,
-            text=True,
-            stderr=subprocess.DEVNULL
-        ).strip()
-        if toplevel and os.path.isdir(toplevel):
-            if os.path.isdir(projects_dir):
-                for f in glob.glob(os.path.join(projects_dir, "*.json")):
-                    try:
-                        with open(f, "r", encoding="utf-8") as pf:
-                            data = json.load(pf)
-                        f_list = extract_folders(data)
-                        if toplevel in [os.path.realpath(x) for x in f_list]:
-                            matched_project = data
-                            matched_folders = f_list
-                            break
-                    except Exception:
-                        pass
-            if not matched_folders:
-                matched_folders = [toplevel]
-    except Exception:
-        pass
+            capture_output=True,
+            text=True
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            toplevel = res.stdout.strip()
+            if os.path.isdir(toplevel):
+                if os.path.isdir(projects_dir):
+                    for f in glob.glob(os.path.join(projects_dir, "*.json")):
+                        try:
+                            with open(f, "r", encoding="utf-8") as pf:
+                                data = json.load(pf)
+                            f_list = extract_folders(data)
+                            if toplevel in [os.path.realpath(x) for x in f_list]:
+                                matched_project = data
+                                matched_folders = f_list
+                                break
+                        except Exception as _err:
+                            sys.stderr.write(f"Notice: [project_sync] Failed reading project {f}: {_err}\n")
+                if not matched_folders:
+                    matched_folders = [toplevel]
+        elif res.returncode != 0 and "not a git repository" not in res.stderr.lower():
+            sys.stderr.write(f"Notice: [project_sync] git rev-parse notice in cwd: {res.stderr.strip()}\n")
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [project_sync] git rev-parse exception in cwd: {_err}\n")
 
 # 4. Fallback: Default to "knot-mesh" project if available, or knot_root
 if not matched_folders:
@@ -188,8 +197,8 @@ if not matched_folders:
                         matched_project = data
                         matched_folders = f_list
                         break
-            except Exception:
-                pass
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [project_sync] Failed reading project {f}: {_err}\n")
 
 if not matched_folders:
     if os.path.isdir(knot_root):
@@ -208,17 +217,25 @@ if target_nodes:
     nodes = [n.strip() for n in target_nodes.split(",") if n.strip()]
 
 if not nodes:
-    try:
-        status_out = subprocess.check_output([knot_bin, "status"], text=True, stderr=subprocess.DEVNULL)
-        import re
-        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-        clean_out = ansi_escape.sub('', status_out)
-        for line in clean_out.splitlines():
-            parts = line.split()
-            if len(parts) >= 5 and parts[4] == "ONLINE":
-                nodes.append(parts[0])
-    except Exception:
-        nodes = ["localhost"]
+    audit_env = os.environ.get("KNOT_AUDIT_NODES")
+    if audit_env:
+        nodes = [n.strip() for n in audit_env.split(",") if n.strip()]
+    else:
+        try:
+            res = subprocess.run([knot_bin, "status"], capture_output=True, text=True)
+            if res.returncode == 0:
+                import re
+                ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+                clean_out = ansi_escape.sub('', res.stdout)
+                for line in clean_out.splitlines():
+                    parts = line.split()
+                    if len(parts) >= 5 and parts[4] == "ONLINE":
+                        nodes.append(parts[0])
+            else:
+                sys.stderr.write(f"Notice: [project_sync] knot status failed: {res.stderr.strip()}\n")
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [project_sync] knot status exception: {_err}\n")
+            nodes = ["localhost"]
 
 if not nodes:
     nodes = ["localhost"]
@@ -243,12 +260,13 @@ results = {
 
 # Determine local node identifiers
 try:
-    _sdir = os.path.dirname(os.path.realpath(__file__))
-    if _sdir not in sys.path:
+    _sdir = os.environ.get("SCRIPT_DIR") or os.path.join(knot_root, "runtime/skills/swarm-council/scripts")
+    if _sdir and _sdir not in sys.path:
         sys.path.insert(0, _sdir)
     from resolve_node import resolve_local_node_id
     detected_local = resolve_local_node_id()
-except Exception:
+except Exception as _err:
+    sys.stderr.write(f"Notice: [project_sync] resolve_local_node_id exception: {_err}\n")
     detected_local = ""
 
 local_node_ids = {"localhost", "127.0.0.1", os.uname().nodename.split(".")[0]}
@@ -262,8 +280,8 @@ if os.path.isfile(node_id_file):
     try:
         with open(node_id_file) as nf:
             local_node_ids.add(nf.read().strip())
-    except Exception:
-        pass
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [project_sync] Failed reading node_id_file: {_err}\n")
 
 # Verify folders on each node
 for node in nodes:
@@ -279,18 +297,23 @@ for node in nodes:
             commit = ""
             if exists:
                 if do_pull:
-                    subprocess.run(["git", "-C", folder, "pull", "--ff-only"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    p_res = subprocess.run(["git", "-C", folder, "pull", "--ff-only"], capture_output=True, text=True)
+                    if p_res.returncode != 0:
+                        sys.stderr.write(f"Notice: [project_sync] git pull failed for {folder}: {p_res.stderr.strip()}\n")
                 try:
-                    branch = subprocess.check_output(["git", "-C", folder, "rev-parse", "--abbrev-ref", "HEAD"], text=True, stderr=subprocess.DEVNULL).strip()
-                    commit = subprocess.check_output(["git", "-C", folder, "rev-parse", "--short", "HEAD"], text=True, stderr=subprocess.DEVNULL).strip()
-                except Exception:
-                    pass
+                    b_res = subprocess.run(["git", "-C", folder, "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True)
+                    branch = b_res.stdout.strip() if b_res.returncode == 0 else ""
+                    c_res = subprocess.run(["git", "-C", folder, "rev-parse", "--short", "HEAD"], capture_output=True, text=True)
+                    commit = c_res.stdout.strip() if c_res.returncode == 0 else ""
+                except Exception as _err:
+                    sys.stderr.write(f"Notice: [project_sync] git rev-parse exception for {folder}: {_err}\n")
             node_res["folders"][folder_name] = {"path": folder, "exists": exists, "branch": branch, "commit": commit}
         else:
             # Sync Antigravity project JSON if matched
             if matched_project:
                 try:
-                    remote_home = subprocess.check_output([knot_bin, "exec", node, 'echo "$HOME"'], text=True, stderr=subprocess.DEVNULL).strip()
+                    h_res = subprocess.run([knot_bin, "exec", node, 'echo "$HOME"'], capture_output=True, text=True)
+                    remote_home = h_res.stdout.strip() if h_res.returncode == 0 else ""
                     if remote_home:
                         adapted_data = json.loads(json.dumps(matched_project))
                         for res in adapted_data.get("projectResources", {}).get("resources", []):
@@ -299,28 +322,35 @@ for node in nodes:
                                 res["gitFolder"]["folderUri"] = f"file://{remote_home}/{u[len(f'file://{home}/'):]}"
                         p_json_str = json.dumps(adapted_data, indent=2)
                         sync_proj_cmd = f"mkdir -p ~/.gemini/config/projects && cat > ~/.gemini/config/projects/{project_id}.json"
-                        p = subprocess.Popen([knot_bin, "exec", node, sync_proj_cmd], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
-                        p.communicate(input=p_json_str)
-                except Exception:
-                    pass
+                        p = subprocess.Popen([knot_bin, "exec", node, sync_proj_cmd], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                        p_out, p_err = p.communicate(input=p_json_str)
+                        if p.returncode != 0:
+                            sys.stderr.write(f"Notice: [project_sync] Failed syncing project to {node}: {p_err.strip()}\n")
+                except Exception as _err:
+                    sys.stderr.write(f"Notice: [project_sync] Remote project adaptation exception on {node}: {_err}\n")
 
             # Probe remote node across candidate directory roots
             pull_subcmd = "git pull -q --ff-only && " if do_pull else ""
             remote_cmd = f'TARGET=""; for c in ~/Dev/{folder_name} ~/{folder_name} ~/.local/share/{folder_name}; do if [ -d "$c" ]; then TARGET="$c"; break; fi; done; if [ -n "$TARGET" ]; then (cd "$TARGET" && {pull_subcmd}git rev-parse --abbrev-ref HEAD && git rev-parse --short HEAD && echo "$TARGET"); else echo "MISSING"; fi'
             try:
-                rout = subprocess.check_output([knot_bin, "exec", node, remote_cmd], text=True, stderr=subprocess.DEVNULL).strip().splitlines()
+                r_res = subprocess.run([knot_bin, "exec", node, remote_cmd], capture_output=True, text=True)
+                rout = r_res.stdout.strip().splitlines() if r_res.returncode == 0 else []
                 if (not rout or rout[0] == "MISSING") and do_pull:
                     try:
-                        remote_url = subprocess.check_output(
+                        u_res = subprocess.run(
                             ["git", "-C", folder, "config", "--get", "remote.origin.url"],
-                            text=True, stderr=subprocess.DEVNULL
-                        ).strip()
+                            capture_output=True, text=True
+                        )
+                        remote_url = u_res.stdout.strip() if u_res.returncode == 0 else ""
                         if remote_url:
                             clone_cmd = f'mkdir -p ~/Dev && git clone -q "{remote_url}" ~/Dev/{folder_name}'
-                            subprocess.run([knot_bin, "exec", node, clone_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                            rout = subprocess.check_output([knot_bin, "exec", node, remote_cmd], text=True, stderr=subprocess.DEVNULL).strip().splitlines()
-                    except Exception:
-                        pass
+                            cl_res = subprocess.run([knot_bin, "exec", node, clone_cmd], capture_output=True, text=True)
+                            if cl_res.returncode != 0:
+                                sys.stderr.write(f"Notice: [project_sync] Remote clone failed on {node}: {cl_res.stderr.strip()}\n")
+                            r_res2 = subprocess.run([knot_bin, "exec", node, remote_cmd], capture_output=True, text=True)
+                            rout = r_res2.stdout.strip().splitlines() if r_res2.returncode == 0 else []
+                    except Exception as _err:
+                        sys.stderr.write(f"Notice: [project_sync] Remote clone exception on {node}: {_err}\n")
 
                 if rout and rout[0] != "MISSING":
                     r_branch = rout[0] if len(rout) > 0 else "unknown"

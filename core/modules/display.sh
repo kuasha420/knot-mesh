@@ -237,10 +237,10 @@ try:
             hi = int.from_bytes(h[20:24], "big")
             print(f"{w} {hi}")
             sys.exit(0)
-except Exception:
-    pass
+except Exception as _err:
+    sys.stderr.write(f"Notice: [display] Failed to parse PNG dimensions: {_err}\n")
 print("1920 1080")
-' "$out_path" 2>&1)"; then
+' "$out_path")"; then
           read -r width height <<< "$dims"
         fi
       else
@@ -290,10 +290,10 @@ try:
             hi = int.from_bytes(h[20:24], "big")
             print(f"{w} {hi}")
             sys.exit(0)
-except Exception:
-    pass
+except Exception as _err:
+    sys.stderr.write(f"Notice: [display] Failed to parse remote PNG dimensions: {_err}\n")
 print("1920 1080")
-' "$out_path" 2>&1)"; then
+' "$out_path")"; then
           read -r width height <<< "$dims"
         fi
       else

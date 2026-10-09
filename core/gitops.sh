@@ -442,7 +442,8 @@ def try_resolve(file_path):
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
-    except Exception:
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [gitops] Conflict resolution error: {_err}\n")
         return False
 
     if "<<<<<<<" not in content or "=======" not in content or ">>>>>>>" not in content:
@@ -495,7 +496,8 @@ def try_resolve(file_path):
         with open(file_path, "w", encoding="utf-8") as f:
             f.write("\n".join(resolved) + "\n")
         return True
-    except Exception:
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [gitops] Conflict resolution error: {_err}\n")
         return False
 
 if not try_resolve(sys.argv[1]):

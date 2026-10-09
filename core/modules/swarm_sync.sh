@@ -353,7 +353,7 @@ EOF_HOOKS
 
   # 5. Antigravity settings auto-healing
   python3 - << 'PY_EOF'
-import json, os
+import json, os, sys
 
 home = os.path.expanduser("~")
 p1 = os.path.join(home, ".gemini/config/config.json")
@@ -369,8 +369,8 @@ if os.path.exists(p1):
         u["themeMode"] = "THEME_MODE_DARK"
         with open(p1, "w") as f:
             json.dump(d, f, indent=2)
-    except Exception:
-        pass
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [swarm_sync] Failed updating {p1}: {_err}\n")
 
 if os.path.exists(p2):
     try:
@@ -383,8 +383,8 @@ if os.path.exists(p2):
         d["theme_mode"] = "THEME_MODE_DARK"
         with open(p2, "w") as f:
             json.dump(d, f, indent=2)
-    except Exception:
-        pass
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [swarm_sync] Failed updating {p2}: {_err}\n")
 PY_EOF
 
   knot_log_ok "Local development environment and Antigravity customizations healed."
@@ -449,7 +449,7 @@ EOF_HOOK
     chmod 644 "$HOME/.gemini/config/hooks.json"
 
     python3 - << "PY_INNER"
-import json, os
+import json, os, sys
 home = os.path.expanduser("~")
 p1 = os.path.join(home, ".gemini/config/config.json")
 p2 = os.path.join(home, ".gemini/antigravity-cli/settings.json")
@@ -462,7 +462,8 @@ for p in [p1, p2]:
             else:
                 d.update({"useAiCredits": False, "useG1Credits": False, "accepted_latest_terms_of_service": True, "theme": "dark", "theme_mode": "THEME_MODE_DARK"})
             with open(p, "w") as f: json.dump(d, f, indent=2)
-        except Exception: pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [swarm_sync] Failed updating remote {p}: {_err}\n")
 PY_INNER
     echo "OK: $DEV_DIR"
   '

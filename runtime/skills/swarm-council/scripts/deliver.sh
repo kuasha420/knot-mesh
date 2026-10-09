@@ -119,8 +119,8 @@ if os.path.isdir(pdir):
                         for c in [os.path.join(home, "Dev", b), os.path.join(home, b), os.path.join(home, ".local/share", b)]:
                             if os.path.isdir(c):
                                 res = c; break
-                if res: break
-        except Exception: pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [deliver] Failed reading project {f}: {_err}\n")
 if not res and pname and pname not in (".", "./"):
     for c in [os.path.join(home, "Dev", pname), os.path.join(home, pname), os.path.join(home, ".local/share", pname)]:
         if os.path.isdir(c):
@@ -180,8 +180,8 @@ if os.path.isdir(pdir):
                         for c in [os.path.join(home, "Dev", b), os.path.join(home, b), os.path.join(home, ".local/share", b)]:
                             if os.path.isdir(c):
                                 res = c; break
-                if res: break
-        except Exception: pass
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [deliver] Failed reading project {f}: {_err}\n")
 if not res and pname and pname not in (".", "./"):
     for c in [os.path.join(home, "Dev", pname), os.path.join(home, pname), os.path.join(home, ".local/share", pname)]:
         if os.path.isdir(c):

@@ -35,6 +35,7 @@ echo -e "\033[1;34m============================================================\
 echo -e "\n\033[1m[Test 1] PSL Rule 1 Audit on Virtual Monitor Modules...\033[0m"
 FORBIDDEN_PATTERN='(2>/dev/null|&>/dev/null|> */dev/null *2>&1|\|\| *true|\|\| *:)'
 TARGET_FILES=(
+  "$KNOT_ROOT/core/modules/vmon.sh"
   "$KNOT_ROOT/core/modules/kdeconnect.sh"
   "$KNOT_ROOT/core/modules/firewall.sh"
   "$KNOT_ROOT/core/modules/doctor.sh"
@@ -146,15 +147,23 @@ else
 fi
 
 # -------------------------------------------------------------
-# Test 7: knot display status Alias Execution
+# Test 7: knot display status & knot display vmon status Alias Execution
 # -------------------------------------------------------------
-echo -e "\n\033[1m[Test 7] knot display status Alias Execution...\033[0m"
+echo -e "\n\033[1m[Test 7] knot display status & knot display vmon status Execution...\033[0m"
 disp_status_out="" disp_status_rc=0
 disp_status_out=$("$KNOT_ROOT/bin/knot" display status 2>&1) || disp_status_rc=$?
 if [ $disp_status_rc -eq 0 ] && echo "$disp_status_out" | grep -q "Host Engine (krdp / krdpserver) :"; then
   pass "knot display status alias functions identically to vmon status"
 else
   fail "knot display status failed ($disp_status_rc): $disp_status_out"
+fi
+
+disp_vmon_out="" disp_vmon_rc=0
+disp_vmon_out=$("$KNOT_ROOT/bin/knot" display vmon status 2>&1) || disp_vmon_rc=$?
+if [ $disp_vmon_rc -eq 0 ] && echo "$disp_vmon_out" | grep -q "Host Engine (krdp / krdpserver) :"; then
+  pass "knot display vmon status functions cleanly via decoupled vmon module"
+else
+  fail "knot display vmon status failed ($disp_vmon_rc): $disp_vmon_out"
 fi
 
 # -------------------------------------------------------------

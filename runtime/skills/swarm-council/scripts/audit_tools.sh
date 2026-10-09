@@ -26,7 +26,9 @@ fi
 
 # Discover online nodes
 nodes=()
-if [ -n "$KNOT_BIN" ] && [ -x "$KNOT_BIN" ]; then
+if [ -n "${KNOT_AUDIT_NODES:-}" ]; then
+  IFS=',' read -ra nodes <<< "$KNOT_AUDIT_NODES"
+elif [ -n "$KNOT_BIN" ] && [ -x "$KNOT_BIN" ]; then
   while read -r node_id; do
     [ -n "$node_id" ] || continue
     nodes+=("$node_id")

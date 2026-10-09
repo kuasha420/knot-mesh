@@ -904,19 +904,33 @@ class AgentWorker:
 
         # 2. Systemd sleep:idle inhibitor (via sudo or unprivileged)
         proc = None
+        inhibit_log = None
+        try:
+            inhibit_log = open("/tmp/knot-inhibit.log", "a", encoding="utf-8")
+        except Exception as _log_err:
+            sys.stderr.write(f"Notice: [agent] Failed to open /tmp/knot-inhibit.log: {_log_err}\n")
+
         try:
             cmd = ["sudo", "-n", "systemd-inhibit", "--what=sleep:idle", "--who=Knot Swarm", f"--why={reason_str}", "sleep", "infinity"]
-            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            proc = subprocess.Popen(cmd, stdout=inhibit_log or subprocess.PIPE, stderr=subprocess.PIPE)
             time.sleep(0.2)
             if proc.poll() is not None:
+                err_diag = proc.stderr.read().decode(errors="replace").strip() if proc.stderr else ""
+                sys.stderr.write(f"Notice: [agent] Sudo systemd-inhibit failed: {err_diag}\n")
                 # Sudo failed or not permitted, try unprivileged sleep:idle inhibitor
                 cmd = ["systemd-inhibit", "--what=sleep:idle", "--who=Knot Swarm", f"--why={reason_str}", "sleep", "infinity"]
-                proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                proc = subprocess.Popen(cmd, stdout=inhibit_log or subprocess.PIPE, stderr=subprocess.PIPE)
                 time.sleep(0.2)
                 if proc.poll() is not None:
+                    err_diag = proc.stderr.read().decode(errors="replace").strip() if proc.stderr else ""
+                    sys.stderr.write(f"Notice: [agent] Unprivileged systemd-inhibit failed: {err_diag}\n")
                     # Final fallback to idle inhibitor
                     cmd = ["systemd-inhibit", "--what=idle", "--who=Knot Swarm", f"--why={reason_str}", "sleep", "infinity"]
-                    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    proc = subprocess.Popen(cmd, stdout=inhibit_log or subprocess.PIPE, stderr=subprocess.PIPE)
+                    time.sleep(0.2)
+                    if proc.poll() is not None:
+                        err_diag = proc.stderr.read().decode(errors="replace").strip() if proc.stderr else ""
+                        sys.stderr.write(f"Notice: [agent] Idle systemd-inhibit failed: {err_diag}\n")
         except Exception as _err:
             sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
@@ -944,7 +958,8 @@ class AgentWorker:
             try:
                 self.power_inhibitor_proc.terminate()
                 self.power_inhibitor_proc.wait(timeout=2)
-            except Exception:
+            except Exception as _term_err:
+                sys.stderr.write(f"Notice: [agent] Inhibitor termination failed, attempting kill: {_term_err}\n")
                 try:
                     self.power_inhibitor_proc.kill()
                 except Exception as _err:

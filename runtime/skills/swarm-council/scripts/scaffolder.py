@@ -80,16 +80,21 @@ def discover_online_nodes(knot_root):
     if not os.path.isfile(knot_bin) or not os.access(knot_bin, os.X_OK):
         import shutil
         knot_bin = shutil.which("knot") or os.path.expanduser("~/.local/bin/knot")
+    audit_env = os.environ.get("KNOT_AUDIT_NODES")
+    if audit_env:
+        return [n.strip() for n in audit_env.split(",") if n.strip()]
+
     nodes = []
     try:
-        out = subprocess.check_output([knot_bin, "status"], text=True, stderr=subprocess.DEVNULL)
-        import re
-        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-        clean = ansi_escape.sub('', out)
-        for line in clean.splitlines():
-            parts = line.split()
-            if len(parts) >= 5 and parts[4] == "ONLINE":
-                nodes.append(parts[0])
+        res = subprocess.run([knot_bin, "status"], capture_output=True, text=True)
+        if res.returncode == 0:
+            import re
+            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+            clean = ansi_escape.sub('', res.stdout)
+            for line in clean.splitlines():
+                parts = line.split()
+                if len(parts) >= 5 and parts[4] == "ONLINE":
+                    nodes.append(parts[0])
     except Exception as _err:
         sys.stderr.write(f"Notice: [scaffolder] Handled exception: {_err}\n")
     if not nodes:
@@ -97,11 +102,13 @@ def discover_online_nodes(knot_root):
         try:
             from resolve_node import resolve_local_node_id
             local_host = resolve_local_node_id()
-        except Exception:
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [scaffolder] Node resolution exception: {_err}\n")
             try:
                 import socket
                 local_host = socket.gethostname().strip().split(".")[0]
-            except Exception:
+            except Exception as _err2:
+                sys.stderr.write(f"Notice: [scaffolder] Hostname resolution exception: {_err2}\n")
                 local_host = "localhost"
         nodes = [local_host]
     return nodes
@@ -117,8 +124,9 @@ def resolve_chunks(project_dir=None):
 
     git_files = []
     try:
-        out = subprocess.check_output(["git", "-C", pdir, "ls-files"], text=True, stderr=subprocess.DEVNULL)
-        git_files = [line.strip() for line in out.splitlines() if line.strip()]
+        res = subprocess.run(["git", "-C", pdir, "ls-files"], capture_output=True, text=True)
+        if res.returncode == 0:
+            git_files = [line.strip() for line in res.stdout.splitlines() if line.strip()]
     except Exception as _err:
         sys.stderr.write(f"Notice: [scaffolder] Handled exception: {_err}\n")
 

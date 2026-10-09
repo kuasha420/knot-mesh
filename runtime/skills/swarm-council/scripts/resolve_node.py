@@ -45,7 +45,8 @@ def resolve_local_node_id(nodes=None):
     try:
         import socket
         cur_host = socket.gethostname().strip()
-    except Exception:
+    except Exception as _err:
+        sys.stderr.write(f"Notice: [resolve_node] gethostname error: {_err}\n")
         cur_host = ""
 
     if not cur_host:

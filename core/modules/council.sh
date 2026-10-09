@@ -559,7 +559,7 @@ council_steer() {
     if [ "$my_h" != "$target_host" ] && command -v knot >/dev/null; then
       if knot exec "$target_host" "test -S /tmp/kitty-council-$run_id.sock"; then
         local relay_err=""
-        if relay_err="$(printf '%s' "$prompt_text" | knot exec "$target_host" "kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-text --match 'title:.*${node}.*' --stdin && sleep 0.2 && kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-key --match 'title:.*${node}.*' return" 2>&1)"; then
+        if relay_err="$(printf '%s' "$prompt_text" | knot exec "$target_host" "tr -d '\r' | kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-text --match 'title:.*${node}.*' --stdin && sleep 0.2 && kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-key --match 'title:.*${node}.*' return" 2>&1)"; then
           knot_log_ok "Steered node '@$node' via Cockpit Bridge Relay to @$target_host (Run: $run_id)"
           return 0
         else
@@ -585,7 +585,7 @@ council_steer() {
         done < <(echo "$mesh_status" | awk 'NR>2 {print $1}')
         if [ -n "$cand_node" ]; then
           local relay_err=""
-          if relay_err="$(printf '%s' "$prompt_text" | knot exec "$cand_node" "kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-text --match 'title:.*${node}.*' --stdin && sleep 0.2 && kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-key --match 'title:.*${node}.*' return" 2>&1)"; then
+          if relay_err="$(printf '%s' "$prompt_text" | knot exec "$cand_node" "tr -d '\r' | kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-text --match 'title:.*${node}.*' --stdin && sleep 0.2 && kitty @ --to unix:/tmp/kitty-council-$run_id.sock send-key --match 'title:.*${node}.*' return" 2>&1)"; then
             knot_log_ok "Steered node '@$node' via Cockpit Bridge Relay to @$cand_node (Run: $run_id)"
             return 0
           else
@@ -614,9 +614,22 @@ council_steer() {
     sleep 0.2
     local win_buf=""
     if win_buf="$(kitty @ --to "unix:$sock" get-text --match "title:.*${node}.*" 2>&1)"; then
+      local last_line=""
+      last_line="$(printf '%s' "$prompt_text" | tail -n1)"
+      if [ -z "$last_line" ]; then
+        last_line="$(printf '%s' "$prompt_text" | grep -v '^[[:space:]]*$' | tail -n1 || [ $? -eq 1 ])"
+      fi
       local first_line=""
       first_line="$(printf '%s' "$prompt_text" | head -n1)"
-      if [ -n "$first_line" ] && echo "$win_buf" | tail -n2 | grep -Fq "$first_line"; then
+
+      local prompt_unsubmitted=0
+      if [ -n "$last_line" ] && echo "$win_buf" | tail -n5 | grep -Fq "$last_line"; then
+        prompt_unsubmitted=1
+      elif [ -n "$first_line" ] && echo "$win_buf" | tail -n5 | grep -Fq "$first_line"; then
+        prompt_unsubmitted=1
+      fi
+
+      if [ "$prompt_unsubmitted" -eq 1 ]; then
         knot_log_warn "Prompt appears unsubmitted in node '@$node' window buffer. Re-attempting return key dispatch..."
         local retry_key_err="" retry_key_rc=0
         retry_key_err="$(kitty @ --to "unix:$sock" send-key --match "title:.*${node}.*" return 2>&1)" || retry_key_rc=$?

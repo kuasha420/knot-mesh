@@ -22,7 +22,7 @@ def detect_local_ips() -> List[str]:
         # Use ip -4 addr show to find non-loopback IPs
         out = subprocess.check_output(
             ["ip", "-4", "addr", "show", "scope", "global"],
-            text=True, stderr=subprocess.DEVNULL
+            text=True, stderr=subprocess.PIPE
         )
         for line in out.splitlines():
             line = line.strip()
@@ -33,7 +33,10 @@ def detect_local_ips() -> List[str]:
                     if ip not in ips:
                         ips.append(ip)
     except Exception as e:
-        sys.stderr.write(f"Notice: [tls] Hostname IP lookup failed: {e}\n")
+        if isinstance(e, subprocess.CalledProcessError) and e.stderr:
+            sys.stderr.write(f"Notice: [tls] Hostname IP lookup failed: {e.stderr.strip()}\n")
+        else:
+            sys.stderr.write(f"Notice: [tls] Hostname IP lookup failed: {e}\n")
         # Fallback socket lookup
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

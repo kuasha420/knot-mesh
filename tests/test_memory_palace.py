@@ -27,7 +27,12 @@ from core.memory.palace import (
     POOL_LOCAL,
     POOL_SHARED,
 )
-from core.memory.profiles import get_profile, list_profiles
+from core.memory.profiles import (
+    get_profile,
+    list_profiles,
+    get_dynamic_capabilities,
+    format_capability_summary,
+)
 from core.mcp.gateway import KnotMCPGateway, MockKnotHubClient
 
 
@@ -345,6 +350,26 @@ class TestHardwareNodeRoleProfiles:
         assert "RTX 3050" in prof["hardware_specialization"]
         assert len(prof["capabilities"]) > 0
         assert len(prof["constraints"]) > 0
+
+    def test_dynamic_capabilities_and_summary(self):
+        caps = get_dynamic_capabilities("laptop")
+        assert caps["is_homogeneous_worker"] is True
+        assert caps["d2d_surface_decoupled"] is True
+
+        # Verify hyphenated and underscored handheld controller node resolution
+        p_rog = get_profile("rog-ally")
+        assert p_rog["id"] == "handheld_controller"
+        p_rog_u = get_profile("rog_ally")
+        assert p_rog_u["id"] == "handheld_controller"
+
+        caps_rog = get_dynamic_capabilities("rog-ally")
+        assert caps_rog["role_name"] == "Handheld Controller"
+        assert "AMD" in caps_rog["hardware_specialization"]
+
+        summary = format_capability_summary("desktop")
+        assert isinstance(summary, str)
+        assert len(summary) > 0
+        assert "Node @[desktop]" in summary
 
 
 class TestSpatialHierarchyAndMap:

@@ -314,7 +314,8 @@ def main():
                 sys.path.insert(0, script_dir)
                 from scaffolder import discover_online_nodes
                 nodes = discover_online_nodes(knot_root)
-            except Exception:
+            except Exception as _err:
+                sys.stderr.write(f"Notice: [confluence] discover_online_nodes failed, falling back to local: {_err}\n")
                 local_h = resolve_local_node_id()
                 nodes = [local_h]
 
@@ -371,6 +372,8 @@ def main():
         env = os.environ.copy()
         env.setdefault("DISPLAY", ":0")
         env.setdefault("WAYLAND_DISPLAY", "wayland-0")
+        conf_log_path = os.path.join(missions_dir, "confluence.log")
+        conf_log_file = open(conf_log_path, "a", encoding="utf-8")
         proc = subprocess.Popen(
             [
                 "kitty",
@@ -386,8 +389,8 @@ def main():
                 "--session", session_file
             ],
             env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=conf_log_file,
+            stderr=conf_log_file,
             start_new_session=True
         )
 
