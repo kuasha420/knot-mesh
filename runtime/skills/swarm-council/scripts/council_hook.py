@@ -9,13 +9,35 @@ outside of council sessions and on subsequent turns.
 import os
 import sys
 import json
+import glob
 
-ROLE_HINTS = {
-    "desktop": "Mesh Anchor & Coordinator",
-    "laptop": "CUDA Compute & Roaming Strand",
-    "rog-ally": "Handheld Strand (AMD APU)",
-    "steamdeck": "Gaming Handheld Strand (SteamOS APU)"
-}
+
+def resolve_node_role(node_id: str) -> str:
+    """Dynamically resolve the node role description from swarm manifests or environment."""
+    env_role = os.environ.get("KNOT_NODE_ROLE")
+    if env_role:
+        return env_role.strip()
+    home = os.path.expanduser("~")
+    manifest_dirs = glob.glob(os.path.join(home, ".config/knot/swarms/*/nodes/*.json")) + \
+                    glob.glob("/etc/knot/swarms.d/*/nodes/*.json")
+    for manifest_path in manifest_dirs:
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as mf:
+                m = json.load(mf)
+            if m.get("id") == node_id:
+                role = m.get("role") or ""
+                desc = m.get("description") or m.get("hardware") or ""
+                if role == "anchor":
+                    return "Mesh Anchor & Coordinator"
+                elif role:
+                    return f"{role.replace('_', ' ').title()} Strand"
+                if desc:
+                    return desc
+        except Exception as _err:
+            sys.stderr.write(f"Notice: [council_hook] Handled exception: {_err}\n")
+    if node_id == "desktop":
+        return "Mesh Anchor & Coordinator"
+    return "Strand Worker"
 
 
 def main():
@@ -55,7 +77,7 @@ def main():
     db_backend = os.environ.get("KNOT_COUNCIL_DB", "mesh")
     hub_url = os.environ.get("KNOT_HUB_URL", "https://127.0.0.1:4242")
     project = os.environ.get("KNOT_PROJECT", "knot-mesh")
-    role_title = ROLE_HINTS.get(node_id, "Strand Worker")
+    role_title = resolve_node_role(node_id)
 
     registry_desc = f"knot://mesh/council/{council_run_id}" if db_backend == "mesh" else "GitHub Discussions"
 

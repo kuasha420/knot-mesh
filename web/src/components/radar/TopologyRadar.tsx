@@ -47,7 +47,8 @@ const formatTokenExpiry = (expiryIso?: string): string => {
     const hrs = Math.floor(mins / 60);
     const remMins = mins % 60;
     return `in ${hrs}h ${remMins}m`;
-  } catch {
+  } catch (err) {
+    console.warn('Failed to parse reset time date:', err);
     return expiryIso.slice(11, 19) || '-';
   }
 };
@@ -168,14 +169,17 @@ export const TopologyRadar: React.FC<TopologyRadarProps> = ({
     try {
       const qualityParam = expandedScreenNode === nodeId ? '&quality=high' : '';
       const url = `/nodes/${nodeId}/screen?force=1${qualityParam}&t=${Date.now()}`;
-      await fetch(url);
+      const res = await fetch(url);
+      if (!res.ok) {
+        console.warn(`Failed to refresh node screen for ${nodeId}: HTTP ${res.status} ${res.statusText}`);
+      }
       setScreenKey(Date.now());
       if (expandedScreenNode === nodeId) {
         setActiveModalSrc(url);
         setLastFrameTime(new Date().toLocaleTimeString());
       }
-    } catch {
-      // Ignored
+    } catch (err) {
+      console.warn(`Failed to refresh node screen for ${nodeId}:`, err);
     } finally {
       setTimeout(() => setRefreshingScreen(null), 400);
     }
@@ -189,6 +193,7 @@ export const TopologyRadar: React.FC<TopologyRadarProps> = ({
       setActionResult(res);
       setIsModalOpen(true);
     } catch (err) {
+      console.warn(`Failed to execute mesh action ${action}:`, err);
       setActionResult({
         action,
         target,

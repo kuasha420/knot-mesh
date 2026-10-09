@@ -11,13 +11,11 @@ This document provides a comprehensive command-line reference for both `knot` (d
 - [1. Core Mesh Administration Commands](#1-core-mesh-administration-commands)
   - [knot status](#knot-status)
   - [knot doctor](#knot-doctor)
-  - [knot repair](#knot-repair)
   - [knot sync](#knot-sync)
   - [knot update](#knot-update)
   - [knot resolve](#knot-resolve)
   - [knot exec](#knot-exec)
   - [knot shutdown](#knot-shutdown)
-  - [knot reboot](#knot-reboot)
   - [knot onboard](#knot-onboard)
 - [2. Tier 1: D2D Physical Workspace Fabric Commands](#2-tier-1-d2d-physical-workspace-fabric-commands)
   - [knot kvm](#knot-kvm)
@@ -32,17 +30,12 @@ This document provides a comprehensive command-line reference for both `knot` (d
   - [knot swarm](#knot-swarm)
   - [knot quota](#knot-quota)
   - [knot auth](#knot-auth)
-  - [knot memory](#knot-memory)
   - [knot hub](#knot-hub)
   - [knot agent](#knot-agent)
   - [knot task](#knot-task)
   - [knot project](#knot-project)
-  - [knot worktree](#knot-worktree)
-  - [knot chat](#knot-chat)
-  - [knot artifact](#knot-artifact)
 - [4. Handheld & Graphical Cockpit Commands](#4-handheld--graphical-cockpit-commands)
   - [knot kafe](#knot-kafe)
-  - [knot web](#knot-web)
   - [jimha (Standalone Game & Mesh Launch)](#jimha-standalone-game--mesh-launch)
 - [5. `knot-installer` — Onboarding & Lifecycle CLI](#5-knot-installer--onboarding--lifecycle-cli)
   - [knot-installer init](#knot-installer-init)
@@ -110,7 +103,7 @@ Comprehensive multi-tier health diagnosis covering systemd units, network interf
 knot doctor local                  # Diagnose local workstation only
 knot doctor <node_id>              # Remotely diagnose a specific node
 knot doctor --all                  # Fleet-wide diagnosis across all active nodes
-knot doctor --fix                  # Run diagnosis and automatically invoke repairs
+knot doctor --repair               # Run diagnosis and automatically invoke repairs (alias: --fix)
 ```
 
 - **Diagnostic Checks**:
@@ -119,17 +112,6 @@ knot doctor --fix                  # Run diagnosis and automatically invoke repa
   3. `Display Manager`: Validates `plasma-login-manager` configuration for headless Wayland autounlock.
   4. `Systemd Services`: Checks status of `knot-hub`, `knot-deskflow`, `knot-agent`, and `knot-guard`.
   5. `SSH Key Mesh`: Verifies bidirectional authorized keys exchange between all swarm members.
-
----
-
-### `knot repair`
-Executes automated remediation scripts to fix common misconfigurations, reload systemd daemons, repair display manager links, and restart stuck services.
-
-```bash
-knot repair local                  # Repair local node components
-knot repair <node_id>              # Remotely repair a specific strand
-knot repair --all                  # Fleet-wide repair across all swarm nodes
-```
 
 ---
 
@@ -238,15 +220,6 @@ knot shutdown --all reboot         # Reboot all Strands, then the Anchor
 
 ---
 
-### `knot reboot`
-Convenience alias for `knot shutdown --reboot`. Coordinates fleet-wide reboot sequencing.
-
-```bash
-knot reboot [target] [options...]
-```
-
----
-
 ### `knot onboard`
 Enrolls the current machine into the local mesh, provisioning SSH host keys, configuring firewall rules, and deploying system services.
 
@@ -320,17 +293,13 @@ knot kdeconnect test-clipboard [--all|<node_id>]    # End-to-end automated clipb
 knot kdeconnect prune-stale                         # Detect and unpair obsolete/duplicate device identities
 knot kdeconnect get-clipboard                       # Read local Wayland/Klipper clipboard contents
 knot kdeconnect set-clipboard "<payload>"           # Set local Wayland/Klipper clipboard contents
-knot kdeconnect vmon status [<node_id>]             # Check Virtual Monitor DBus availability & active streams
-knot kdeconnect vmon start <node_id>                # Spawn headless Wayland virtual screen & stream to remote strand via RDP
-knot kdeconnect vmon stop [<node_id>]               # Terminate virtual display stream and restore local display geometry
-knot display extend <node_id>                       # Alias for knot kdeconnect vmon start <node_id>
 ```
 
 - **Core Capabilities**:
-  - **Wayland Virtual Monitor Fabric**: Instantly expands Desktop Anchor's workspace onto docked handhelds (ROG Ally, Steam Deck OLED) or secondary laptops via KWin Wayland headless outputs + `krdpserver` and KRDC. Single-click start/stop with zero manual password or port configuration.
+  - **Wayland Virtual Monitor Fabric**: Instantly expands Desktop Anchor's workspace onto docked handhelds (ROG Ally, Steam Deck OLED) or secondary laptops via KWin Wayland headless outputs + `krdpserver` and KRDC (`knot display vmon`, `knot display extend`). Single-click start/stop with zero manual password or port configuration.
   - **Tier 1 D2D Continuous Self-Healing**: Fully autonomous background reconciliation supervised by `knot-kdeconnect-reconcile.timer` (running every 3 minutes under `graphical-session.target`) and `knot-guard` (triggering on network roaming). Scans active swarm node manifests, auto-accepts pairing requests from verified peers over reciprocal Ed25519 SSH probes, and silently re-pairs dropped connections without operator intervention.
   - **Zero-Interaction Trust Bootstrapping**: Leverages existing Ed25519 SSH mesh credentials as out-of-band trust anchors to automatically accept pairing requests via DBus without manual GUI clicks.
-  - **Turnkey Onboarding & 1-Click Repair**: Automatically executes non-blocking reconciliation during `knot onboard` and `knot-installer join`; `knot doctor` detects unbonded swarm peers and `knot repair` self-heals the entire mesh with one click.
+  - **Turnkey Onboarding & 1-Click Repair**: Automatically executes non-blocking reconciliation during `knot onboard` and `knot-installer join`; `knot doctor` detects unbonded swarm peers and `knot doctor --repair` self-heals the entire mesh with one click.
   - **Plasma 6 Wayland Pipeline**: Direct integration with KDE Plasma 6 Klipper DBus (`org.kde.klipper /klipper`) with transparent fallback to `wl-paste` / `wl-copy`. Safely supports large payloads (>8KB / 16KB / 21KB), multi-line snippets, and long URLs with query parameters without shell mangling.
   - **Intentional Cross-Strand Piping**: Pipe authorization codes, tokens, or URLs straight to another node's clipboard (`echo "https://..." | knot kdeconnect share --target laptop`).
   - **Auto-Integrated Workflows**: Automatically pre-synchronizes clipboards during `knot auth login` (for instant cross-screen OAuth code copying) and `knot-installer invite` / `join` (for seamless token auto-detection).
@@ -344,6 +313,7 @@ Controls dynamic Wayland virtual display extension across the physical mesh. All
 knot display status [<node_id>]       # Inspect local host/client engines & peer virtual monitor readiness
 knot display extend <node_id>         # Spawn headless Wayland screen on Anchor & stream fullscreen to target
 knot display stop [<node_id>]         # Terminate virtual display stream and cleanly close remote viewer
+knot display vmon <status|start|stop> # Direct virtual monitor management
 ```
 
 - **Subcommands**:
@@ -358,18 +328,16 @@ knot display stop [<node_id>]         # Terminate virtual display stream and cle
 ---
 
 ### `knot topology`
-Multi-screen spatial topology reasoning and visual layout management module. Renders 2D spatial ASCII representations of active swarm displays, triggers camera-based computer vision layout analysis, aligns multi-display outputs, and flashes high-contrast display overlays.
+Multi-screen spatial topology reasoning and visual layout management module. Renders 2D spatial ASCII representations of active swarm displays and aligns multi-display outputs.
 
 ```bash
-knot topology [show|refresh|align-internal|identify|guide] [options]
+knot topology [show|align-internal|guide] [options]
 ```
 
 - **Subcommands**:
   - `knot topology show`: Displays current 2D ASCII screen layout, Anchor screen identity, and active screen boundaries.
-  - `knot topology refresh --photo <path> [--mode auto|swarm|offline] [--apply]`: Analyzes a photo of physical monitors using computer vision, inferring relative physical screen positions, spans, and boundaries.
   - `knot topology align-internal`: Automatically aligns internal handheld displays (eDP-1) with connected external monitors via KDE KScreen.
-  - `knot topology identify [--all]`: Spawns fullscreen high-contrast colored overlays displaying node identity and display numbers across screens.
-  - `knot topology guide`: Outputs photography, lighting, and camera positioning best practices for spatial detection.
+  - `knot topology guide`: Outputs multi-display setup and spatial orientation best practices.
 
 ---
 
@@ -450,16 +418,13 @@ Manages multi-tenant swarm profiles and Antigravity multi-agent cluster operatio
 ```bash
 knot swarm status                  # List configured swarm profiles and active fence
 knot swarm switch <swarm_id>       # Switch active swarm profile (e.g. home, office)
-knot swarm test [node_id]          # Test Antigravity CLI telemetry and ping latency
-knot swarm auth [node_id]          # Verify Google OAuth token validity for headless agy
-knot swarm quota [node|--all]      # Inspect real-time 5h and weekly model quotas
-knot swarm exec <node> <cmd...>    # Run commands across swarm nodes
+knot swarm auth [node_id]          # Verify Google OAuth token validity (delegates to knot auth)
 ```
 
 ---
 
 ### `knot quota`
-Direct alias for `knot swarm quota`. Displays real-time 5-hour and weekly Google AI Pro/Ultra and Antigravity model quota consumption, active reset countdowns, and graphical progress bars across the mesh.
+Displays real-time 5-hour and weekly Google AI Pro/Ultra and Antigravity model quota consumption, active reset countdowns, and graphical progress bars across the mesh.
 
 ```bash
 knot quota                         # Display formatted quota matrix for all online nodes
@@ -513,30 +478,6 @@ knot auth <action> --node <node_id>     # e.g., knot auth list --node steamdeck
 
 ---
 
-### `knot memory`
-Decentralized Memory Palace and Vault module backed by embedded SQLite with CRDT synchronization and in-process vector cosine similarity.
-
-```bash
-knot memory <store|recall|map|promote|relate|artifact-put|artifact-get|profile|export-crdt|test> [options]
-```
-
-- **Subcommands**:
-  - `knot memory store`: Stores a memory into the spatial palace.
-    ```bash
-    knot memory store --wing <wing> --hall <hall> --drawer <drawer> --title "<title>" --content "<content>" [--pool shared|local] [--importance 1-10] [--tags t1,t2]
-    ```
-  - `knot memory recall`: Recalls memories using vector cosine similarity or spatial path query.
-    ```bash
-    knot memory recall --query "<search text>" [--wing <wing>] [--hall <hall>] [--pool shared|local|all] [--limit 5] [--min-score 0.1]
-    ```
-  - `knot memory map`: Displays the complete spatial hierarchy tree of memories stored in the local SQLite palace.
-  - `knot memory promote`: Promotes a local scratchpad observation to the swarm-shared memory pool with an importance boost.
-  - `knot memory relate`: Creates an associative typed edge between two memories.
-  - `knot memory profile <role_or_node>`: Displays hardware node-role profile, constraints, and system prompt.
-  - `knot memory test`: Runs the comprehensive embedded SQLite memory palace self-test suite.
-
----
-
 ### `knot hub`
 Controls the Knot Swarm Blackboard Hub daemon (`knot-hub.service`), providing Linda tuplespaces, task leasing, and SSE event streaming.
 
@@ -576,46 +517,25 @@ knot task wait <task_id>           # Follow task execution until completion
 ---
 
 ### `knot project`
-Manages native Antigravity multi-folder project registrations and cross-node worktrees.
+Manages native Antigravity multi-folder project registrations.
 
 ```bash
 knot project list                  # List registered projects
 knot project get <project_id>      # Inspect project metadata
-knot project sync [project_id]     # Synchronize project workspaces across nodes
 ```
 
 ---
 
 ### `knot worktree`
-Manages cross-node Git worktrees without duplicate clones, preserving storage and eliminating fetch contention.
+Manages cross-node Git worktrees without duplicate clones, preserving storage, eliminating fetch contention, and orchestrating parallel landing rebase arbiters.
 
 ```bash
 knot worktree list                 # List active git worktrees across the mesh
 knot worktree add <repo> <name> [--branch <b>] [--nodes <n1,n2>]  # Provision worktree mesh
 knot worktree remove <repo> <name> # Cleanly delete worktree across target nodes
-```
-
----
-
-### `knot chat`
-Manages Swarm Konversations channels, inter-agent chat messaging, and persistent channel logs.
-
-```bash
-knot chat channels                 # List active chat channels
-knot chat create <channel_id> [title] [-p project_id]  # Create a new channel
-knot chat post [-c channel] [-s sender] <message>      # Post message to channel
-knot chat read [-c channel] [-n limit]                 # Read channel history
-```
-
----
-
-### `knot artifact`
-Manages 3-state artifact leases (`DRAFTING`, `LOCKED_SURGERY`, `VERIFIED_COMMITTED`) preventing concurrent file mutation collisions across agents.
-
-```bash
-knot artifact list                 # List active artifact leases and expiry countdowns
-knot artifact lock <name> [--ttl <sec>]  # Acquire LOCKED_SURGERY lease on an artifact
-knot artifact release <name> [--state <state>] # Commit and release artifact lease
+knot worktree normalize [path]     # Normalize paths across home directory structures
+knot worktree provision            # Provision worktrees across target nodes
+knot worktree rebase-mesh          # Rebase and land branches across mesh worktrees
 ```
 
 ---
@@ -632,15 +552,6 @@ knot kafe build-desktop            # Compile release Tauri v2 container binary
 knot kafe dev                      # Launch Vite HMR development server (:5173)
 knot kafe build                    # Build production static bundle to web/dist
 knot kafe install                  # Install web cockpit npm dependencies
-```
-
----
-
-### `knot web`
-Direct alias dispatch for `knot kafe`.
-
-```bash
-knot web [open|dev|build|install]
 ```
 
 ---

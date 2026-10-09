@@ -117,156 +117,6 @@ for src, dirs in layout.items():
 "
 }
 
-topology_refresh() {
-  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-    echo "Usage: knot topology refresh --photo <img.jpg> [--mode auto|swarm|offline] [--apply]"
-    return 0
-  fi
-  local photo_path=""
-  local mode="auto"
-  local apply_layout=0
-
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --photo|-p)
-        photo_path="${2:-}"
-        shift 2
-        ;;
-      --mode|-m)
-        mode="${2:-auto}"
-        shift 2
-        ;;
-      --apply|-a)
-        apply_layout=1
-        shift
-        ;;
-      *)
-        if [ -f "$1" ] && [ -z "$photo_path" ]; then
-          photo_path="$1"
-          shift
-        else
-          knot_log_err "Unknown option: $1"
-          echo "Usage: knot topology refresh [--photo] <path> [--mode auto|swarm|offline] [--apply]"
-          return 1
-        fi
-        ;;
-    esac
-  done
-
-  if [ -z "$photo_path" ]; then
-    knot_log_err "Missing required --photo argument"
-    echo "Usage: knot topology refresh --photo <path> [--mode auto|swarm|offline] [--apply]"
-    return 1
-  fi
-
-  if [ ! -f "$photo_path" ]; then
-    knot_log_err "Photo file not found: $photo_path"
-    return 1
-  fi
-
-  knot_log_info "Analyzing physical desk photo: $photo_path (mode: $mode)..."
-
-  # Invoke Python vision analysis directly or via Hub endpoint
-  local py_code="
-import json, sys
-from core.vision.engine import analyze_desk_photo
-
-try:
-    res = analyze_desk_photo('$photo_path', mode='$mode')
-    print(json.dumps(res))
-except Exception as e:
-    sys.stderr.write(f'Analysis failed: {e}\n')
-    sys.exit(1)
-"
-
-  local analysis_json="" py_rc=0
-  analysis_json="$(python3 -c "$py_code" 2>&1)" || py_rc=$?
-  if [ $py_rc -ne 0 ]; then
-    # If direct import fails due to CWD or path, try through Knot hub
-    knot_log_warn "Local execution failed ($py_rc): $analysis_json"
-    knot_log_info "Forwarding to Knot Hub API..."
-    analysis_json="$(curl -k -s -X POST https://127.0.0.1:4242/topology/analyze-photo \
-      -H 'Content-Type: application/json' \
-      -d "{\"image_path\": \"$photo_path\", \"mode\": \"$mode\"}" | jq -r '.result // empty')"
-  fi
-
-  if [ -z "$analysis_json" ] || [ "$analysis_json" = "null" ]; then
-    knot_log_err "Failed to analyze photo."
-    return 1
-  fi
-
-  echo "$analysis_json" | python3 -c "
-import json, sys
-
-data = json.load(sys.stdin)
-engine = data.get('engine', 'unknown')
-anchor = data.get('anchor_node_id', 'unknown')
-screens = data.get('screens', [])
-layout = data.get('proposed_layout', {})
-meta = data.get('metadata', {})
-
-print('\033[1;32m✔ Vision & Spatial Reasoning Complete!\033[0m')
-print(f'Engine Used  : \033[1;36m{engine.upper()}\033[0m (Duration: {meta.get(\"detection_time_ms\", 0)}ms)')
-print(f'Anchor Screen: \033[1m{anchor}\033[0m')
-print(f'Detected Displays ({len(screens)}):')
-
-for s in screens:
-    nid = s.get('matched_node_id', '?')
-    dtype = s.get('device_type', 'screen')
-    pos = s.get('position_relative_to_anchor', 'anchor')
-    box = s.get('box_2d', [])
-    conf = int(s.get('confidence', 0.8) * 100)
-    print(f'  • \033[1m{nid:<24}\033[0m [{dtype:<16}] Position: \033[33m{pos:<8}\033[0m Box: {box} (Conf: {conf}%)')
-
-print('')
-print('\033[1mReasoning:\033[0m')
-print(data.get('reasoning', 'No reasoning provided.'))
-"
-
-  if [ "$apply_layout" -eq 1 ]; then
-    knot_log_info "Applying proposed topology layout to active mesh..."
-    local active_swarm
-    active_swarm="$(knot_get_active_swarm)"
-    local user_home
-    user_home="$(knot_detect_user_home)"
-    local topo_file="$user_home/.config/knot/swarms/${active_swarm}/topology.json"
-
-    echo "$analysis_json" | python3 -c "
-import json, sys
-
-data = json.load(sys.stdin)
-anchor = data.get('anchor_node_id', 'unknown')
-layout = data.get('proposed_layout', {})
-screens = list(set([s.get('matched_node_id') for s in data.get('screens', []) if s.get('matched_node_id')]))
-
-new_topo = {
-    'anchor': anchor,
-    'screens': screens,
-    'layout': layout,
-    'locked': False
-}
-
-with open('$topo_file', 'w') as f:
-    json.dump(new_topo, f, indent=2)
-
-print('Updated ' + '$topo_file')
-"
-    # Recompile and reload Deskflow & Stripd
-    deskflow_configure
-    local r_err=""
-    if ! r_err="$(systemctl --user restart knot-deskflow.service 2>&1)"; then
-      knot_log_warn "Notice: knot-deskflow.service restart failed: $r_err"
-    fi
-    if ! r_err="$(systemctl --user restart knot-stripd.service 2>&1)"; then
-      knot_log_warn "Notice: knot-stripd.service restart failed: $r_err"
-    fi
-    knot_log_ok "Topology successfully refreshed and applied to mesh!"
-  else
-    echo ""
-    echo -e "${C_YELLOW}Note: Layout was not applied. Pass --apply to update topology.json and reload Deskflow KVM.${C_RESET}"
-  fi
-}
-
 topology_align_internal() {
   if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
     echo "Usage: knot topology align-internal"
@@ -326,145 +176,20 @@ with open('$target_mf', 'w') as f:
   knot_log_ok "Internal display topology synchronized with Deskflow KVM."
 }
 
-topology_identify() {
-  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-    echo "Usage: knot topology identify [--all] [--bg white|black|neon] [--duration <sec>]"
-    return 0
-  fi
-  local bg="white"
-  local duration="15"
-  local broadcast_all=0
-
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --bg)
-        bg="${2:-white}"
-        shift 2
-        ;;
-      --duration|-d)
-        duration="${2:-15}"
-        shift 2
-        ;;
-      --all|-a)
-        broadcast_all=1
-        shift
-        ;;
-      *)
-        shift
-        ;;
-    esac
-  done
-
-  # Guarantee GUI compositor environment variables in non-interactive sessions
-  if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
-    export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-  fi
-  if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -S "$XDG_RUNTIME_DIR/wayland-0" ]; then
-    export WAYLAND_DISPLAY="wayland-0"
-  fi
-  if [ -z "${DISPLAY:-}" ]; then
-    export DISPLAY=":0"
-  fi
-
-  # Wake display from DPMS power-save and simulate user activity
-  if command -v kscreen-doctor >/dev/null; then
-    local kd_err="" kd_rc=0
-    kd_err="$(kscreen-doctor --dpms on 2>&1)" || kd_rc=$?
-    if [ $kd_rc -ne 0 ]; then
-      knot_log_warn "Notice: kscreen-doctor --dpms on exited with code $kd_rc: $kd_err"
-    fi
-  fi
-  if command -v qdbus6 >/dev/null; then
-    local qd_err="" qd_rc=0
-    qd_err="$(qdbus6 org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.SimulateUserActivity 2>&1)" || qd_rc=$?
-    if [ $qd_rc -ne 0 ]; then
-      knot_log_warn "Notice: qdbus6 SimulateUserActivity exited with code $qd_rc: $qd_err"
-    fi
-  elif command -v qdbus >/dev/null; then
-    local qd_err="" qd_rc=0
-    qd_err="$(qdbus org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver.SimulateUserActivity 2>&1)" || qd_rc=$?
-    if [ $qd_rc -ne 0 ]; then
-      knot_log_warn "Notice: qdbus SimulateUserActivity exited with code $qd_rc: $qd_err"
-    fi
-  fi
-
-  # Auto-unlock graphical session if locked so overlay is not obscured by lockscreen
-  if command -v loginctl >/dev/null; then
-    local u_name
-    u_name="$(knot_detect_user)"
-    local s_id=""
-    if ! s_id="$(loginctl show-user "$u_name" -p Display --value 2>&1)"; then
-      s_id=""
-    fi
-    if [ -z "$s_id" ]; then
-      local s_list=""
-      if s_list="$(loginctl list-sessions --no-legend 2>&1)"; then
-        s_id="$(echo "$s_list" | awk -v u="$u_name" '$3==u && $4~/seat/ {print $1; exit}')"
-      fi
-    fi
-    if [ -n "$s_id" ]; then
-      local is_locked=""
-      if is_locked="$(loginctl show-session "$s_id" -p LockedHint --value 2>&1)"; then
-        if [ "$is_locked" = "yes" ]; then
-          local ul_err="" ul_rc=0
-          ul_err="$(loginctl unlock-session "$s_id" 2>&1)" || ul_rc=$?
-          if [ $ul_rc -ne 0 ]; then
-            knot_log_warn "Notice: loginctl unlock-session failed ($ul_rc): $ul_err"
-          fi
-        fi
-      fi
-    fi
-  fi
-
-  if [ "$broadcast_all" -eq 1 ]; then
-    knot_log_info "Flashing display calibration pattern swarm-wide across all mesh nodes..."
-    local c_out="" c_rc=0
-    c_out="$(curl -k -s -X POST https://127.0.0.1:4242/topology/identify \
-      -H "Content-Type: application/json" \
-      -d "{\"bg\": \"$bg\", \"duration_sec\": $duration}" 2>&1)" || c_rc=$?
-    if [ $c_rc -ne 0 ]; then
-      knot_log_warn "Notice: curl to topology/identify failed ($c_rc): $c_out"
-    fi
-  fi
-
-  knot_log_info "Opening high-contrast display identification overlay on local displays (bg: $bg, duration: ${duration}s)..."
-  local py_script="$KNOT_ROOT/core/vision/display_overlay.py"
-  if [ -f "$py_script" ]; then
-    python3 "$py_script" --bg "$bg" --duration "$duration"
-  else
-    knot_log_err "Overlay script not found at: $py_script"
-    return 1
-  fi
-}
-
 topology_guide() {
   cat << 'GUIDE_EOF'
 ================================================================================
-           KNOT VISION & PHYSICAL TOPOLOGY PHOTOGRAPHY GUIDANCE
+           KNOT PHYSICAL TOPOLOGY & DISPLAY ALIGNMENT GUIDANCE
 ================================================================================
 
-1. DISPLAY IDENTIFICATION CALIBRATION PATTERN:
-   Run: knot topology identify --all [--bg white|black|neon]
-   Or in Kafe Web Cockpit: Click "📸 Flash Display ID Pattern"
-   - Every connected screen will display a crisp, high-contrast banner with its
-     Node ID, output connector name (DP-2, eDP-1), resolution, and corner fiducials.
-   - This guarantees 100% boundary detection and zero ambiguous node assignments.
-
-2. OPTIMAL PHOTOGRAPHY FRAMING:
-   - Stand or place camera 1.5 - 2.5 meters away from the desk.
-   - Hold camera parallel to the desk plane (eye-level with the center monitor).
-   - Ensure ALL screens (elevated monitors, laptops, handheld consoles) are visible
-     in a single wide shot without extreme wide-angle fisheye lens distortion.
-   - Avoid direct overhead light glare reflecting directly on screen panels.
-
-3. MULTI-DISPLAY NODE ALIGNMENT (e.g. ASUS ROG ALLY):
+1. MULTI-DISPLAY NODE ALIGNMENT (e.g. ASUS ROG ALLY):
    - For nodes with both an external monitor (DP-2) and a built-in screen (eDP-1):
      Run: knot topology align-internal
      - Places eDP-1 at (0,720) with Scale 3 (640x360) directly below the left 50% of DP-2.
      - Left 50% bottom edge seamlessly transitions into ROG Ally console display.
      - Right 50% bottom edge exits directly to Steam Deck without passing through Ally!
 
-4. FRACTIONAL KVM SPAN CUSTOMIZATION:
+2. FRACTIONAL KVM SPAN CUSTOMIZATION:
    In topology.json, spans can be customized per edge:
    - "left": { "node": "laptop", "span": [25, 100], "target_span": [0, 85] }
    - "right": { "node": "workstation_monitor", "span": [0, 100] }
@@ -481,28 +206,28 @@ cmd_topology() {
     show|status|map)
       topology_show "$@"
       ;;
-    refresh|analyze|photo)
-      topology_refresh "$@"
-      ;;
     align-internal|align)
       topology_align_internal "$@"
       ;;
-    identify|calibrate|flash)
-      topology_identify "$@"
-      ;;
-    -h|--help|guide|help)
+    guide)
       topology_guide
+      return 0
+      ;;
+    -h|--help|help)
+      echo -e "${C_BOLD}Knot Topology Management${C_RESET}"
+      echo "Usage:"
+      echo "  knot topology show            Show current 2D screen spatial layout"
+      echo "  knot topology align-internal  Align multi-display outputs (e.g. ROG Ally eDP-1)"
+      echo "  knot topology guide           Print layout & alignment best practices"
       return 0
       ;;
     *)
       echo "Error: Unknown topology subcommand '$sub'" >&2
       echo -e "${C_BOLD}Knot Topology Management${C_RESET}" >&2
       echo "Usage:" >&2
-      echo "  knot topology show                  Show current 2D screen spatial layout" >&2
-      echo "  knot topology refresh --photo <img.jpg> [--mode auto|swarm|offline] [--apply]" >&2
-      echo "  knot topology align-internal        Align multi-display outputs (e.g. ROG Ally eDP-1)" >&2
-      echo "  knot topology identify [--all]      Flash high-contrast display identification overlay" >&2
-      echo "  knot topology guide                 Print photography & alignment best practices" >&2
+      echo "  knot topology show            Show current 2D screen spatial layout" >&2
+      echo "  knot topology align-internal  Align multi-display outputs (e.g. ROG Ally eDP-1)" >&2
+      echo "  knot topology guide           Print layout & alignment best practices" >&2
       return 1
       ;;
   esac

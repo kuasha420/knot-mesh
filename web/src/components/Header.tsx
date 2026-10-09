@@ -6,9 +6,7 @@ import {
   Gamepad2,
   GitBranch,
   Kanban,
-  KeyRound,
   LayoutGrid,
-  MessageSquare,
   Moon,
   Radio,
   RefreshCw,
@@ -169,19 +167,6 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           <button
-            onClick={() => onViewModeChange('chat')}
-            title="Swarm Konversations Chat"
-            className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-md transition-all ${
-              viewMode === 'chat'
-                ? 'bg-night-panel text-night-cyan font-bold shadow-sm border border-night-cyan/40'
-                : 'text-night-muted hover:text-night-text'
-            }`}
-          >
-            <MessageSquare className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Chat</span>
-          </button>
-
-          <button
             onClick={() => onViewModeChange('radar')}
             title="Topology Radar & Quotas"
             className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-md transition-all ${
@@ -218,19 +203,6 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Kanban className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Kanban</span>
-          </button>
-
-          <button
-            onClick={() => onViewModeChange('artifacts')}
-            title="Artifact Leases Vault"
-            className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-md transition-all ${
-              viewMode === 'artifacts'
-                ? 'bg-night-panel text-night-magenta font-bold shadow-sm border border-night-magenta/40'
-                : 'text-night-muted hover:text-night-text'
-            }`}
-          >
-            <KeyRound className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Vault</span>
           </button>
         </nav>
       )}

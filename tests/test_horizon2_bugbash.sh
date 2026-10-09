@@ -63,40 +63,36 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# Test 2: BUG-016 - knot repair --help and -h handling
+# Test 2: BUG-016 - knot doctor --repair usage and rejection of purged 'knot repair'
 # ------------------------------------------------------------------------------
-echo -e "\n\033[1m[Test 2/7] Verifying 'knot repair --help' and '-h' CLI routing...\033[0m"
+echo -e "\n\033[1m[Test 2/7] Verifying 'knot doctor --repair --help' and rejection of purged root 'knot repair'...\033[0m"
 
 rep_help_out=""
 rep_help_rc=0
-if rep_help_out="$(knot repair --help 2>&1)"; then
+if rep_help_out="$(knot doctor --repair --help 2>&1)"; then
   rep_help_rc=0
 else
   rep_help_rc=$?
 fi
 
-if [ $rep_help_rc -eq 0 ] && echo "$rep_help_out" | grep -q "Usage: knot repair"; then
+if [ $rep_help_rc -eq 0 ] && echo "$rep_help_out" | grep -q "Usage: knot doctor"; then
   if echo "$rep_help_out" | grep -qiE "unknown option|ssh"; then
-    test_fail "knot repair --help printed usage but still triggered SSH warnings"
+    test_fail "knot doctor --repair --help printed usage but still triggered SSH warnings"
   else
-    test_pass "knot repair --help exited 0 with usage and no SSH dispatch"
+    test_pass "knot doctor --repair --help exited 0 with usage and no SSH dispatch"
   fi
 else
-  test_fail "knot repair --help failed with exit $rep_help_rc: $rep_help_out"
+  test_fail "knot doctor --repair --help failed with exit $rep_help_rc: $rep_help_out"
 fi
 
-rep_h_out=""
-rep_h_rc=0
-if rep_h_out="$(knot repair -h 2>&1)"; then
-  rep_h_rc=0
-else
-  rep_h_rc=$?
-fi
+rep_purged_out=""
+rep_purged_rc=0
+rep_purged_out="$(knot repair 2>&1)" || rep_purged_rc=$?
 
-if [ $rep_h_rc -eq 0 ] && echo "$rep_h_out" | grep -q "Usage: knot repair"; then
-  test_pass "knot repair -h exited 0 with usage"
+if [ $rep_purged_rc -eq 1 ] && echo "$rep_purged_out" | grep -q "Unknown command 'repair'"; then
+  test_pass "knot repair correctly rejected as purged command (exit 1)"
 else
-  test_fail "knot repair -h failed with exit $rep_h_rc: $rep_h_out"
+  test_fail "knot repair was not rejected as purged command (exit $rep_purged_rc): $rep_purged_out"
 fi
 
 # ------------------------------------------------------------------------------

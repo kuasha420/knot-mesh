@@ -2829,7 +2829,7 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             return
 
         clean_path = path.lstrip("/")
-        if not clean_path or clean_path in ("kafe", "cockpit", "chat", "dag", "artifacts", "projects"):
+        if not clean_path or clean_path in ("kafe", "cockpit", "dag", "projects"):
             target = os.path.join(WEB_DIST_DIR, "index.html")
         else:
             target = os.path.abspath(os.path.join(WEB_DIST_DIR, clean_path))
@@ -3164,33 +3164,6 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             else:
                 self._send_error("Project not found", 404)
 
-        elif path == "/chat/conversations":
-            proj_id = query.get("project_id", [None])[0]
-            self._send_json(self.db.list_conversations(project_id=proj_id))
-
-        elif path.startswith("/chat/conversations/") and path.endswith("/models"):
-            cid = path.replace("/chat/conversations/", "").replace("/models", "").strip()
-            self._send_json(self.db.get_conversation_models(cid))
-
-        elif path.startswith("/chat/conversations/"):
-            cid = path.replace("/chat/conversations/", "").strip()
-            c = self.db.get_conversation(cid)
-            if c:
-                self._send_json(c)
-            else:
-                self._send_error("Conversation not found", 404)
-
-        elif path == "/chat/session":
-            conv_id = query.get("conv_id", [""])[0]
-            node_id = query.get("node_id", [""])[0]
-            session_id = self.db.get_node_session(conv_id, node_id)
-            self._send_json({"conv_id": conv_id, "node_id": node_id, "agy_session_id": session_id})
-
-        elif path == "/chat/messages":
-            conv_id = query.get("conv_id", ["main"])[0]
-            limit = int(query.get("limit", [50])[0])
-            before_ts = int(query.get("before_ts", [0])[0]) or None
-            self._send_json(self.db.list_chat_messages(conv_id=conv_id, limit=limit, before_ts=before_ts))
 
         elif path == "/council/threads":
             self._send_json(self.db.list_council_threads())
@@ -3215,16 +3188,6 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             tid = path.replace("/council/threads/", "").strip()
             self._send_json(self.db.get_council_thread(tid))
 
-        elif path == "/artifacts/leases":
-            self._send_json(self.db.list_artifact_leases())
-
-        elif path.startswith("/artifacts/lease/"):
-            name = path.replace("/artifacts/lease/", "").strip()
-            lease = self.db.get_artifact_lease(name)
-            if lease:
-                self._send_json(lease)
-            else:
-                self._send_error("Artifact lease not found", 404)
 
         elif path == "/swarm/activity":
             timeout = int(query.get("timeout", [1800])[0])
@@ -3770,55 +3733,6 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             proj = self.db.create_project(project_id=pid, name=name, description=desc, folders=folders)
             self._send_json(proj, 201)
 
-        elif path == "/chat/conversations":
-            cid = body.get("id", "").strip() or re.sub(r'[^a-zA-Z0-9_-]', '-', body.get("title", "").strip().lower()) or str(uuid.uuid4())
-            title = body.get("title", cid).strip() or cid
-            proj_id = body.get("project_id", "knot").strip() or "knot"
-            desc = body.get("description", "").strip()
-            created_by = body.get("created_by", "human").strip() or "human"
-            conv = self.db.create_conversation(conv_id=cid, title=title, project_id=proj_id, description=desc, created_by=created_by)
-            self._send_json(conv, 201)
-
-        elif path.startswith("/chat/conversations/") and path.endswith("/model"):
-            cid = path.replace("/chat/conversations/", "").replace("/model", "").strip()
-            model = body.get("model", "").strip()
-            node_id = body.get("node_id", "").strip() or None
-            res = self.db.set_conversation_model(conv_id=cid, model=model, node_id=node_id)
-            self._send_json(res, 200)
-
-        elif path == "/chat/session":
-            conv_id = body.get("conv_id", "").strip()
-            node_id = body.get("node_id", "").strip()
-            agy_session_id = body.get("agy_session_id", "").strip()
-            if not conv_id or not node_id or not agy_session_id:
-                self._send_error("Fields conv_id, node_id, and agy_session_id are required", 400)
-                return
-            self.db.set_node_session(conv_id, node_id, agy_session_id)
-            self._send_json({"ok": True, "conv_id": conv_id, "node_id": node_id, "agy_session_id": agy_session_id}, 200)
-
-        elif path == "/chat/messages":
-            sender = body.get("sender", "user").strip() or "user"
-            content = body.get("content", "").strip()
-            conv_id = body.get("conv_id", "main").strip() or "main"
-            mentions = body.get("mentions", None)
-            artifacts = body.get("artifacts", None)
-            reply_to = body.get("reply_to", None)
-            meta = body.get("meta", None)
-
-            if not content:
-                self._send_error("Field 'content' is required", 400)
-                return
-
-            msg = self.db.post_chat_message(
-                sender=sender,
-                content=content,
-                conv_id=conv_id,
-                mentions=mentions,
-                artifacts=artifacts,
-                reply_to=reply_to,
-                meta=meta
-            )
-            self._send_json(msg, 201)
 
         elif path == "/council/threads":
             tid = body.get("id", "").strip() or str(uuid.uuid4())
@@ -3850,32 +3764,6 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 logger.debug("Notice: failed to publish council reply strand event: %s", e)
             self._send_json(res, 201)
 
-        elif path == "/artifacts/lock":
-            name = body.get("name", "").strip()
-            locked_by = body.get("node_id", body.get("locked_by", "")).strip()
-            ttl_sec = int(body.get("ttl", body.get("lease_ttl", DEFAULT_ARTIFACT_LEASE_TTL)))
-            state = body.get("state", "LOCKED_SURGERY").strip() or "LOCKED_SURGERY"
-
-            if not name or not locked_by:
-                self._send_error("Fields 'name' and 'node_id' (or 'locked_by') are required", 400)
-                return
-
-            res = self.db.lock_artifact(name=name, locked_by=locked_by, ttl_sec=ttl_sec, state=state)
-            status_code = 200 if res.get("ok") else 409
-            self._send_json(res, status_code)
-
-        elif path == "/artifacts/release":
-            name = body.get("name", "").strip()
-            node_id = body.get("node_id", "").strip()
-            new_state = body.get("state", "VERIFIED_COMMITTED").strip() or "VERIFIED_COMMITTED"
-
-            if not name or not node_id:
-                self._send_error("Fields 'name' and 'node_id' are required", 400)
-                return
-
-            res = self.db.release_artifact(name=name, node_id=node_id, new_state=new_state)
-            status_code = 200 if res.get("ok") else 400
-            self._send_json(res, status_code)
 
         elif path == "/topology":
             active_swarm, _ = get_active_swarm_info()
@@ -3914,175 +3802,7 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             broadcast_event("topology_updated", topo_data)
             self._send_json({"ok": True, "recompiled": recompiled, "topology": topo_data})
 
-        elif path == "/topology/analyze-photo":
-            active_swarm, _ = get_active_swarm_info()
-            user_home = os.path.expanduser("~")
-            nodes_dir = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/nodes")
 
-            mode = body.get("mode", "auto")
-            raw_data = None
-
-            if "raw_bytes" in body:
-                raw_data = body["raw_bytes"]
-            elif "image_base64" in body:
-                b64_str = body["image_base64"]
-                if "," in b64_str:
-                    b64_str = b64_str.split(",", 1)[1]
-                try:
-                    raw_data = base64.b64decode(b64_str)
-                except Exception as be:
-                    self._send_error(f"Invalid base64 image data: {be}", 400)
-                    return
-            elif "image_path" in body:
-                p = body["image_path"].strip()
-                if os.path.isfile(p):
-                    try:
-                        with open(p, "rb") as f:
-                            raw_data = f.read()
-                    except Exception as fe:
-                        self._send_error(f"Cannot read image_path: {fe}", 400)
-                        return
-                else:
-                    self._send_error(f"image_path file not found: {p}", 404)
-                    return
-            else:
-                self._send_error("Provide 'image_base64', 'image_path', or binary image payload", 400)
-                return
-
-            # Gather swarm node context
-            node_list = []
-            if os.path.isdir(nodes_dir):
-                for fname in sorted(os.listdir(nodes_dir)):
-                    if fname.endswith(".json"):
-                        try:
-                            with open(os.path.join(nodes_dir, fname), "r") as mf:
-                                node_list.append(json.load(mf))
-                        except Exception as exc:
-                            sys.stderr.write(f"[Knot Hub] Failed to read node manifest {fname}: {exc}\n")
-
-            topo_path = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/topology.json")
-            anchor_id = "desktop"
-            if os.path.exists(topo_path):
-                try:
-                    with open(topo_path, "r") as tf:
-                        anchor_id = json.load(tf).get("anchor") or "desktop"
-                except Exception as exc:
-                    sys.stderr.write(f"[Knot Hub] Failed to read topology at {topo_path}: {exc}\n")
-            if anchor_id == "desktop":
-                for node in node_list:
-                    if node.get("role") == "anchor":
-                        anchor_id = node.get("id") or node.get("node_id", anchor_id)
-                        break
-
-            try:
-                from core.vision.engine import analyze_desk_photo
-                analysis = analyze_desk_photo(
-                    raw_data,
-                    mode=mode,
-                    swarm_nodes=node_list,
-                    anchor_id=anchor_id
-                )
-                self._send_json({"ok": True, "result": analysis}, 200)
-            except Exception as ve:
-                logger.exception("Photo topology analysis error: %s", ve)
-                self._send_error(f"Topology analysis failed: {ve}", 500)
-
-        elif path == "/topology/identify":
-            bg = body.get("bg", "white")
-            duration = int(body.get("duration") or body.get("duration_sec") or 15)
-            active_swarm, _ = get_active_swarm_info()
-            user_home = os.path.expanduser("~")
-            nodes_dir = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/nodes")
-            anchor_id = "desktop"
-            topo_path = os.path.join(user_home, f".config/knot/swarms/{active_swarm}/topology.json")
-            if os.path.isfile(topo_path):
-                try:
-                    with open(topo_path, "r") as tf:
-                        anchor_id = json.load(tf).get("anchor", "desktop")
-                except Exception as exc:
-                    sys.stderr.write(f"[Knot Hub] Failed to read topology at {topo_path}: {exc}\n")
-
-            # 1. Broadcast display_identify SSE event to all connected Kafe web clients
-            broadcast_event("display_identify", {
-                "bg": bg,
-                "duration": duration,
-                "timestamp": time.time()
-            })
-
-            # 2. Trigger local display overlay on anchor if display is available and not already running
-            overlay_script = os.path.join(REPO_ROOT, "core/vision/display_overlay.py")
-            if os.path.exists(overlay_script) and (os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")):
-                try:
-                    res_check = subprocess.run(["pgrep", "-f", "display_overlay.py"], capture_output=True, text=True)
-                    if not res_check.stdout.strip():
-                        subprocess.Popen([
-                            sys.executable,
-                            overlay_script,
-                            "--bg", bg,
-                            "--duration", str(duration)
-                        ])
-                except Exception as oe:
-                    logger.warning("Failed to launch local display overlay: %s", oe)
-
-            # 3. Asynchronously trigger remote strand overlays over SSH concurrently in background threads
-            def _trigger_single_node(nid, user, ip, port):
-                remote_cmd = (
-                    f"export XDG_RUNTIME_DIR=/run/user/$(id -u); "
-                    f"export WAYLAND_DISPLAY=${{WAYLAND_DISPLAY:-wayland-0}}; "
-                    f"export DISPLAY=${{DISPLAY:-:0}}; "
-                    f"export PATH=\"$HOME/.local/bin:$HOME/.local/share/knot-mesh/bin:/usr/local/bin:$PATH\"; "
-                    f"knot topology identify --bg {bg} --duration {duration}"
-                )
-                # Try via SSH config alias first (supports dynamic knot-resolve proxy)
-                ssh_cmd = [
-                    "ssh", "-o", "ConnectTimeout=3", "-o", "StrictHostKeyChecking=accept-new",
-                    nid, remote_cmd
-                ]
-                try:
-                    res = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=duration + 5)
-                    if res.returncode != 0:
-                        sys.stderr.write(f"[knot-hub] Remote overlay trigger via alias '{nid}' returned {res.returncode}: {res.stderr.strip()}\n")
-                        if ip:
-                            # Fallback to direct user@ip
-                            fallback_cmd = [
-                                "ssh", "-o", "ConnectTimeout=3", "-o", "StrictHostKeyChecking=accept-new",
-                                "-p", port, f"{user}@{ip}", remote_cmd
-                            ]
-                            res_fb = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=duration + 5)
-                            if res_fb.returncode != 0:
-                                sys.stderr.write(f"[knot-hub] Remote overlay fallback to {user}@{ip} returned {res_fb.returncode}: {res_fb.stderr.strip()}\n")
-                except subprocess.TimeoutExpired:
-                    sys.stderr.write(f"[knot-hub] Timeout triggering remote overlay on '{nid}'\n")
-                except Exception as exc:
-                    sys.stderr.write(f"[knot-hub] Error triggering remote overlay on '{nid}': {exc}\n")
-
-            def _trigger_remote_nodes():
-                if not os.path.isdir(nodes_dir):
-                    return
-                threads = []
-                for fname in sorted(os.listdir(nodes_dir)):
-                    if fname.endswith(".json"):
-                        try:
-                            with open(os.path.join(nodes_dir, fname), "r") as mf:
-                                mdata = json.load(mf)
-                            nid = mdata.get("id") or fname[:-5]
-                            role = mdata.get("role", "strand")
-                            if role == "anchor" or nid == anchor_id:
-                                continue
-                            ip = mdata.get("ip_hint") or ""
-                            user = mdata.get("user") or os.environ.get("USER") or "user"
-                            port = str(mdata.get("port") or 22)
-                            t = threading.Thread(target=_trigger_single_node, args=(nid, user, ip, port), daemon=True)
-                            threads.append(t)
-                            t.start()
-                        except Exception as re:
-                            sys.stderr.write(f"[knot-hub] Remote identify trigger error for {fname}: {re}\n")
-                for t in threads:
-                    t.join(timeout=duration + 5)
-
-            threading.Thread(target=_trigger_remote_nodes, daemon=True).start()
-
-            self._send_json({"ok": True, "bg": bg, "duration": duration, "broadcast": True}, 200)
 
         elif path == "/topology/align":
             knot_bin = shutil.which("knot") or os.path.expanduser("~/.local/bin/knot")
@@ -4100,7 +3820,7 @@ class HubRequestHandler(BaseHTTPRequestHandler):
         # Suppress poll logs
         if args and str(args[1]) in ("200", "201"):
             cmd_path = str(args[0])
-            if any(p in cmd_path for p in ("/tasks/claim", "/chat/messages", "/artifacts/leases")):
+            if any(p in cmd_path for p in ("/tasks/claim",)):
                 return
         super().log_message(format, *args)
 
@@ -4109,7 +3829,6 @@ def lease_reaper_loop(db: Database, stop_event: threading.Event):
     while not stop_event.is_set():
         try:
             db.reap_expired_leases()
-            db.reap_expired_artifact_leases()
         except Exception as e:
             print(f"[!] Error in lease reaper: {e}", file=sys.stderr)
         stop_event.wait(5.0)

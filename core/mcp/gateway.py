@@ -25,11 +25,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-try:
-    from core.memory.palace import MemoryPalaceClient, format_tree
-except ImportError:
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
-    from core.memory.palace import MemoryPalaceClient, format_tree
 
 
 class KnotHubClient:
@@ -106,9 +101,8 @@ class KnotMCPGateway:
 
     PROTOCOL_VERSION = "2024-11-05"
 
-    def __init__(self, hub_client: KnotHubClient, memory_client: MemoryPalaceClient | None = None):
+    def __init__(self, hub_client: KnotHubClient):
         self.hub = hub_client
-        self.memory = memory_client or MemoryPalaceClient()
         self.initialized = False
 
     def handle_request(self, req: dict) -> dict | None:
@@ -657,18 +651,11 @@ class MockKnotHubClient(KnotHubClient):
         return {}
 
 
-class MockMemoryPalaceClient:
-    """Mock memory palace client retained for test backwards-compatibility."""
-    def __init__(self):
-        pass
-
-
 def run_self_test() -> int:
     """Runs internal self-check verifying JSON-RPC initialize, tools/list, and tools/call outputs."""
     print("=== [knot-mcp-gateway] Starting Internal Self-Test Suite ===", file=sys.stderr)
     mock_hub = MockKnotHubClient()
-    mock_memory = MockMemoryPalaceClient()
-    gateway = KnotMCPGateway(mock_hub, mock_memory)
+    gateway = KnotMCPGateway(mock_hub)
 
     # 1. Test initialize
     init_req = {

@@ -91,7 +91,7 @@ echo -e "\n\033[1m[Test 3] CLI Command Dispatch & Usages...\033[0m"
 # knot kdeconnect vmon usage check
 vmon_help_out="" vmon_help_rc=0
 vmon_help_out=$("$KNOT_ROOT/bin/knot" kdeconnect vmon invalid_action 2>&1) || vmon_help_rc=$?
-if [ $vmon_help_rc -ne 0 ] && echo "$vmon_help_out" | grep -q "Usage: knot kdeconnect vmon"; then
+if [ $vmon_help_rc -ne 0 ] && echo "$vmon_help_out" | grep -qE "Usage: knot (display|kdeconnect) vmon"; then
   pass "knot kdeconnect vmon displays correct usage on invalid subaction"
 else
   fail "knot kdeconnect vmon usage routing failed ($vmon_help_rc): $vmon_help_out"

@@ -4,13 +4,9 @@ import type {
   NodeAccountInfo,
   NodeQuotaMatrix,
   DagTask,
-  ArtifactLease,
-  KnotChatMessage,
   KnotProject,
-  KnotConversation,
   ConnectionState,
   NodeId,
-  ArtifactStatus,
   SwarmPowerState,
   MeshActionType,
   MeshActionResult,
@@ -46,34 +42,6 @@ interface RawBackendNode {
   };
 }
 
-interface RawBackendChatMessage {
-  id: string;
-  conv_id?: string;
-  channel?: string;
-  sender?: string;
-  sender_id?: string;
-  content: string;
-  target_node?: NodeId | null;
-  mentions?: string[];
-  created_at?: number;
-  timestamp?: number;
-  meta?: Record<string, unknown>;
-}
-
-interface RawBackendLease {
-  name?: string;
-  artifact_name?: string;
-  state?: ArtifactStatus;
-  status?: ArtifactStatus;
-  locked_by?: NodeId | null;
-  holder_node?: NodeId | null;
-  lease_ttl_sec?: number;
-  locked_at?: number | null;
-  acquired_at?: number | null;
-  expires_at?: number | null;
-  checksum?: string | null;
-}
-
 const INITIAL_DEFAULT_NODES: MeshNode[] = [
   {
     node_id: 'anchor',
@@ -106,23 +74,14 @@ export function useKnotStore() {
   const [nodes, setNodes] = useState<MeshNode[]>(INITIAL_DEFAULT_NODES);
   const [quotas, setQuotas] = useState<NodeQuotaMatrix[]>(INITIAL_DEFAULT_QUOTAS);
   const [tasks, setTasks] = useState<DagTask[]>([]);
-  const [leases, setLeases] = useState<ArtifactLease[]>([]);
-  const [messages, setMessages] = useState<KnotChatMessage[]>([]);
   const [projects, setProjects] = useState<KnotProject[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string>('knot');
-  const [conversations, setConversations] = useState<KnotConversation[]>([]);
-  const [activeConvId, setActiveConvId] = useState<string>('main');
   const [powerStatus, setPowerStatus] = useState<SwarmPowerState | null>(null);
   const [models, setModels] = useState<SwarmModelsState | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
 
-  const activeConvIdRef = useRef<string>('main');
   const activeProjectIdRef = useRef<string>('knot');
   const esRef = useRef<EventSource | null>(null);
-
-  useEffect(() => {
-    activeConvIdRef.current = activeConvId;
-  }, [activeConvId]);
 
   useEffect(() => {
     activeProjectIdRef.current = activeProjectId;
@@ -134,9 +93,11 @@ export function useKnotStore() {
       if (res.ok) {
         const data = (await res.json()) as SwarmModelsState;
         setModels(data);
+      } else {
+        console.warn(`Failed to fetch swarm models: HTTP ${res.status} ${res.statusText}`);
       }
-    } catch {
-      // Ignored
+    } catch (err) {
+      console.warn('Failed to fetch swarm models:', err);
     }
   }, []);
 
@@ -152,23 +113,11 @@ export function useKnotStore() {
           const knotProj = data.find((p) => p.name === 'knot');
           return knotProj ? knotProj.id : (data[0]?.id ?? curr);
         });
+      } else {
+        console.warn(`Failed to fetch projects: HTTP ${res.status} ${res.statusText}`);
       }
-    } catch {
-      // Ignored
-    }
-  }, []);
-
-  const fetchConversations = useCallback(async (projectId?: string) => {
-    try {
-      const pid = projectId ?? activeProjectIdRef.current;
-      const url = pid ? `/chat/conversations?project_id=${encodeURIComponent(pid)}` : '/chat/conversations';
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = (await res.json()) as KnotConversation[];
-        setConversations(data);
-      }
-    } catch {
-      // Ignored
+    } catch (err) {
+      console.warn('Failed to fetch projects:', err);
     }
   }, []);
 
@@ -231,9 +180,11 @@ export function useKnotStore() {
           };
         });
         setQuotas(derivedQuotas);
+      } else {
+        console.warn(`Failed to fetch nodes: HTTP ${res.status} ${res.statusText}`);
       }
-    } catch {
-      // Ignored
+    } catch (err) {
+      console.warn('Failed to fetch nodes:', err);
     }
   }, []);
 
@@ -245,9 +196,11 @@ export function useKnotStore() {
         if (Array.isArray(data) && data.length > 0) {
           setQuotas(data);
         }
+      } else {
+        console.warn(`Failed to fetch quotas: HTTP ${res.status} ${res.statusText}`);
       }
-    } catch {
-      // Ignored
+    } catch (err) {
+      console.warn('Failed to fetch quotas:', err);
     }
   }, []);
 
@@ -257,104 +210,18 @@ export function useKnotStore() {
       if (res.ok) {
         const data = (await res.json()) as DagTask[];
         setTasks(data);
+      } else {
+        console.warn(`Failed to fetch tasks: HTTP ${res.status} ${res.statusText}`);
       }
-    } catch {
-      // Ignored
-    }
-  }, []);
-
-  const fetchLeases = useCallback(async () => {
-    try {
-      const res = await fetch('/artifacts/leases');
-      if (res.ok) {
-        const rawList = (await res.json()) as RawBackendLease[];
-        const normalizedLeases: ArtifactLease[] = rawList.map((l) => ({
-          artifact_name: l.artifact_name || l.name || '',
-          status: l.status || l.state || 'DRAFTING',
-          holder_node: l.holder_node || l.locked_by || null,
-          acquired_at: l.acquired_at || l.locked_at || null,
-          expires_at: l.expires_at || null,
-          checksum: l.checksum || null,
-        }));
-        setLeases(normalizedLeases);
-      }
-    } catch {
-      // Ignored
-    }
-  }, []);
-
-  const fetchMessages = useCallback(async (convId?: string) => {
-    try {
-      const target = convId ?? activeConvIdRef.current;
-      const res = await fetch(`/chat/messages?conv_id=${encodeURIComponent(target)}&limit=100`);
-      if (res.ok) {
-        const rawList = (await res.json()) as RawBackendChatMessage[];
-        const normalizedMessages: KnotChatMessage[] = rawList.map((m) => {
-          const senderId = m.sender_id || m.sender || 'unknown';
-          const target = m.target_node || (m.mentions && m.mentions.length > 0 ? (m.mentions[0] as NodeId) : null);
-          return {
-            id: m.id,
-            channel: m.channel || m.conv_id || 'main',
-            sender_id: senderId,
-            content: m.content,
-            target_node: target,
-            timestamp: m.timestamp || m.created_at || Math.floor(Date.now() / 1000),
-            meta: m.meta || {},
-          };
-        });
-        setMessages(normalizedMessages);
-      }
-    } catch {
-      // Ignored
+    } catch (err) {
+      console.warn('Failed to fetch tasks:', err);
     }
   }, []);
 
   const selectProject = useCallback((projectId: string) => {
     setActiveProjectId(projectId);
     activeProjectIdRef.current = projectId;
-    const proj = projects.find((p) => p.id === projectId);
-    const defChan = proj?.default_channel || 'main';
-    setActiveConvId(defChan);
-    activeConvIdRef.current = defChan;
-    void fetchConversations(projectId);
-    void fetchMessages(defChan);
-  }, [projects, fetchConversations, fetchMessages]);
-
-  const selectConversation = useCallback((convId: string) => {
-    setActiveConvId(convId);
-    activeConvIdRef.current = convId;
-    void fetchMessages(convId);
-  }, [fetchMessages]);
-
-  const createConversation = useCallback(async (
-    id: string,
-    title?: string,
-    description?: string,
-    projectId?: string
-  ): Promise<boolean> => {
-    try {
-      const targetProject = projectId ?? activeProjectIdRef.current;
-      const res = await fetch('/chat/conversations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id,
-          title: title || `#${id}`,
-          description: description || '',
-          project_id: targetProject,
-          created_by: 'human@desktop',
-        }),
-      });
-      if (res.ok) {
-        await fetchConversations(targetProject);
-        selectConversation(id);
-        return true;
-      }
-      return false;
-    } catch {
-      return false;
-    }
-  }, [fetchConversations, selectConversation]);
+  }, []);
 
   const fetchPowerStatus = useCallback(async () => {
     try {
@@ -362,9 +229,11 @@ export function useKnotStore() {
       if (res.ok) {
         const data = (await res.json()) as SwarmPowerState;
         setPowerStatus(data);
+      } else {
+        console.warn(`Failed to fetch power status: HTTP ${res.status} ${res.statusText}`);
       }
-    } catch {
-      // Ignored
+    } catch (err) {
+      console.warn('Failed to fetch power status:', err);
     }
   }, []);
 
@@ -381,8 +250,10 @@ export function useKnotStore() {
           void fetchPowerStatus();
           return true;
         }
+        console.warn(`Failed to set swarm wake hold: HTTP ${res.status} ${res.statusText}`);
         return false;
-      } catch {
+      } catch (err) {
+        console.warn('Failed to set swarm wake hold:', err);
         return false;
       }
     },
@@ -400,8 +271,10 @@ export function useKnotStore() {
         void fetchPowerStatus();
         return true;
       }
+      console.warn(`Failed to release swarm wake hold: HTTP ${res.status} ${res.statusText}`);
       return false;
-    } catch {
+    } catch (err) {
+      console.warn('Failed to release swarm wake hold:', err);
       return false;
     }
   }, [fetchPowerStatus]);
@@ -418,8 +291,10 @@ export function useKnotStore() {
           return (await res.json()) as MeshActionResult;
         }
         const errText = await res.text();
+        console.warn(`Mesh action failed: HTTP ${res.status} ${res.statusText}:`, errText);
         return { ok: false, action, target, output: errText || 'Action failed', exit_code: res.status };
       } catch (err) {
+        console.warn('Failed to trigger mesh action:', err);
         return { ok: false, action, target, output: String(err), exit_code: -1 };
       }
     },
@@ -438,6 +313,8 @@ export function useKnotStore() {
           const data = await res.json();
           await Promise.all([fetchModels(), fetchNodes()]);
           return data;
+        } else {
+          console.warn(`Failed to set swarm model: HTTP ${res.status} ${res.statusText}`);
         }
       } catch (err) {
         console.error('Failed to set swarm model:', err);
@@ -445,40 +322,16 @@ export function useKnotStore() {
     },
     [fetchModels, fetchNodes]
   );
-
-  const setConversationModel = useCallback(
-    async (convId: string, model: string, nodeId?: string) => {
-      try {
-        const res = await fetch(`/chat/conversations/${convId}/model`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model, node_id: nodeId }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          await fetchConversations();
-          return data;
-        }
-      } catch (err) {
-        console.error('Failed to set conversation model:', err);
-      }
-    },
-    [fetchConversations]
-  );
-
   const refreshAll = useCallback(async () => {
     await Promise.allSettled([
       fetchProjects(),
-      fetchConversations(),
       fetchNodes(),
       fetchModels(),
       fetchPowerStatus(),
       fetchQuotas(),
       fetchTasks(),
-      fetchLeases(),
-      fetchMessages(),
     ]);
-  }, [fetchProjects, fetchConversations, fetchNodes, fetchModels, fetchPowerStatus, fetchQuotas, fetchTasks, fetchLeases, fetchMessages]);
+  }, [fetchProjects, fetchNodes, fetchModels, fetchPowerStatus, fetchQuotas, fetchTasks]);
 
   useEffect(() => {
     void refreshAll();
@@ -494,7 +347,8 @@ export function useKnotStore() {
         setConnectionState('connected');
       };
 
-      es.onerror = () => {
+      es.onerror = (err) => {
+        console.warn('SSE connection interrupted or encountered error:', err);
         setConnectionState('disconnected');
         es.close();
         esRef.current = null;
@@ -522,7 +376,8 @@ export function useKnotStore() {
               return [payload as unknown as DagTask, ...prev];
             }
           });
-        } catch {
+        } catch (err) {
+          console.warn('Failed to parse task event:', err);
           void fetchTasks();
         }
       };
@@ -535,55 +390,6 @@ export function useKnotStore() {
 
       es.addEventListener('project_created', () => {
         void fetchProjects();
-      });
-
-      es.addEventListener('conversation_created', () => {
-        void fetchConversations(activeProjectIdRef.current);
-      });
-
-      es.addEventListener('chat_message', (e: MessageEvent) => {
-        try {
-          const raw = JSON.parse(e.data as string) as RawBackendChatMessage;
-          const chan = raw.channel || raw.conv_id || 'main';
-          const msg: KnotChatMessage = {
-            id: raw.id,
-            channel: chan,
-            sender_id: raw.sender_id || raw.sender || 'unknown',
-            content: raw.content,
-            target_node: raw.target_node || (raw.mentions && raw.mentions.length > 0 ? (raw.mentions[0] as NodeId) : null),
-            timestamp: raw.timestamp || raw.created_at || Math.floor(Date.now() / 1000),
-            meta: raw.meta || {},
-          };
-
-          // Update conversation message counts and last message in real-time
-          setConversations((prev) =>
-            prev.map((c) =>
-              c.id === chan
-                ? {
-                    ...c,
-                    message_count: (c.message_count || 0) + 1,
-                    last_message: {
-                      id: msg.id,
-                      sender: msg.sender_id,
-                      content: msg.content,
-                      created_at: msg.timestamp,
-                    },
-                    updated_at: msg.timestamp,
-                  }
-                : c
-            )
-          );
-
-          // If message is in the active channel, append to active messages
-          if (chan === activeConvIdRef.current) {
-            setMessages((prev) => {
-              if (prev.some((m) => m.id === msg.id)) return prev;
-              return [...prev, msg];
-            });
-          }
-        } catch {
-          void fetchMessages();
-        }
       });
 
       es.addEventListener('node_heartbeat', () => {
@@ -611,8 +417,8 @@ export function useKnotStore() {
               )
             );
           }
-        } catch {
-          // Ignored
+        } catch (err) {
+          console.warn('Failed to parse node activity event:', err);
         }
       });
 
@@ -632,16 +438,6 @@ export function useKnotStore() {
         void fetchModels();
         void fetchNodes();
       });
-
-      es.addEventListener('conversation_model_updated', () => {
-        void fetchConversations();
-      });
-
-      const handleLeaseEvent = () => {
-        void fetchLeases();
-      };
-      es.addEventListener('artifact_locked', handleLeaseEvent);
-      es.addEventListener('artifact_released', handleLeaseEvent);
     };
 
     connectSSE();
@@ -653,118 +449,24 @@ export function useKnotStore() {
         esRef.current = null;
       }
     };
-  }, [refreshAll, fetchTasks, fetchMessages, fetchNodes, fetchModels, fetchPowerStatus, fetchLeases, fetchProjects, fetchConversations]);
-
-  const sendMessage = useCallback(
-    async (content: string, targetNode?: NodeId | null, convId?: string) => {
-      let resolvedTarget: NodeId | null = targetNode ?? null;
-      if (!resolvedTarget) {
-        const match = content.match(/@(swarm|all|desktop|laptop|steamdeck)/i);
-        if (match && match[1]) {
-          resolvedTarget = match[1].toLowerCase() as NodeId;
-        }
-      }
-
-      // Extract all distinct @mentions from message content
-      const matches = content.match(/@([a-zA-Z0-9_-]+)/g);
-      const textMentions = matches
-        ? Array.from(new Set(matches.map((m) => m.slice(1).toLowerCase())))
-        : [];
-      if (resolvedTarget && !textMentions.includes(resolvedTarget)) {
-        textMentions.push(resolvedTarget);
-      }
-
-      const targetConv = convId ?? activeConvIdRef.current;
-
-      await fetch('/chat/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          conv_id: targetConv,
-          sender: 'human@desktop',
-          content,
-          mentions: textMentions,
-        }),
-      });
-    },
-    []
-  );
-
-  const lockArtifact = useCallback(
-    async (artifactName: string, holderNode: NodeId, ttlSeconds = 600): Promise<boolean> => {
-      try {
-        const res = await fetch('/artifacts/lock', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: artifactName,
-            node_id: holderNode,
-            ttl: ttlSeconds,
-            state: 'LOCKED_SURGERY',
-          }),
-        });
-        const data = (await res.json()) as { ok?: boolean; success?: boolean };
-        void fetchLeases();
-        return Boolean(data.ok || data.success);
-      } catch {
-        return false;
-      }
-    },
-    [fetchLeases]
-  );
-
-  const releaseArtifact = useCallback(
-    async (
-      artifactName: string,
-      holderNode: NodeId,
-      newStatus: ArtifactStatus = 'VERIFIED_COMMITTED'
-    ): Promise<boolean> => {
-      try {
-        const res = await fetch('/artifacts/release', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: artifactName,
-            node_id: holderNode,
-            state: newStatus,
-          }),
-        });
-        const data = (await res.json()) as { ok?: boolean; success?: boolean };
-        void fetchLeases();
-        return Boolean(data.ok || data.success);
-      } catch {
-        return false;
-      }
-    },
-    [fetchLeases]
-  );
+  }, [refreshAll, fetchTasks, fetchNodes, fetchModels, fetchPowerStatus, fetchProjects]);
 
   return {
     nodes,
     quotas,
     tasks,
-    leases,
-    messages,
     projects,
     activeProjectId,
-    conversations,
-    activeConvId,
     connectionState,
     powerStatus,
     models,
     fetchModels,
     setSwarmModel,
-    setConversationModel,
     fetchPowerStatus,
     setSwarmWakeHold,
     releaseSwarmWakeHold,
     triggerMeshAction,
     refreshAll,
     selectProject,
-    selectConversation,
-    createConversation,
-    sendMessage,
-    lockArtifact,
-    releaseArtifact,
   };
 }

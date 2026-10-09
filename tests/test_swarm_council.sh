@@ -431,93 +431,9 @@ if [ -d "$purr_dir" ]; then
 fi
 echo "PASSED"
 
-# 16. Dynamic Node Identifier Resolution & Active Tournament Server Delivery
-echo -n "16. Testing dynamic node resolution & active tournament server delivery... "
-resolved_nid="$(python3 "$COUNCIL_SCRIPTS/resolve_node.py")"
-if [ -z "$resolved_nid" ]; then
-  echo "FAILED (Empty node id from resolve_node.py)"
-  exit 1
-fi
 
-ring_test="$(python3 -c '
-import sys; sys.path.insert(0, "runtime/skills/swarm-council/scripts")
-from scaffolder import build_tournament_ring
-nodes = ["laptop", "rog-ally", "steamdeck", "desktop"]
-ring = build_tournament_ring(nodes)
-print(",".join(ring))
-')"
-first_ring_node="$(echo "$ring_test" | cut -d',' -f1)"
-if [ "$first_ring_node" != "$resolved_nid" ]; then
-  echo "FAILED (Expected first ring node to be $resolved_nid, got $first_ring_node)"
-  exit 1
-fi
-
-# Test tournament launcher delivery for active server vs standby
-test_tourn_run="unit_test_tourn_$$"
-mkdir -p "$HOME/.config/knot/missions/$test_tourn_run"
-
-python3 "$COUNCIL_SCRIPTS/scaffolder.py" --run-id "$test_tourn_run" --pack tournament --db mesh --nodes "$resolved_nid,mock-peer" --project-dir "$KNOT_ROOT" >/dev/null
-
-meta_tourn="$HOME/.config/knot/missions/$test_tourn_run/meta.json"
-meta_opening="$(jq -r '.opening_node // empty' "$meta_tourn")"
-if [ "$meta_opening" != "$resolved_nid" ]; then
-  echo "FAILED (Opening node in meta.json is $meta_opening, expected $resolved_nid)"
-  exit 1
-fi
-
-# Stage delivery without launching
-LAUNCH=0 bash "$COUNCIL_SCRIPTS/deliver.sh" confluence "$test_tourn_run" "knot-mesh" grid 0 "$resolved_nid,mock-peer" 0 0 >/dev/null
-
-active_launch="$HOME/.config/knot/missions/$test_tourn_run/${resolved_nid}_launch.sh"
-peer_launch="$HOME/.config/knot/missions/$test_tourn_run/mock-peer_launch.sh"
-
-if [ ! -f "$active_launch" ] || [ ! -f "$peer_launch" ]; then
-  echo "FAILED (Launch scripts not generated)"
-  exit 1
-fi
-
-if ! grep -q -- '-i "\$(< "\$PROMPT_FILE")"' "$active_launch"; then
-  echo "FAILED (Active opening server launcher missing prompt execution flag - was generated in Standby!)"
-  exit 1
-fi
-
-if ! grep -q "Zero-Token Standby" "$peer_launch"; then
-  echo "FAILED (Peer node launcher not generated in Zero-Token Standby mode)"
-  exit 1
-fi
-
-rm -rf "$HOME/.config/knot/missions/$test_tourn_run"
-echo "PASSED"
-
-# 17. Cryptographic Challenge Tool (knot council challenge)
-echo -n "17. Testing knot council challenge (generate, verify, solve)... "
-gen_out="$("$KNOT_ROOT/bin/knot" council challenge generate --difficulty 3 --keyword TEST --prefix KNOT-UNIT)"
-if ! echo "$gen_out" | grep -q "Target: Find a string starting with 'KNOT-UNIT-'"; then
-  echo "FAILED (Challenge generate format unexpected: $gen_out)"
-  exit 1
-fi
-
-solve_out="$(python3 "$COUNCIL_SCRIPTS/challenge_tool.py" solve --difficulty 3 --keyword TEST --prefix KNOT-UNIT)"
-if ! echo "$solve_out" | grep -q "\[✓\] SOLVED"; then
-  echo "FAILED (Challenge solve failed: $solve_out)"
-  exit 1
-fi
-solved_str="$(echo "$solve_out" | grep -o "String='[^']*'" | cut -d"'" -f2)"
-
-ver_out="$("$KNOT_ROOT/bin/knot" council challenge verify --string "$solved_str" --difficulty 3 --keyword TEST)"
-if ! echo "$ver_out" | grep -q "\[✓\] VALID"; then
-  echo "FAILED (Challenge verify failed for valid solution: $ver_out)"
-  exit 1
-fi
-
-if "$KNOT_ROOT/bin/knot" council challenge verify --string "INVALID_NONCE" --difficulty 3 --keyword TEST 2>&1 | grep -q "\[✓\] VALID"; then
-  echo "FAILED (Challenge verify succeeded on invalid candidate)"
-  exit 1
-fi
-echo "PASSED"
-
-# 18. Mesh DB CLI Ergonomics (knot council db inspect, tail)
-echo -n "18. Testing knot council db (inspect, tail)... "
+# 16. Mesh DB CLI Ergonomics (knot council db inspect, tail)
+echo -n "16. Testing knot council db (inspect, tail)... "
 inspect_out="$("$KNOT_ROOT/bin/knot" council db inspect "test_mesh_$$")"
 if ! echo "$inspect_out" | jq -e '.comments.totalCount >= 2' >/dev/null; then
   echo "FAILED (Inspect output missing expected comments count: $inspect_out)"
@@ -531,8 +447,8 @@ if ! echo "$tail_out" | grep -q "@desktop"; then
 fi
 echo "PASSED"
 
-# 19. Steer Option Validation
-echo -n "19. Testing knot council steer argument validation... "
+# 17. Steer Option Validation
+echo -n "17. Testing knot council steer argument validation... "
 usage_out=""
 if ! usage_out="$("$KNOT_ROOT/bin/knot" council steer 2>&1)"; then
   : # Expected non-zero exit code for missing arguments
@@ -543,8 +459,8 @@ if ! echo "$usage_out" | grep -q "Usage: knot council steer"; then
 fi
 echo "PASSED"
 
-# 20. Cockpit Self-Healing & Topology Guard (knot council heal)
-echo -n "20. Testing knot council heal in mock Kitty environment... "
+# 18. Cockpit Self-Healing & Topology Guard (knot council heal)
+echo -n "18. Testing knot council heal in mock Kitty environment... "
 heal_test_run="test_heal_$$"
 heal_missions_dir="$HOME/.config/knot/missions/$heal_test_run"
 mkdir -p "$heal_missions_dir"
@@ -622,8 +538,8 @@ fi
 rm -rf "$heal_missions_dir" "$mock_bin_dir" "$mock_sock" "$mock_log"
 echo "PASSED"
 
-# 21. Testing dot project resolution and clean launch.sh staging across modes
-echo -n "21. Testing dot project resolution and clean launch.sh staging... "
+# 19. Testing dot project resolution and clean launch.sh staging across modes
+echo -n "19. Testing dot project resolution and clean launch.sh staging... "
 sync_dot_out="$(cd "$KNOT_ROOT" && bash "$COUNCIL_SCRIPTS/project_sync.sh" --project .)"
 dot_proj_name="$(echo "$sync_dot_out" | jq -r '.project_name')"
 dot_first_folder="$(echo "$sync_dot_out" | jq -r '.folders[0]')"
@@ -663,8 +579,8 @@ fi
 rm -rf "$tui_stage_dir"
 echo "PASSED"
 
-# 22. Delimiter Flushing & Execution Buffer Verification (Issue #73)
-echo -n "22. Testing council_steer delimiter sanitization and buffer submission... "
+# 20. Delimiter Flushing & Execution Buffer Verification (Issue #73)
+echo -n "20. Testing council_steer delimiter sanitization and buffer submission... "
 steer_test_run="test_steer_$$"
 steer_missions_dir="$HOME/.config/knot/missions/$steer_test_run"
 mkdir -p "$steer_missions_dir"
@@ -763,8 +679,8 @@ fi
 rm -rf "$steer_missions_dir" "$mock_steer_sock"
 echo "PASSED"
 
-# 23. Confluence Synchronous Socket Validation & Crash Transparency (Issue #74)
-echo -n "23. Testing confluence.py synchronous socket failure transparency... "
+# 21. Confluence Synchronous Socket Validation & Crash Transparency (Issue #74)
+echo -n "21. Testing confluence.py synchronous socket failure transparency... "
 conf_fail_run="test_conf_fail_$$"
 conf_fail_dir="$HOME/.config/knot/missions/$conf_fail_run"
 mkdir -p "$conf_fail_dir/bin"
@@ -794,8 +710,8 @@ fi
 rm -rf "$conf_fail_dir"
 echo "PASSED"
 
-# 24. Display Cockpit Hub URL Resolution & Injection (Issue #71)
-echo -n "24. Testing display launch KNOT_HUB_URL dynamic propagation... "
+# 22. Display Cockpit Hub URL Resolution & Injection (Issue #71)
+echo -n "22. Testing display launch KNOT_HUB_URL dynamic propagation... "
 display_test_out="$("$KNOT_ROOT/bin/knot" display launch laptop board --dry-run)"
 if ! echo "$display_test_out" | grep -q "KNOT_HUB_URL="; then
   echo "FAILED (KNOT_HUB_URL not found in display launch output: $display_test_out)"
@@ -808,4 +724,4 @@ fi
 echo "PASSED"
 
 echo ""
-echo "=== All 24 Swarm Council Tests PASSED Successfully! ==="
+echo "=== All 22 Swarm Council Tests PASSED Successfully! ==="

@@ -463,3 +463,248 @@ Branch `backup-local-main` holds 4 valuable commits authored on Oct 7, 2026:
 
 ### 11.2 Final Production Certification
 Knot Mesh has successfully transitioned from an AI-assisted rapid prototype to a **hardened, hermetic, production-grade distributed workspace orchestrator**. All initial findings and remedies have been adversarially challenged, remediated, committed, and verified under the PSL Gold Standard.
+
+
+---
+
+## 12. Systematic CLI Command & Code Surface Rationalization Audit
+
+**Audit Baseline Commit:** `321e6c3` (`origin/main`)  
+**Scope:** Exhaustive evaluation of all 40 root commands/aliases in `bin/knot`, supporting shell modules in `core/modules/`, Python daemons in `core/hub/`, cognitive memory modules in `core/memory/`, vision engines in `core/vision/`, and skill scripts in `runtime/skills/`.  
+**Governance Standard:** Universal PSL Gold Standard (`AGENTS.md`) — Zero Error Swallowing, Strict Failure Transparency, Hermetic Verification, and Aggressive Elimination of AI Vibe Slop.
+
+---
+
+### 12.1 Executive Summary & Audit Rationale
+
+Prior to undertaking modular architectural decomposition of `bin/knot` (which currently stands at 2,519 lines), an empirical, line-by-line product utility audit was conducted across every CLI command and backing script. Over multiple waves of AI-assisted feature additions, the codebase accumulated:
+1. **Speculative "Vibe Code" Bloat:** Features built around anthropomorphic metaphors (e.g. an 1,822-line "Cognitive Memory Palace" with wings, halls, and drawers; a 297-line "Tournament Referee" tracking cognitive volleys, aces, and power smashes; and computer vision models running 3D RGB color histogram matching on physical desk photographs to infer display positions).
+2. **Namespace Pollution & Triplicate Dispatchers:** Root-level aliases (`knot unlock`, `knot lock`, `knot login`, `knot restart`, `knot reboot`, `knot quota`, `knot power`) cluttering the root CLI help alongside their parent commands (`knot screen`, `knot autologin`, `knot kvm`, `knot shutdown`, `knot swarm`, `knot sleep`).
+3. **Dead Compatibility Shims & Hollow Stubs:** Leftover SurrealQL shims (`execute_surreal`) and PocketBase replacements in `core/memory/palace.py`, uncalled artifact leases in `core/hub/hub.py`, phantom options in help strings (`knot artifact upload/pull` that were never implemented), and hollow stubs (`knot project sync` which curls `/projects` and does nothing).
+4. **Architectural Demarcation:** The core identity of Knot Mesh is a **hardened, hermetic distributed workspace fabric across Arch Linux, KDE Plasma 6 Wayland, and SteamOS** (Deskflow KVM, Wayland virtual monitor extension, OpenSSH ControlMaster multiplexing, KDE Connect clipboard/file fabric, GitOps worktree landing arbiter, and Linda Tuplespace task distribution). Everything outside this boundary is candidate for pruning or consolidation.
+
+---
+
+### 12.2 Exhaustive 40-Command Utility & Redundancy Matrix
+
+The table below catalogs every root command, alias, and subcommand in `bin/knot` evaluated against implementation completeness, product relevance, architectural redundancy, and triage bucket.
+
+| # | Command / Alias | Subcommands / Flags | Backing File(s) | Implementation State | Core Mission Relevance | Redundancy & Overlap | Triage Classification |
+|---|---|---|---|---|---|---|---|
+| **1** | `update` | `--all`, `<node_id>`, `--dev`, `--force-prod`, `--force-dev`, `-f` | `bin/knot:cmd_update`, `cmd_update_dev` | **Complete**: Production GitHub release downloading, fast-forward git pulls across fleet, symlink healing, and safe service restarts. | **CORE**: Essential software update distribution mechanism across heterogeneous nodes. | None. Canonical updater. | **[KEEP - CORE]** |
+| **2** | `topology` | `show`, `align-internal`, `identify`, `refresh` (`--photo`), `guide` | `core/modules/topology.sh`, `core/vision/engine.py` | **Mixed**: `show` (ASCII map) and `align-internal` (ROG Ally layout) are robust. `refresh --photo` calls complex CV heuristic / Swarm AI. | **PARTIAL**: 2D ASCII spatial map and output alignment are core to KVM; photo-based computer vision is speculative vibe bloat. | `topology refresh --photo` overlaps nothing but introduces large PIL/numpy dependency footprint. | **[CONSOLIDATE]** / **[HARDEN]**<br>*(Keep show/align; prune photo CV)* |
+| **3** | `onboard` | `[node_id]` | `bin/knot:cmd_onboard`, `core/modules/ssh.sh`, `core/modules/firewall.sh`, etc. | **Complete**: Automated SSH key generation, firewall rules, passwordless sudo, systemd guard, mDNS, autologin DM, manifest creation. | **CORE**: Single-command turnkey node enrollment into the active mesh. | None. Primary node enrollment path. | **[KEEP - CORE]** |
+| **4** | `sync` | `--all`, `<node_id>`, `--dev`, `--mirrors`, `--terminfo`, `--force-prod` | `bin/knot:cmd_sync`, `core/modules/swarm_sync.sh` | **Complete**: Synchronizes SSH keys, client configs, Deskflow configs, KDE Connect pairings, pacman mirrors, terminfo definitions. | **CORE**: Foundational cluster-wide configuration and key synchronization engine. | Minor overlap with `council sync` (which runs `project_sync.sh`). | **[KEEP - CORE]** |
+| **5** | `resolve` | `<node_id> [port]` | `core/resolver.sh` | **Complete**: Multi-tiered IP resolution engine (Tailscale 100.x -> Local Subnet ARP -> mDNS .local -> cached IP hint). | **CORE**: Universal inter-node address resolution primitive used by every remote command. | None. Foundation for all networking. | **[KEEP - CORE]** |
+| **6** | `status` | *(none)* | `bin/knot:cmd_status` | **Complete**: Probes all registered nodes, detects online state, measures ping latency, probes SSH reachability, checks KVM port :24800. | **CORE**: Indispensable live cluster observability and health dashboard. | None. Primary status view. | **[KEEP - CORE]** |
+| **7** | `exec` | `[-P]`, `[--timeout]`, `[-t]`, `<target\|--all>`, `<command>` | `bin/knot:cmd_exec` | **Complete**: Sequential and parallel (`-P`) remote execution with environment propagation (terminfo, PATH, node ID, hub URL). | **CORE**: Fundamental remote command execution primitive across the mesh. | `knot swarm exec` wraps this command redundantly. | **[KEEP - CORE]** |
+| **8** | `kvm` | `restart`, `status`, `lock`, `unlock`, `lock-toggle` | `bin/knot:cmd_kvm`, `core/modules/deskflow.sh` | **Complete**: Full Deskflow server/client daemon management, boundary cursor lock toggling, and socket connection auditing. | **CORE**: Primary software KVM mouse/keyboard sharing capability. | Top-level `knot restart` is a redundant wrapper around `knot kvm restart`. | **[KEEP - CORE]** |
+| **9** | `screen` | `status`, `status-raw`, `unlock`, `lock`, `login` | `bin/knot:cmd_screen`, `core/modules/autounlock.sh` | **Complete**: Queries and controls graphical session lock/unlock via loginctl, kscreenlocker, and qdbus. | **CORE**: Essential for remote display wake and unlock across headless Wayland nodes. | Shadowed by top-level aliases `unlock`, `lock`, `login`. | **[CONSOLIDATE]**<br>*(Make canonical home for screen state)* |
+| **10** | `unlock` | `[node\|--all\|local]` | `core/modules/autounlock.sh:screen_unlock` | **Complete**: Directly forwards to `screen_unlock`. | **REDUNDANT**: Convenience shortcut that pollutes the root CLI namespace. | 100% duplicate of `knot screen unlock`. | **[CONSOLIDATE]**<br>*(Merge into `knot screen unlock`)* |
+| **11** | `lock` | `[node\|--all\|local]` | `core/modules/autounlock.sh:screen_lock` | **Complete**: Directly forwards to `screen_lock`. | **REDUNDANT**: Convenience shortcut that pollutes the root CLI namespace. | 100% duplicate of `knot screen lock`. | **[CONSOLIDATE]**<br>*(Merge into `knot screen lock`)* |
+| **12** | `login` | `[node\|--all\|local]` | `core/modules/autounlock.sh:screen_login` | **Complete**: Directly forwards to `screen_login` -> `autologin_execute_local`. | **REDUNDANT**: Convenience shortcut duplicating display manager autologin. | Triplicate of `knot screen login` and `knot autologin local`. | **[CONSOLIDATE]**<br>*(Merge into `knot autologin local`)* |
+| **13** | `autologin` | `status`, `check`, `doctor`, `migrate-dm`, `local`, `reconcile`, `purge-stale`, `configure-timer`, `fix-kwallet` | `bin/knot:cmd_autologin`, `core/modules/autologin.sh` | **Complete**: Display manager setup (SDDM, LightDM, GDM), PAM kwallet integration, and systemd reconciler. | **CORE**: Crucial for handheld and headless nodes rebooting directly into Wayland sessions without passwords. | Duplicated by `knot login` and `knot screen login`. | **[KEEP - CORE]**<br>*(Canonical home for DM login)* |
+| **14** | `kdeconnect` | `status`, `sync`, `pair`, `reconcile`, `vmon`, `share`, `sync-clipboard`, `test-clipboard`, `prune-stale` | `bin/knot:cmd_kdeconnect`, `core/modules/kdeconnect.sh` | **Complete**: Inter-device pairing, cross-node clipboard synchronization, and file sharing. | **CORE**: Primary peer-to-peer data and clipboard sharing mechanism. | `knot kdeconnect vmon` is a 100% duplicate alias of `knot display vmon`. | **[CONSOLIDATE]**<br>*(Retain KDE Connect; move vmon to display)* |
+| **15** | `display` | `status`, `extend`, `stop`, `vmon`, `toggle-kvm`, `launch`, `capture-fleet` | `bin/knot:cmd_display`, `core/modules/display.sh`, `core/modules/vmon.sh` | **Complete**: Virtual monitor scaling, KRDP headless Wayland session lifecycle, application launching, and screen captures. | **CORE**: Enables using portable nodes (ROG Ally, Steam Deck, Laptop) as secondary Wayland monitors. | `display vmon` duplicates `kdeconnect vmon`; `display toggle-kvm` duplicates `kvm lock-toggle`. | **[HARDEN]**<br>*(Canonical home for virtual display routing)* |
+| **16** | `council` | `start`, `resume`, `status`, `reply`, `list`, `attach`, `reconcile`, `copy`, `clean`, `kill`, `steer`, `challenge`, `db`, `board`, `heal`, `audit`, `sync` | `core/modules/council.sh`, `runtime/skills/swarm-council/scripts/` | **Complete**: Out-of-band multi-agent coordination via GitHub Discussions, Kitty Confluence spatial multiplexer, curses board. | **CORE / SPECIALIZED**: Essential out-of-band collaboration mechanism for autonomous SWE campaigns. | Contains `tournament_referee.py` (vibe slop); `council sync` overlaps `project_sync.sh`. | **[HARDEN]**<br>*(Purge esports referee; harden council core)* |
+| **17** | `swarm` | `status`, `quota`, `auth`, `color`, `test`, `exec`, `wave`, `switch` | `bin/knot:cmd_swarm`, `core/modules/antigravity.sh` | **Bloated Umbrella**: Hub for Antigravity AI agents, active swarm switching, and multi-node sweeps. | **HIGH CONFUSION**: Acted as a catch-all dumping ground for commands that already exist at root level. | `swarm quota` -> `knot quota`; `swarm auth` -> `knot auth`; `swarm color` -> `knot color`; `swarm exec` -> `knot exec`. | **[CONSOLIDATE]**<br>*(Strip redundant switches; keep switch/use)* |
+| **18** | `color` / `palette` | `[get\|set\|list]` | `bin/knot:cmd_color`, `core/palette.py` | **Complete**: Mathematical node color derivation based on Golden Angle and WCAG contrast against dark terminal canvas. | **UTILITY**: Visual terminal identification across multiplexed Kitty strands. | Exact duplicate in `knot swarm color`. | **[KEEP - CORE]**<br>*(Canonical command; drop swarm color)* |
+| **19** | `quota` | `[node\|--all]`, `watch`, `live` | `core/modules/antigravity.sh:antigravity_swarm_quota`, `core/hub/limit_visualizer.py` | **Complete**: Live curses TUI and tabular visualizer for Antigravity 5h and weekly model quota limits across nodes. | **UTILITY**: Essential operational tool for preventing LLM quota exhaustion during distributed campaigns. | Top-level alias delegating to `knot swarm quota`. | **[KEEP - CORE]**<br>*(Promote to canonical command)* |
+| **20** | `auth` | `login`, `import`, `list`, `status`, `switch`, `remove`, `test-lock`, `sync`, `token` | `core/modules/auth.sh` (1,153 lines) | **Complete**: Multi-tenant profile sandboxing, D-Bus SecretService probing, OAuth token linking, headless terminal flows (Issue #60). | **CORE**: Hardened production security module for multi-account management across headless Linux devices. | `knot swarm auth` is a redundant wrapper. | **[KEEP - CORE]**<br>*(Canonical authentication tool)* |
+| **21** | `hub` | `start`, `stop`, `restart`, `status`, `logs` | `bin/knot:cmd_hub`, `core/modules/hub.sh`, `core/hub/hub.py` | **Complete**: Systemd user daemon management for Blackboard Hub HTTP/SSE server (:4242). | **CORE**: Central cluster coordination and state broadcast authority. | None. Daemon controller. | **[KEEP - CORE]** |
+| **22** | `agent` | `start`, `stop`, `restart`, `status`, `logs` | `bin/knot:cmd_agent`, `core/modules/hub.sh`, `core/hub/agent.py` | **Complete**: Systemd user daemon management for Worker Agent background process. | **CORE**: Distributed task executor claiming and executing Tuplespace tasks across strands. | None. Daemon controller. | **[KEEP - CORE]** |
+| **23** | `task` | `post`, `list`, `batch`, `get`, `wait`, `watch` | `bin/knot:cmd_task`, `core/modules/hub.sh` | **Complete**: Linda Tuplespace client interacting with `hub.py` (posting prompts, claiming tasks, polling, SSE streaming). | **CORE**: Core distributed task distribution engine for autonomous agent swarms. | None. Client interface to Hub. | **[KEEP - CORE]** |
+| **24** | `project` | `list`, `get`, `sync`, `worktree` | `bin/knot:cmd_project`, `core/modules/hub.sh` | **Incomplete / Stub**: `list`/`get` query `~/.gemini/config/projects`. `sync` is a dummy stub (counts items, does no sync). `worktree` forwards to `knot worktree`. | **LOW**: Minimal utility; `project worktree` is redundant; `project sync` is hollow. Real sync is in `runtime/skills/swarm-council/scripts/project_sync.sh`. | Directly duplicates `knot worktree`. | **[CONSOLIDATE]**<br>*(Merge into `knot worktree`; purge stubs)* |
+| **25** | `worktree` | `add`, `remove`, `list`, `normalize`, `provision`, `rebase-mesh` | `bin/knot:cmd_worktree`, `core/gitops.sh` | **Complete**: Parallel git worktree lifecycle manager, path normalization across home directories, mesh provisioning, and rebasing. | **CORE**: Foundational parallel GitOps workspace engine for multi-node SWE development. | Duplicated by `knot project worktree`. | **[KEEP - CORE]** |
+| **26** | `chat` | `channels`, `create`, `post`, `read` | `bin/knot:cmd_chat`, `core/modules/hub.sh`, `core/hub/hub.py` | **Speculative Prototype**: "Swarm Konversations" IRC-style message posting to `hub.py`. | **DEAD / VIBE SLOP**: Disconnected from actual development workflows (which use GitHub Discussions via `knot council` or stdio). Zero functional tests. | Competes with `knot council` without providing GitHub persistence or terminal multiplexing. | **[PURGE - DEAD/SLOP]**<br>*(Immediate deletion)* |
+| **27** | `artifact` | `list`, `lock`, `release` *(help claims `upload/pull` which do not exist)* | `bin/knot:cmd_artifact`, `core/modules/hub.sh`, `core/hub/hub.py` | **Abandoned Prototype**: In-memory string lease manager. Help text advertises phantom `upload` and `pull` options. | **DEAD / VIBE SLOP**: Unused POC. Git worktrees (`knot worktree`) already provide actual filesystem isolation. Zero functional tests. | Duplicated by `palace.py`'s embedded "artifact closet" (`artifact-put`/`get`). | **[PURGE - DEAD/SLOP]**<br>*(Immediate deletion)* |
+| **28** | `sleep` | `status`, `prevent [mins]`, `allow` | `bin/knot:cmd_sleep`, `core/modules/hub.sh`, `core/hub/hub.py` | **Complete**: Swarm-wide power state monitoring and AC sleep prevention enforcement (`/swarm/wake`, `/swarm/sleep-allow`). | **CORE**: Prevents laptops and handheld consoles from sleeping during long compilation/testing sweeps. | Aliased by `knot power`. | **[KEEP - CORE]** |
+| **29** | `power` | `status`, `prevent [mins]`, `allow` | `core/modules/hub.sh:cmd_sleep` | **Complete**: Exact alias of `knot sleep`. | **REDUNDANT**: Duplicate root dispatcher entry. | 100% duplicate of `knot sleep`. | **[CONSOLIDATE]**<br>*(Retain as alias or document under `sleep`)* |
+| **30** | `kafe` | `open`, `desktop`, `build-desktop`, `dev`, `build`, `install`, `typecheck` | `bin/knot:cmd_web`, `core/modules/hub.sh`, `web/` | **Complete**: Launcher and build orchestrator for React 19 + Vite + Tailwind + `@assistant-ui` cockpit. | **UTILITY**: Web-based operational cockpit and Blackboard visualization UI. | Triplicate aliases: `knot kafe`, `knot web`, `knot cockpit`. | **[CONSOLIDATE]**<br>*(Consolidate under single canonical name)* |
+| **31** | `web` | `dev`, `build`, `install` | `bin/knot:cmd_web` | **Complete**: Build and dev tooling for `web/`. | **UTILITY**: Web build interface. | Triplicate alias of `knot kafe`. | **[CONSOLIDATE]**<br>*(Merge with `knot kafe`)* |
+| **32** | `memory` | `store`, `recall`, `map`, `promote`, `relate`, `artifact-put`, `artifact-get`, `profile`, `test` | `bin/knot:cmd_memory`, `core/modules/memory.sh`, `core/memory/palace.py` (1,822 lines), `core/memory/profiles.py` | **Vibe Code Overhaul**: "Cognitive Memory Palace" graph with wings, halls, drawers, pure-Python cosine similarity, and legacy SurrealDB shims. | **VIBE BLOAT**: Knot is a distributed Linux workspace fabric, not a cognitive mind graph. MCP gateway pruned memory tools in Issue #41. | Contains dead `execute_surreal` shims, duplicate artifact closet, and duplicate node profiles. | **[PURGE - DEAD/SLOP]**<br>*(Eliminate palace bloat & dead shims)* |
+| **33** | `doctor` | `local`, `<node_id>`, `--all`, `--json` | `bin/knot:cmd_doctor`, `core/modules/doctor.sh` (1,500+ lines) | **Complete**: Comprehensive diagnostic suite checking SSH keys, permissions, firewall ports, systemd units, KVM, Wayland, TLS certs. | **CORE**: Indispensable cluster diagnostic and pre-flight verification tool. | None. Essential diagnostic suite. | **[KEEP - CORE]** |
+| **34** | `repair` | `[node\|--all]` | `bin/knot:cmd_repair`, `core/modules/doctor.sh:doctor_repair` | **Complete**: Auto-repair engine: re-establishes dropped KVM links, cleans stale sockets, restarts failed services. | **CORE**: Indispensable automated self-healing and recovery mechanism. | None. Essential repair command. | **[KEEP - CORE]** |
+| **35** | `restart` | `[kvm]` | `bin/knot:2437` | **Incomplete Wrapper**: Root command that only accepts `kvm` and forwards to `cmd_kvm restart`. | **REDUNDANT**: Pointless single-purpose root command. | 100% duplicate of `knot kvm restart`. | **[CONSOLIDATE]**<br>*(Remove root command; use `knot kvm restart`)* |
+| **36** | `shutdown` | `[target]`, `-d`, `-r`, `-c`, `-s`, `-m`, `-f` | `bin/knot:cmd_shutdown`, `core/modules/shutdown.sh` | **Complete**: Graceful swarm-wide poweroff/reboot engine with delay timers, cancellation, broadcast wall messages, confirmation gates. | **CORE**: Essential cluster-wide physical power management. | Aliased by `knot reboot`. | **[KEEP - CORE]** |
+| **37** | `reboot` | `[target]`, `-d`, `-c`, `-m`, `-f` | `bin/knot:cmd_shutdown --reboot` | **Complete**: Convenience alias for `knot shutdown --reboot`. | **REDUNDANT**: Duplicate root dispatcher entry. | 100% duplicate of `knot shutdown --reboot`. | **[CONSOLIDATE]**<br>*(Consolidate into `knot shutdown --reboot`)* |
+| **38** | `mcp` | `gateway`, `sync`, `status`, `test`, `list` | `bin/knot:cmd_mcp`, `core/mcp/gateway.py`, `core/mcp/sync.py` | **Complete**: Zero-dependency stdio Model Context Protocol (MCP) server exposing 4 canonical tools to LLM coding agents. | **CORE**: Primary standard interface allowing AI coding agents to control Knot Mesh safely without shell escape hazards. | None. Core agent interface. | **[KEEP - CORE]** |
+| **39** | `socket` | `status`, `cleanup` | `bin/knot:cmd_socket`, `core/modules/ssh.sh` | **Complete**: OpenSSH ControlMaster multiplexing socket manager (inspects `~/.ssh/sockets/`, purges stale/orphaned sockets). | **CORE**: Infrastructure foundation ensuring zero-latency sub-second SSH execution across nodes. | None. Essential SSH socket management. | **[KEEP - CORE]** |
+| **40** | `ledger` | `generate`, `[--json]`, `[--swarm]` | `bin/knot:cmd_ledger`, `core/modules/telemetry.sh` | **Complete**: Generates deterministic machine-readable JSON/text cluster health, socket, and node state telemetry. | **CORE**: Critical for autonomous agent auditability and telemetry synchronization. | None. Telemetry generator. | **[KEEP - CORE]** |
+
+---
+
+### 12.3 Triage Classification Summary & Breakdown
+
+Based on empirical audit, all 40 commands and sub-dispatchers break down into 4 clear buckets:
+
+```
+========================================================================================
+                       KNOT CLI RATIONALIZATION TRIAGE MATRIX
+========================================================================================
+BUCKET                 COUNT  COMMANDS / SUBSYSTEMS
+----------------------------------------------------------------------------------------
+[KEEP - CORE]          20     update, onboard, sync, resolve, status, exec, kvm, 
+                              autologin, color, quota, auth, hub, agent, task, 
+                              worktree, sleep, doctor, repair, shutdown, mcp, 
+                              socket, ledger
+[CONSOLIDATE]          12     screen (merge unlock/lock/login), unlock, lock, login,
+                              kdeconnect (consolidate vmon), swarm (strip auth/quota/color),
+                              power (merge sleep), kafe/web (merge cockpit), 
+                              restart (merge kvm), reboot (merge shutdown),
+                              project (merge worktree)
+[HARDEN]               3      display (canonical vmon & headless routing), 
+                              council (purge tournament slop; streamline discussion),
+                              topology (retain ASCII 2D spatial layout; purge photo CV)
+[PURGE - DEAD/SLOP]    5      chat (Swarm Konversations), artifact (abandoned leases),
+                              memory (Cognitive Memory Palace & SurrealQL shims),
+                              tournament_referee (esports ping pong scoring),
+                              core/vision (heuristic desk photo detector)
+========================================================================================
+TOTAL AUDITED:         40 root dispatchers and subsystem backings
+========================================================================================
+```
+
+---
+
+### 12.4 Backing Architecture & Dead Code Deep Dive
+
+Beyond the root CLI dispatcher, every supporting file in `core/modules/`, `core/hub/`, `core/memory/`, `core/vision/`, `web/`, and `runtime/skills/` was audited line-by-line to uncover hidden couplings, dead code, unused endpoints, and test suite dependencies.
+
+#### 12.4.1 The Esports Ping Pong Slop (`tournament_referee.py` & `scaffolder.py`)
+- **File:** `runtime/skills/swarm-council/scripts/tournament_referee.py` (297 lines)
+- **Evidence:** While Phase 5 purged personal benchmark scripts (`scripts/ping_pong_tournament.py`), `tournament_referee.py` was left behind in the council skill. It contains functions like `calculate_volley_points()` (evaluating "aces", "power smashes", "elegance bonuses", "faults", and "streak multipliers") and models like `NodeScore` and `TournamentState`.
+- **Cross-References & Test Coupling:**
+  1. `runtime/skills/swarm-council/scripts/scaffolder.py`: line 211 (`build_tournament_ring`), line 219 (`scaffold_tournament_prompt`), line 303 (`Pack: tournament`).
+  2. `tests/test_council_steer.sh`:
+     - Step 3 (lines 45–58): Executes `scaffolder.py --pack tournament --dry-run` and asserts pack name is `"tournament"`.
+     - Step 4 (lines 60–80): Imports and asserts `calculate_volley_points` and `verify_proof` from `tournament_referee.py`.
+- **Verdict & Impact:** Pure AI vibe slop. Deleting `tournament_referee.py` and removing `--pack tournament` from `scaffolder.py` requires atomically refactoring **both Step 3 and Step 4** of `tests/test_council_steer.sh` to maintain a green test suite.
+
+#### 12.4.2 The Cognitive Memory Palace Bloat, Dead Shims & Pytest Coupling (`palace.py` & `profiles.py`)
+- **Files:** `core/memory/palace.py` (1,822 lines), `core/memory/profiles.py` (177 lines), `core/modules/memory.sh` (8 lines)
+- **Evidence:** 
+  1. `core/memory/palace.py` line 1523 contains `execute_surreal(self, sql: str)`, an empty dead shim returning `[{"status": "OK", "result": []}]` from a legacy SurrealDB migration.
+  2. Line 1023 defines an "Embedded Artifact Closet (Replaces PocketBase)", duplicating file storage.
+  3. The entire "Memory Palace" structure (organizing data into "wings", "halls", and "drawers" formatted with castle emojis 🏰 🏛️ 🏢 📂) is speculative vibe architecture.
+  4. In Issue #41, `core/mcp/gateway.py` was explicitly pruned to 4 lean tools, eliminating memory tools. However, **`core/mcp/gateway.py` lines 28–33 and line 111 still import and instantiate `MemoryPalaceClient`** (`self.memory = memory_client or MemoryPalaceClient()`). While `self.memory` is dead and uncalled, deleting `palace.py` without cleaning up `gateway.py` will cause an unhandled `ImportError` on `knot mcp gateway`!
+  5. `core/memory/profiles.py` duplicates `.agents/skills/hardware-profiles/SKILL.md` verbatim.
+  6. **Write-Only Sink in `agent.py`:** `core/hub/agent.py` lines 1404 and 1492 spawn background daemon threads calling `palace.ingest_antigravity_transcript()`, storing records into "wing: swarm_sessions". An exhaustive audit confirms that **zero readers or query callers exist anywhere in Knot Mesh** for this data. It is a 100% write-only sink.
+- **Pytest Coupling Hazard:**
+  - `tests/test_memory_palace.py` contains **21 pytest tests** across 494 lines (testing SQLite init, CRDT schema, in-process cosine similarity, dual-pool memory, and hardware profiles).
+  - These 21 tests constitute **30.4% of the entire 69-assertion pytest test suite**.
+- **Verdict & Safe Migration:** Anthropomorphic palace bloat and dead shims must be excised. `core/mcp/gateway.py` must be cleaned up to drop the dead import. The 21 tests in `tests/test_memory_palace.py` must be adapted to verify the lean storage model or retired in sync with the module.
+
+#### 12.4.3 Speculative Desk Photo Computer Vision & Web Radar Modal (`core/vision/`)
+- **Files:** `core/vision/engine.py` (67 lines), `core/vision/offline_detector.py` (510 lines), `core/vision/swarm_detector.py` (280 lines), `core/vision/display_overlay.py` (170 lines)
+- **Evidence:** Implements heuristic computer vision algorithms (PIL edge detection, bounding box normalization, 3D RGB color histogram matching against `/tmp/knot_screens/`) to deduce physical screen positions from photographs. `display_overlay.py` introduces a heavyweight PyQt6 GUI dependency.
+- **Cross-References & Web Coupling:**
+  1. Tested only by synthetic unit tests in `tests/test_vision_engine.py` (4 tests using synthetic PIL rectangles).
+  2. `web/src/components/radar/PhotoTopologyModal.tsx` is an active 668-line React component in the web cockpit (`knot kafe`) calling `/topology/analyze-photo` (line 116) and `/topology/identify` (line 89).
+  3. Real users configure spatial topology deterministically via `knot topology align-internal` or declarative `topology.json`.
+- **Verdict:** Speculative AI vibe feature. Adds substantial maintenance surface, cognitive overhead, and heavy dependencies (PIL, numpy, PyQt6). Purging requires removing `core/vision/`, updating `core/modules/topology.sh`, retiring `tests/test_vision_engine.py`, and removing the modal from `web/`.
+
+#### 12.4.4 Chat & Artifact Subsystems: Agent Daemon & Web Cockpit Couplings
+- **Files:** `core/modules/hub.sh` (`cmd_chat: lines 501-637`, `cmd_artifact: lines 639-723`, `cmd_project sync: lines 479-486`), `core/hub/hub.py`, `core/hub/agent.py`, `web/`
+- **Evidence & Hidden Couplings:**
+  1. `knot chat` ("Swarm Konversations"): 137 lines of shell code managing IRC-like chat channels (`/chat/conversations`, `/chat/messages`).
+     - **CRITICAL DAEMON COUPLING:** `core/hub/agent.py` lines 1228–1433 runs an active background daemon thread `chat_mention_worker(self)` (`chat_thread = threading.Thread(target=self.chat_mention_worker, daemon=True)` started at line 1432). Every 4 seconds (line 1236: `self.stop_event.wait(4.0)`), it issues an HTTP request to `f"{self.hub.hub_url}/chat/messages?conv_id=all&limit=20"`!
+     - **Failure Mode:** If `/chat/*` is deleted from `hub.py` without stopping `chat_mention_worker` in `agent.py`, the worker will throw continuous HTTP 404 errors every 4 seconds and flood stderr in an infinite loop.
+     - **Web Cockpit Usage:** `web/src/components/chat/SwarmChat.tsx` and `web/src/hooks/useKnotChatRuntime.ts` provide a full chat interface in the web cockpit.
+  2. `knot artifact`: 85 lines of shell code managing in-memory string locks (`/artifacts/leases`, `/artifacts/lock`, `/artifacts/release`).
+     - Help text advertises phantom `upload` and `pull` options that do not exist.
+     - `web/src/components/artifacts/ArtifactVault.tsx` provides a "3-State Atomic Artifact Lease Vault" UI calling `/artifacts/*` via `web/src/hooks/useKnotSSE.ts`.
+  3. `knot project sync`: 8 lines of shell code that curls `/projects`, prints item count, and does zero actual synchronization.
+- **Verdict & Safe Migration:** While the CLI entrypoints (`knot chat`, `knot artifact`) and hollow stubs (`knot project sync`) can be immediately pruned from `bin/knot`, removing backend `/chat/*` and `/artifacts/*` from `hub.py` requires **atomically excising `chat_mention_worker` from `agent.py` and retiring the corresponding tabs from `web/`**.
+
+#### 12.4.5 Namespace Pollution & Legacy Script Delegation
+- **Files:** `bin/knot` (lines 2349–2364, 2381–2388, 2417–2424, 2437–2456), `core/modules/antigravity.sh`
+- **Evidence:** 
+  1. Root convenience aliases cluttering the CLI: `unlock`, `lock`, `login`, `restart`, `reboot`, `power`, `quota`.
+  2. `knot swarm auth` vs `knot auth`: `knot auth` dispatches to `core/modules/auth.sh` (1,153 lines, hardened multi-tenant architecture), while `knot swarm auth` dispatches directly to `antigravity_swarm_auth` in `core/modules/antigravity.sh` (124 lines, legacy procedural SSH script).
+  3. `tests/test_cli_help.sh` tests all 39 root subcommands and 18 nested commands across 229 assertions.
+- **Verdict:** Consolidate aliases into canonical commands (`knot screen`, `knot autologin`, `knot kvm`, `knot shutdown`, `knot sleep`, `knot quota`, `knot auth`). Update `tests/test_cli_help.sh` to match the canonical palette.
+
+---
+
+### 12.5 Atomic Pruning & Consolidation Action Plan
+
+To execute this pruning safely and deterministically without breaking mesh invariants or test suites, the work is organized into 4 atomic phases:
+
+#### Phase 1: Dead Code & Vibe Slop Elimination (Immediate Excision)
+1. **Purge Esports Referee & Scaffolder Tournament Packs:**
+   - Delete `runtime/skills/swarm-council/scripts/tournament_referee.py`.
+   - In `runtime/skills/swarm-council/scripts/scaffolder.py`: remove `build_tournament_ring`, `scaffold_tournament_prompt`, and `--pack tournament`.
+   - In `tests/test_council_steer.sh`: refactor Step 3 (replace tournament pack check) and Step 4 (replace points calculation with core council challenge/steering verification).
+2. **Purge Desk Photo CV Engine:**
+   - Delete `core/vision/` directory (`engine.py`, `offline_detector.py`, `swarm_detector.py`, `display_overlay.py`).
+   - In `core/modules/topology.sh`: remove `topology_refresh` photo handling and `topology_identify` overlay execution. Retain `show`, `align-internal`, and `guide`.
+   - In `core/hub/hub.py`: remove `/topology/analyze-photo` and `/topology/identify` routes.
+   - Remove `tests/test_vision_engine.py` (4 tests).
+   - In `web/`: remove `PhotoTopologyModal.tsx` and decouple radar trigger.
+3. **Purge Cognitive Memory Palace & Clean Up MCP Gateway:**
+   - In `core/mcp/gateway.py`: remove dead `from core.memory.palace import MemoryPalaceClient` (lines 28–33) and unused `self.memory` attribute (line 111).
+   - In `core/hub/agent.py`: remove dead background transcript harvesting (`_bg_chat_ingest`, `_bg_ingest`).
+   - Remove `execute_surreal`, embedded artifact closet, and castle metaphors from `core/memory/palace.py` (or replace with lean, unopinionated SQLite store <100 lines).
+   - Deduplicate `core/memory/profiles.py` to point to `runtime/skills/hardware-profiles/`.
+   - Adapt `tests/test_memory_palace.py` to maintain 100% green test assertions.
+4. **Purge CLI Stubs & Abandoned Prototypes:**
+   - Remove `cmd_chat` and `cmd_artifact` from `core/modules/hub.sh`.
+   - Remove `chat` and `artifact` cases from `bin/knot` dispatcher.
+   - In `core/hub/agent.py`: remove `chat_mention_worker` daemon thread (lines 1228–1433) before dropping `/chat/*` hub endpoints.
+   - In `core/hub/hub.py`: remove `/chat/*` and `/artifacts/*` routes and in-memory stores.
+   - In `web/`: retire `SwarmChat.tsx` and `ArtifactVault.tsx`.
+   - Update `tests/test_cli_help.sh` to remove `chat` and `artifact`.
+
+#### Phase 2: CLI Namespace Consolidation
+1. **Consolidate Screen & Login Commands:**
+   - Canonicalize `knot screen <status|unlock|lock>`.
+   - Canonicalize `knot autologin <local|status|reconcile|...>`.
+   - Remove redundant top-level `knot unlock`, `knot lock`, and `knot login` entries from `bin/knot` (or retain hidden backwards-compatible shims while removing from primary help).
+2. **Consolidate Power & System Operations:**
+   - Canonicalize `knot kvm restart`; retire standalone `knot restart`.
+   - Canonicalize `knot shutdown [--reboot]`; consolidate `knot reboot` into `knot shutdown --reboot`.
+   - Canonicalize `knot sleep`; consolidate `knot power` into `knot sleep`.
+3. **Consolidate Display & Virtual Monitor:**
+   - Standardize virtual monitor commands exclusively under `knot display vmon <status|start|stop>`.
+   - Deprecate duplicate `knot kdeconnect vmon` alias.
+4. **Consolidate Swarm Umbrella:**
+   - Canonicalize `knot quota` as the top-level command for model quotas.
+   - Make `knot auth` the sole canonical authentication tool; remove redundant `knot swarm auth`.
+   - Retain `knot swarm switch <id>`, `knot swarm status`, and `knot swarm wave` as genuine swarm commands.
+
+#### Phase 3: Hub Route Compaction
+- In `core/hub/hub.py`: streamline route table down to verified production routes:
+  - Cluster Health: `/health`, `/nodes`, `/nodes/activity`
+  - Task Blackboard: `/tasks/*`, `/stream`, `/events`, `/strand/events`
+  - Model Quotas: `/quota`, `/swarm/models`
+  - Power Coordination: `/power/status`, `/swarm/wake`, `/swarm/sleep-allow`
+  - Mesh Remote Action: `/mesh/action`, `/mesh/exec`
+  - Enrollment & Distribution: `/dist/*`, `/join/*`, `/swarm/enroll/*`
+
+#### Phase 4: Test Suite & Documentation Harmonization
+- Update `tests/test_cli_help.sh` (all 229 assertions) to reflect the pruned canonical command dictionary.
+- Verify `tests/test_tauri_kafe.sh` (ensuring `pnpm typecheck` and `pnpm build` pass with 0 errors).
+- Verify `tests/test_psl_integrity.sh` (asserting 0 defects under Rule 1).
+- Verify `pytest` (asserting 100% green across remaining test modules).
+- Update `docs/CLI_REFERENCE.md` and `README.md` to document the streamlined command palette.
+
+---
+
+### 12.6 Safety & Non-Breaking Verification Analysis
+
+The pruning plan is specifically engineered to guarantee that **zero core workspace capabilities are broken**:
+
+1. **KVM & Input Capture Invariant:**
+   - Deskflow configuration compilation (`core/modules/compile_deskflow.py`), service unit management (`knot-deskflow.service`), and the C-level Wayland token persistence shim (`core/shim/input_capture_shim.c`) are 100% untouched.
+2. **Virtual Monitor Invariant:**
+   - Virtual monitor scaling (`core/modules/vmon.sh`), `knot-vmon-keepalive`, and KRDP Wayland headless virtual display creation remain 100% intact under canonical `knot display vmon`.
+3. **GitOps Worktrees & Landing Arbiter Invariant:**
+   - Cross-node worktree provisioning, home path normalization, and rebase verification (`core/gitops.sh`, `tests/test_gitops.sh`, `tests/test_worktree_rebase_mesh.sh`) remain 100% untouched.
+4. **Hub & Linda Tuplespace Task Engine Invariant:**
+   - Task queuing, batch fanouts, node claims, heartbeats, results, and SSE event streaming (`core/hub/hub.py`, `core/hub/agent.py`, `tests/test_strand_event_bus.py`, `tests/test_dag.py`) remain 100% untouched.
+5. **OpenSSH ControlMaster Multiplexing Invariant:**
+   - Socket creation, status inspection, and cleanup (`core/modules/ssh.sh`, `core/resolver.sh`, `bin/knot:cmd_socket`) remain 100% untouched.
+
+By executing this rationalization, Knot Mesh will eliminate over 2,500 lines of dead code and speculative vibe bloat, resolve hidden daemon crash risks, dramatically reduce maintenance overhead, and present a hardened, coherent, enterprise-grade CLI interface.
+

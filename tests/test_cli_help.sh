@@ -59,9 +59,6 @@ SUBCOMMANDS=(
   "exec"
   "kvm"
   "screen"
-  "unlock"
-  "lock"
-  "login"
   "autologin"
   "kdeconnect"
   "display"
@@ -75,17 +72,10 @@ SUBCOMMANDS=(
   "task"
   "project"
   "worktree"
-  "chat"
-  "artifact"
   "sleep"
   "kafe"
-  "web"
-  "memory"
   "doctor"
-  "repair"
-  "restart"
   "shutdown"
-  "reboot"
   "topology"
   "mcp"
   "socket"
@@ -126,12 +116,9 @@ NESTED_COMMANDS=(
   "council heal"
   "council clean"
   "council copy"
-  "council challenge"
   "council board"
   "swarm switch"
-  "swarm exec"
-  "swarm test"
-  "kdeconnect vmon"
+  "swarm wave"
   "display vmon"
   "auth login"
   "auth import"
@@ -145,9 +132,8 @@ NESTED_COMMANDS=(
   "worktree normalize"
   "worktree provision"
   "topology show"
-  "topology refresh"
   "topology align-internal"
-  "topology identify"
+  "topology guide"
   "screen unlock"
   "screen lock"
   "screen login"
@@ -167,7 +153,6 @@ assert_exit_code 1 "knot unknown-root-cmd" "$KNOT_BIN" unknown-root-cmd
 assert_exit_code 1 "knot council unknown-action" "$KNOT_BIN" council unknown-action
 assert_exit_code 1 "knot swarm unknown-action" "$KNOT_BIN" swarm unknown-action
 assert_exit_code 1 "knot kdeconnect unknown-action" "$KNOT_BIN" kdeconnect unknown-action
-assert_exit_code 1 "knot kdeconnect vmon unknown-action" "$KNOT_BIN" kdeconnect vmon unknown-action
 assert_exit_code 1 "knot display unknown-action" "$KNOT_BIN" display unknown-action
 assert_exit_code 1 "knot display vmon unknown-action" "$KNOT_BIN" display vmon unknown-action
 assert_exit_code 1 "knot screen unknown-action" "$KNOT_BIN" screen unknown-action
@@ -176,11 +161,12 @@ assert_exit_code 1 "knot hub unknown-action" "$KNOT_BIN" hub unknown-action
 assert_exit_code 1 "knot agent unknown-action" "$KNOT_BIN" agent unknown-action
 assert_exit_code 1 "knot task unknown-action" "$KNOT_BIN" task unknown-action
 assert_exit_code 1 "knot project unknown-action" "$KNOT_BIN" project unknown-action
-assert_exit_code 1 "knot chat unknown-action" "$KNOT_BIN" chat unknown-action
-assert_exit_code 1 "knot artifact unknown-action" "$KNOT_BIN" artifact unknown-action
+assert_exit_code 1 "knot chat (purged command)" "$KNOT_BIN" chat
+assert_exit_code 1 "knot artifact (purged command)" "$KNOT_BIN" artifact
+assert_exit_code 1 "knot memory (purged command)" "$KNOT_BIN" memory
+assert_exit_code 1 "knot repair (purged command)" "$KNOT_BIN" repair
 assert_exit_code 1 "knot kafe unknown-action" "$KNOT_BIN" kafe unknown-action
 assert_exit_code 1 "knot sleep unknown-action" "$KNOT_BIN" sleep unknown-action
-assert_exit_code 1 "knot restart unknown-target" "$KNOT_BIN" restart unknown-target
 assert_exit_code 1 "knot topology unknown-sub" "$KNOT_BIN" topology unknown-sub
 
 echo ""

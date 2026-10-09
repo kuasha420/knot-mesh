@@ -28,7 +28,7 @@ The agent MUST halt autonomous execution and surface an explicit escalation to t
 
 ### Tier 1: Architectural & Strategic Decisions
 - Breaking schema changes to Knot Hub database or Linda Tuplespace contracts.
-- Altering core cryptographic algorithms (e.g., changing SHA-256 tournament baseline or GPG keys).
+- Altering core cryptographic algorithms (e.g., changing cryptographic authentication baseline or GPG keys).
 - Adding new external system dependencies or services not already present in the mesh topology.
 
 ### Tier 2: Rule 5 Stop-and-Inquire Escalations

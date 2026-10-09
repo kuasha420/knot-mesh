@@ -42,43 +42,37 @@ if [[ "$out" != *"Kitty control socket not found"* ]]; then
 fi
 echo "PASSED"
 
-# 3. Tournament pack scaffolding verification
-echo -n "3. Testing tournament pack prompt scaffolding... "
-scaffold_json="$(python3 "$KNOT_ROOT/runtime/skills/swarm-council/scripts/scaffolder.py" --pack tournament --dry-run)"
+# 3. Core pack scaffolding verification
+echo -n "3. Testing audit-parity pack prompt scaffolding... "
+scaffold_json="$(python3 "$KNOT_ROOT/runtime/skills/swarm-council/scripts/scaffolder.py" --pack audit-parity --dry-run)"
 pack_name="$(echo "$scaffold_json" | jq -r '.pack')"
-if [ "$pack_name" != "tournament" ]; then
-  echo "FAILED (Expected pack 'tournament', got '$pack_name')"
+if [ "$pack_name" != "audit-parity" ]; then
+  echo "FAILED (Expected pack 'audit-parity', got '$pack_name')"
   exit 1
 fi
 has_desktop="$(echo "$scaffold_json" | jq -r '.prompts_generated.desktop.preview_len')"
 if [ -z "$has_desktop" ] || [ "$has_desktop" -le 0 ]; then
-  echo "FAILED (Desktop tournament prompt not generated)"
+  echo "FAILED (Desktop audit-parity prompt not generated)"
   exit 1
 fi
 echo "PASSED"
 
-# 4. Tournament referee syntax and calculation verification
-echo -n "4. Testing tournament referee points calculation... "
-referee_test="$(python3 -c "
+# 4. Council hook dynamic role resolution verification
+echo -n "4. Testing council hook dynamic role resolution... "
+hook_test="$(python3 -c "
 import sys
 sys.path.insert(0, '$KNOT_ROOT/runtime/skills/swarm-council/scripts')
-from tournament_referee import calculate_volley_points, verify_proof
+from council_hook import resolve_node_role
 
-pts, ace, smash, elegance = calculate_volley_points(4200.0, True)
-assert smash == True, 'Should be smash (<5s)'
-assert pts == 250, f'Expected 250 pts, got {pts}'
-
-pts2, ace2, smash2, elegance2 = calculate_volley_points(8200.0, False)
-assert ace2 == True, 'Should be ace (<10s)'
-assert smash2 == False
-assert pts2 == 150, f'Expected 150 pts, got {pts2}'
-
-assert verify_proof('test_proof', 'd3f0') == True, 'SHA256 verify failed'
+role = resolve_node_role('desktop')
+assert role == 'Mesh Anchor & Coordinator', f'Expected Mesh Anchor & Coordinator, got {role}'
+fallback_role = resolve_node_role('unknown-node')
+assert fallback_role == 'Strand Worker', f'Expected Strand Worker, got {fallback_role}'
 print('OK')
 ")"
 
-if [ "$referee_test" != "OK" ]; then
-  echo "FAILED (Referee points calculation failed)"
+if [ "$hook_test" != "OK" ]; then
+  echo "FAILED (Council hook dynamic role resolution failed)"
   exit 1
 fi
 echo "PASSED"

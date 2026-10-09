@@ -167,7 +167,7 @@ knot_swarm_topology()
 ### 3.3 Handheld Display Allocation (Steam Deck / ROG Ally)
 Handheld screens (`eDP-1`) provide ideal non-intrusive monitoring surfaces while the operator is away from the workstation ([`docs/SWARM_OPERATIONS.md:178-181`](docs/SWARM_OPERATIONS.md)):
 - **Live Compact Quota Visualizer**: Runs `knot quota live --compact` (specifically engineered for $\le 80$ columns).
-- **Live Council Message Board**: Runs `knot council board --compact` or `knot chat read` to display real-time strand communication.
+- **Live Council Message Board**: Runs `knot council board --compact` to display real-time strand communication.
 
 ```bash
 # Deploy compact telemetry dashboard on handheld display (e.g. Steam Deck)

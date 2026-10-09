@@ -1211,7 +1211,7 @@ doctor_repair() {
   for arg in "$@"; do
     case "$arg" in
       -h|--help|help)
-        echo "Usage: knot repair [node|--all|local]"
+        echo "Usage: knot doctor --repair [node|--all|local]"
         echo ""
         echo "Auto-repair KVM dropout, portal connections, and mesh state."
         echo ""

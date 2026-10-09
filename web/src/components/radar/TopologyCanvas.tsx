@@ -5,7 +5,6 @@ import {
   Gamepad2,
   Lock,
   Unlock,
-  Camera,
   RefreshCw,
   Sparkles,
   ArrowRight,
@@ -16,8 +15,7 @@ import {
   Sliders,
   Layers,
 } from 'lucide-react';
-import type { MeshTopologyState, MeshNode, MeshTopologyLink } from '../../types/knot';
-import { PhotoTopologyModal } from './PhotoTopologyModal';
+import type { MeshTopologyState, MeshNode } from '../../types/knot';
 import { DisplayCalibrationOverlay } from './DisplayCalibrationOverlay';
 
 export interface TopologyCanvasProps {
@@ -31,7 +29,6 @@ export const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
 }) => {
   const [topology, setTopology] = useState<MeshTopologyState | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [isPhotoModalOpen, setIsPhotoModalOpen] = useState<boolean>(false);
   const [isCalibrationOverlayOpen, setIsCalibrationOverlayOpen] = useState<boolean>(false);
   const [isFlashing, setIsFlashing] = useState<boolean>(false);
   const [isAligning, setIsAligning] = useState<boolean>(false);
@@ -56,35 +53,6 @@ export const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
   useEffect(() => {
     void fetchTopology();
   }, []);
-
-  const handleApplyTopology = async (
-    layout: Record<string, Record<string, MeshTopologyLink>>,
-    screens: string[],
-    anchor: string
-  ): Promise<boolean> => {
-    try {
-      const res = await fetch('/topology', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          anchor,
-          screens,
-          layout,
-          locked: topology?.locked || false,
-        }),
-      });
-      if (res.ok) {
-        await fetchTopology();
-        setStatusMsg('Topology applied and Deskflow recompiled successfully!');
-        setTimeout(() => setStatusMsg(null), 3500);
-        return true;
-      }
-      return false;
-    } catch (err) {
-      console.error('Failed to apply topology:', err);
-      return false;
-    }
-  };
 
   const toggleLock = async () => {
     if (!topology) return;
@@ -379,16 +347,6 @@ export const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
               </>
             )}
           </button>
-
-          {/* Auto-Arrange from Photo Button */}
-          <button
-            type="button"
-            onClick={() => setIsPhotoModalOpen(true)}
-            className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-night-cyan/20 to-purple-500/20 hover:from-night-cyan/30 hover:to-purple-500/30 text-night-white border border-night-cyan/40 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm"
-          >
-            <Camera className="w-3.5 h-3.5 text-night-cyan" />
-            Auto-Arrange from Photo
-          </button>
         </div>
       </div>
 
@@ -493,15 +451,6 @@ export const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
           </div>
         )}
       </div>
-
-      {/* Photo Topology Modal */}
-      <PhotoTopologyModal
-        isOpen={isPhotoModalOpen}
-        onClose={() => setIsPhotoModalOpen(false)}
-        onApplyTopology={handleApplyTopology}
-        currentTopology={topology}
-        onFlashIdentify={handleFlashIdentify}
-      />
 
       {/* Display Calibration Pattern Overlay */}
       <DisplayCalibrationOverlay

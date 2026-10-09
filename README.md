@@ -69,7 +69,7 @@ The foundational infrastructure plane managing physical machines, hardware netwo
 - **Wayland LayerShell Strips**: Subtle PyQt6 edge indicators (`knot-stripd`) flashing visual transitions across physical monitor edges.
 - **DPMS Auto-Unlock & Non-Destructive Auto-Login**: Advisory, non-destructive session wake and unlock via DPMS and KDE Connect verification without destroying active sessions.
 - **KDE Connect Clipboard Integration**: Unified cross-node clipboard synchronization and device pairing.
-- **Wayland Virtual Monitor Fabric**: Seamlessly expand the Anchor desktop onto docked handhelds (Steam Deck OLED, ROG Ally) and laptops via KWin Wayland headless outputs + `krdpserver` and KRDC with out-of-band FreeRDP dynamic port pre-trusting (`knot display extend`, `knot kdeconnect vmon`).
+- **Wayland Virtual Monitor Fabric**: Seamlessly expand the Anchor desktop onto docked handhelds (Steam Deck OLED, ROG Ally) and laptops via KWin Wayland headless outputs + `krdpserver` and KRDC with out-of-band FreeRDP dynamic port pre-trusting (`knot display extend`, `knot display vmon`).
 - **3-Tier Mesh Network Resolver**: Dynamic resolution hierarchy traversing WireGuard encrypted mesh $\to$ mDNS local resolution $\to$ LAN physical fallback.
 - **Hardware-Fenced PAM Sudo Gates**: Real-time CIDR subnet and Default Gateway MAC / BSSID validation (`knot-guard`, `knot-auth-check`).
 
@@ -77,7 +77,6 @@ The foundational infrastructure plane managing physical machines, hardware netwo
 The autonomous multi-agent intelligence layer orchestrating distributed AI agent instances across the mesh:
 - **Linda Tuplespace & Blackboard Hub**: Distributed state coordination, artifact leasing, and task fanout via `knot-hub` and `knot-agent`.
 - **Lean Stateless MCP Gateway**: Minimalist, zero-external-dependency Model Context Protocol server (`core/mcp/gateway.py`) exposing the 4 canonical mesh tools (`knot_node_status`, `knot_quota_matrix`, `knot_exec_command`, `knot_swarm_topology`).
-- **Decentralized CRDT Memory Palace**: In-process SQLite-backed vector search and shared knowledge vault across node clusters (`core/memory/`).
 - **Swarm Council Plane**: Out-of-band collaborative deliberation across autonomous CLI agents with zero startup token overhead and Kitty confluence multiplexing (`knot council`).
 - **Antigravity Subscription & Multi-Tenant Sandboxing**: Local credential sandboxing (`knot auth`), zero network credential transmission, instantaneous atomic profile switching, dynamic tier awareness (Google AI Pro vs Antigravity Starter Quota), and live zero-token HUD visualizers (`knot quota live`, `knot council board`).
 
@@ -89,7 +88,7 @@ The autonomous multi-agent intelligence layer orchestrating distributed AI agent
    Move your mouse cursor fluidly across physical machines. Leverages Deskflow with a custom C `libportal` InputCapture shim tailored specifically for KWin Wayland session semantics.
 
 2. **🤖 Zero-Prompt Antigravity Multi-Agent Orchestration**  
-   Built-in Model Context Protocol (MCP) server (`core/mcp/gateway.py`) with 4 canonical tools and pre-approved operational skills in `runtime/skills/` (`knot-swarm`, `hardware-profiles`, `swarm-council`, `goal-with-lease`, `subagent-ladder`) grant agents headless mesh execution, shared memory palace recall, and distributed task fanout across nodes without human prompts.
+   Built-in Model Context Protocol (MCP) server (`core/mcp/gateway.py`) with 4 canonical tools and pre-approved operational skills in `runtime/skills/` (`knot-swarm`, `hardware-profiles`, `swarm-council`, `goal-with-lease`, `subagent-ladder`) grant agents headless mesh execution, Linda tuplespace task coordination, and distributed task fanout across nodes without human prompts.
 
 3. **💡 Ambient Spatial Awareness & Wayland LayerShell Strips**  
    Subtle, low-opacity PyQt6 Wayland LayerShell edge indicators (`knot-stripd`) glow softly along physical display boundaries, flashing dynamic visual cues when the cursor traverses between machines.

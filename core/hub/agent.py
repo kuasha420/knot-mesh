@@ -186,34 +186,6 @@ def detect_capabilities(node_id: str) -> list[str]:
     return list(dict.fromkeys(caps))
 
 
-def ensure_headless_shims() -> str:
-    """
-    Creates dummy executable shims for browser and desktop opener binaries in
-    ~/.local/share/knot/shims/ to ensure headless background tasks (systemd services)
-    can NEVER trigger GUI browser tabs or desktop dialogs even if agy invokes xdg-open.
-    Returns the absolute path to the shims directory.
-    """
-    shims_dir = os.path.expanduser("~/.local/share/knot/shims")
-    os.makedirs(shims_dir, exist_ok=True)
-    shim_script = "#!/bin/sh\n# Knot Headless Shim: Exit immediately to prevent GUI spawns\nexit 0\n"
-    binaries = [
-        "xdg-open", "kde-open", "kde-open5", "kde-open6",
-        "kioexec", "kfmclient", "gio", "sensible-browser",
-        "x-www-browser", "chromium", "google-chrome-stable",
-        "google-chrome", "brave", "firefox"
-    ]
-    for b in binaries:
-        path = os.path.join(shims_dir, b)
-        if not os.path.exists(path):
-            try:
-                with open(path, "w") as f:
-                    f.write(shim_script)
-                os.chmod(path, 0o755)
-            except Exception as _err:
-                sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
-    return shims_dir
-
-
 def is_online(host: str = "oauth2.googleapis.com", port: int = 443, timeout: float = 1.5) -> bool:
     """
     Fast pre-flight network and DNS readiness probe. Prevents agy from attempting
@@ -232,9 +204,9 @@ def get_headless_systemd_env() -> list[str]:
     """
     Returns systemd-run --setenv arguments to enforce completely headless execution.
     """
-    shims_dir = ensure_headless_shims()
+    home = os.path.expanduser("~")
     return [
-        f"--setenv=PATH={shims_dir}:/usr/local/bin:/usr/bin:/bin",
+        f"--setenv=PATH={home}/.local/bin:/usr/local/bin:/usr/bin:/bin",
         "--setenv=BROWSER=/bin/true",
         "--setenv=DE=generic",
         "--setenv=XDG_CURRENT_DESKTOP=",
@@ -643,22 +615,6 @@ class HubClient:
         except Exception:
             return None
 
-    def get_conversation(self, conv_id: str) -> dict | None:
-        return self._get(f"/chat/conversations/{conv_id}")
-
-    def get_node_session(self, conv_id: str, node_id: str) -> str | None:
-        data = self._get(f"/chat/session?conv_id={conv_id}&node_id={node_id}")
-        if data and data.get("agy_session_id"):
-            return data["agy_session_id"]
-        return None
-
-    def set_node_session(self, conv_id: str, node_id: str, agy_session_id: str) -> bool:
-        resp = self._post("/chat/session", {
-            "conv_id": conv_id,
-            "node_id": node_id,
-            "agy_session_id": agy_session_id
-        })
-        return bool(resp and resp.get("ok"))
 
     def send_node_heartbeat(self, node_id: str, hostname: str, capabilities: list[str],
                             agy_ver: str, agy_auth: str, quota: dict | None = None,
@@ -1225,196 +1181,7 @@ class AgentWorker:
                 except Exception as _err:
                     sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
-    def chat_mention_worker(self):
-        """
-        Listens to Swarm Konversations across all channels (conv_id=all) for direct mentions
-        (@node_id or @swarm for desktop) and responds autonomously in the channel,
-        preserving native agy project context and conversation session.
-        """
-        last_seen_ts = int(time.time())
-        while not self.stop_event.is_set():
-            self.stop_event.wait(4.0)
-            if self.stop_event.is_set():
-                break
-            try:
-                url = f"{self.hub.hub_url}/chat/messages?conv_id=all&limit=20"
-                req = urllib.request.Request(url, headers={"Accept": "application/json"})
-                with urllib.request.urlopen(req, timeout=5.0, context=self.hub.ssl_ctx) as resp:
-                    messages = json.loads(resp.read().decode("utf-8"))
-                    for m in messages:
-                        m_ts = m.get("created_at", 0)
-                        if m_ts <= last_seen_ts:
-                            continue
-                        last_seen_ts = max(last_seen_ts, m_ts)
 
-                        sender = m.get("sender", "")
-                        if sender == self.node_id:
-                            continue
-
-                        mentions = m.get("mentions", [])
-                        content = m.get("content", "")
-                        conv_id = m.get("conv_id", "main")
-
-                        # Parse metadata for cascade control
-                        meta = m.get("meta", {})
-                        if isinstance(meta, str):
-                            try:
-                                meta = json.loads(meta)
-                            except Exception:
-                                meta = {}
-                        turn_depth = int(meta.get("turn_depth", 0))
-                        is_human = sender.startswith("human") or sender in ("user", "operator")
-
-                        should_respond = False
-                        is_swarm_broadcast = any(k in mentions for k in ["@swarm", "swarm", "@all", "all"])
-                        if is_swarm_broadcast:
-                            # Swarm-level broadcasts must only be coordinated by the master planner / anchor node (desktop)
-                            if self.node_id == "desktop":
-                                should_respond = True
-                        else:
-                            # Direct mentions to specific nodes
-                            if f"@{self.node_id}" in mentions or self.node_id in mentions:
-                                should_respond = True
-
-                        # Anti-cascade guardrails: halt ping-pong chatter loops between peer agents
-                        if should_respond and not is_human:
-                            # 1. Cap automated agent-to-agent cascade depth
-                            if turn_depth >= 2:
-                                should_respond = False
-                            # 2. Ignore passive acknowledgments / wrap-ups if no question mark is present
-                            ack_markers = [
-                                "confirmed", "standing by", "consensus confirmed",
-                                "wrap-up acknowledged", "acknowledged.", "synchronized",
-                                "idle, and standing by"
-                            ]
-                            lower_c = content.lower()
-                            if any(am in lower_c for am in ack_markers) and "?" not in content:
-                                should_respond = False
-
-                        if should_respond and self.agy_auth == "AUTHENTICATED":
-                            # 1. Look up conversation details and project
-                            conv = self.hub.get_conversation(conv_id)
-                            project_id = conv.get("project_id", "knot") if conv else "knot"
-                            conv_title = conv.get("title", f"#{conv_id}") if conv else f"#{conv_id}"
-
-                            # 2. Look up existing native agy conversation session for this node in this channel
-                            existing_session_id = self.hub.get_node_session(conv_id, self.node_id)
-
-                            print(f"\n[💬] @{self.node_id} mentioned by @{sender} in #{conv_id} (project: {project_id}, session: {existing_session_id or 'new'}): \"{content[:60]}...\"")
-
-                            prompt = (
-                                f"You are @{self.node_id}, an autonomous agent node in the Knot Swarm.\n"
-                                f"In channel #{conv_id} ({conv_title}) under project '{project_id}', @{sender} said:\n"
-                                f"\"{content}\"\n\n"
-                                f"Respond concisely and helpfully to the channel as @{self.node_id}.\n"
-                                f"- Your concluding markdown response will be automatically posted to channel #{conv_id}. If you need to post interim progress updates while executing long multi-step tasks, you may use `knot_chat_post`.\n"
-                                f"- CRITICAL: Use Linda Tuplespace MCP tools (`knot_task_post`, `knot_task_fanout`, `knot_task_wait`) for multi-node task execution and barrier joins. NEVER use chat @mentions for task execution, polling, or barrier synchronization.\n"
-                                f"- Never mention peer nodes for passive acknowledgments, readiness confirmations, or status handshakes. Only mention a peer node if you have an explicit new question or directive for them."
-                            )
-
-                            # Resolve model hierarchically:
-                            # 1. Message meta override
-                            # 2. Conversation node override
-                            # 3. Conversation default model
-                            # 4. Global node model (self.selected_model)
-                            msg_meta = m.get("meta") or {}
-                            conv_node_models = conv.get("node_models") or {} if conv else {}
-                            conv_selected_model = conv.get("selected_model") if conv else None
-                            turn_model = (
-                                msg_meta.get("model") or
-                                conv_node_models.get(self.node_id) or
-                                conv_selected_model or
-                                self.selected_model
-                            )
-
-                            start_turn_time = time.time()
-                            status, reply, session_id, dur, tokens = self.execute_agy_task(
-                                prompt=prompt,
-                                project=project_id,
-                                conversation_id=existing_session_id,
-                                task_title=f"#{conv_id} Response",
-                                model=turn_model
-                            )
-
-                            # 3. Persist native agy conversation session if newly created or updated
-                            target_session = session_id or existing_session_id
-                            if target_session and target_session != existing_session_id:
-                                self.hub.set_node_session(conv_id, self.node_id, target_session)
-
-                            # Check if the agent already posted directly via knot_chat_post during this execution
-                            already_posted = False
-                            try:
-                                recent_msgs = self.hub._get(f"/chat/messages?conv_id={conv_id}&limit=5")
-                                if recent_msgs and isinstance(recent_msgs, list):
-                                    for rm in recent_msgs:
-                                        if rm.get("sender") == self.node_id and rm.get("created_at", 0) >= int(start_turn_time):
-                                            already_posted = True
-                                            break
-                            except Exception as _err:
-                                sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
-
-                            is_wrapper_stub = False
-                            if reply:
-                                low_reply = reply.lower().strip()
-                                is_wrapper_stub = any(low_reply.startswith(p) for p in [
-                                    "i have posted", "i have dispatched", "as @", "here is the channel response",
-                                    "i have shared", "i have updated the channel"
-                                ])
-
-                            if reply and status == "COMPLETED":
-                                if already_posted and is_wrapper_stub:
-                                    print(f"[*] Suppressed redundant wrapper reply in #{conv_id} (session: {target_session[:8] if target_session else 'none'})")
-                                else:
-                                    self.hub._post("/chat/messages", {
-                                        "sender": self.node_id,
-                                        "content": reply,
-                                        "conv_id": conv_id,
-                                        "reply_to": m.get("id"),
-                                        "meta": {
-                                            "session_id": target_session,
-                                            "project_id": project_id,
-                                            "duration_seconds": dur,
-                                            "tokens_used": tokens,
-                                            "turn_depth": turn_depth + 1
-                                        }
-                                    })
-                                    print(f"[✓] Posted reply to #{conv_id} in {dur}s (session: {target_session[:8] if target_session else 'none'})")
-                            elif status != "COMPLETED":
-                                error_notice = f"⚠️ **@{self.node_id} execution notice ({status}):**\n\n> {reply or 'Subprocess did not return a response.'}"
-                                self.hub._post("/chat/messages", {
-                                    "sender": self.node_id,
-                                    "content": error_notice,
-                                    "conv_id": conv_id,
-                                    "reply_to": m.get("id"),
-                                    "meta": {
-                                        "session_id": target_session,
-                                        "project_id": project_id,
-                                        "duration_seconds": dur,
-                                        "tokens_used": tokens,
-                                        "turn_depth": turn_depth + 1,
-                                        "error": True
-                                    }
-                                })
-                                print(f"[!] Posted failure notification to #{conv_id} (status: {status})")
-
-                            # 4. Background transcript ingestion if session exists
-                            if target_session:
-                                def _bg_chat_ingest(s_id=target_session):
-                                    try:
-                                        from core.memory.palace import MemoryPalaceClient
-                                        palace = MemoryPalaceClient()
-                                        for cand in [
-                                            os.path.expanduser(f"~/.gemini/antigravity-cli/brain/{s_id}/.system_generated/logs/transcript.jsonl"),
-                                            os.path.expanduser(f"~/.gemini/antigravity/brain/{s_id}/.system_generated/logs/transcript.jsonl"),
-                                        ]:
-                                            if os.path.exists(cand):
-                                                palace.ingest_antigravity_transcript(cand, s_id, self.node_id)
-                                                break
-                                    except Exception as _err:
-                                        sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
-                                threading.Thread(target=_bg_chat_ingest, daemon=True).start()
-            except Exception as _err:
-                sys.stderr.write(f"Notice: [agent] Handled exception: {_err}\n")
 
     def run(self):
         print(f"[*] Knot Swarm Worker starting on node: {self.node_id} ({self.hostname})")
@@ -1428,9 +1195,6 @@ class AgentWorker:
         hb_thread = threading.Thread(target=self.heartbeat_worker, daemon=True)
         hb_thread.start()
 
-        # Start Swarm Konversations mention listener
-        chat_thread = threading.Thread(target=self.chat_mention_worker, daemon=True)
-        chat_thread.start()
 
         # Fetch initial model quota in background
         threading.Thread(target=self._refresh_quota_bg, daemon=True).start()
@@ -1485,23 +1249,6 @@ class AgentWorker:
                     tokens_used=tokens
                 )
 
-                # Background session transcript ingestion
-                if session_id:
-                    def _bg_ingest():
-                        try:
-                            from core.memory.palace import MemoryPalaceClient
-                            palace = MemoryPalaceClient()
-                            for cand in [
-                                os.path.expanduser(f"~/.gemini/antigravity-cli/brain/{session_id}/.system_generated/logs/transcript.jsonl"),
-                                os.path.expanduser(f"~/.gemini/antigravity/brain/{session_id}/.system_generated/logs/transcript.jsonl"),
-                            ]:
-                                if os.path.exists(cand):
-                                    palace.ingest_antigravity_transcript(cand, session_id, self.node_id)
-                                    print(f"[*] Ingested transcript for session {session_id[:8]} into Memory Palace.")
-                                    break
-                        except Exception as e:
-                            print(f"[!] Memory Palace transcript ingest failed for session {session_id[:8]}: {e}", file=sys.stderr)
-                    threading.Thread(target=_bg_ingest, daemon=True).start()
 
                 # Refresh quota in background after task completion
                 threading.Thread(target=self._refresh_quota_bg, daemon=True).start()

@@ -762,17 +762,6 @@ sys.exit(1)
   fi
 }
 
-council_challenge() {
-  local script="$SCRIPTS_DIR/challenge_tool.py"
-  if [ ! -f "$script" ]; then
-    script="$KNOT_ROOT/runtime/skills/swarm-council/scripts/challenge_tool.py"
-  fi
-  if [ ! -f "$script" ]; then
-    knot_log_err "challenge_tool.py not found at $script"
-    return 1
-  fi
-  python3 "$script" "$@"
-}
 
 council_db() {
   local action="${1:-inspect}"

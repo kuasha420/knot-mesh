@@ -978,6 +978,129 @@ auth_list_all() {
   done
 }
 
+# Synchronize credentials from Secret Service / KWallet to upstream token file
+auth_sync_credentials() {
+  local token_file="$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
+  mkdir -p "$(dirname "$token_file")"
+
+  if command -v secret-tool >/dev/null; then
+    local secret_json="" st_out="" st_rc=0
+    st_out="$(secret-tool search service gemini 2>&1)" || st_rc=$?
+    if [ $st_rc -eq 0 ]; then
+      secret_json="$(echo "$st_out" | awk -F'secret = ' '/^secret = / {print $2}' | head -n1)"
+    else
+      knot_log_warn "Notice: secret-tool search failed (exit code $st_rc): $st_out"
+    fi
+    if [ -n "$secret_json" ] && echo "$secret_json" | jq -e '.token.access_token or .token.refresh_token' >/dev/null; then
+      local current_json=""
+      if [ -f "$token_file" ]; then
+        current_json="$(cat "$token_file")"
+      fi
+      if [ "$current_json" != "$secret_json" ]; then
+        echo "$secret_json" > "$token_file"
+        chmod 600 "$token_file"
+        knot_log_ok "Synchronized updated Antigravity token from Secret Service to $token_file"
+      fi
+      return 0
+    fi
+  fi
+
+  if [ -s "$token_file" ] && jq -e '.token.access_token or .token.refresh_token' "$token_file" >/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
+# Mesh-wide or local credential synchronization
+auth_sync() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot auth sync [--all]"
+    return 0
+  fi
+  if [ "${1:-}" = "--all" ]; then
+    knot_log_info "Synchronizing Antigravity credentials across all mesh nodes..."
+    if ! auth_sync_credentials; then
+      knot_log_warn "Local Antigravity credentials could not be synchronized."
+    fi
+    local all_nodes=()
+    read -ra all_nodes <<< "$(auth_get_all_nodes)"
+    local my_host
+    my_host="$(knot_detect_hostname)"
+    for node_id in "${all_nodes[@]}"; do
+      if [ "$node_id" != "$my_host" ] && ! auth_is_local_node "$node_id"; then
+        local sync_err="" sync_rc=0
+        sync_err="$(ssh -o BatchMode=yes -o ConnectTimeout=4 "$node_id" "knot auth sync" 2>&1)" || sync_rc=$?
+        if [ $sync_rc -ne 0 ]; then
+          knot_log_warn "Failed to sync credentials to node '$node_id' (exit code $sync_rc): $sync_err"
+        fi
+      fi
+    done
+    knot_log_ok "Credential sync complete across swarm."
+    return 0
+  else
+    if ! auth_sync_credentials; then
+      knot_log_warn "Local Antigravity credentials could not be synchronized."
+    fi
+    if command -v systemctl >/dev/null; then
+      local r_out=""
+      if ! r_out="$(systemctl --user restart knot-agent.service 2>&1)"; then
+        knot_log_warn "Notice: knot-agent.service not running or could not restart: $r_out"
+      fi
+    fi
+    knot_log_ok "Local Antigravity credentials synchronized."
+    return 0
+  fi
+}
+
+# Remote or local interactive Antigravity CLI login
+auth_login_remote() {
+  local target="${1:-}"
+  local gui_mode=0
+  if [ "$target" = "--gui" ]; then
+    gui_mode=1
+    target="${2:-}"
+  elif [ "${2:-}" = "--gui" ]; then
+    gui_mode=1
+  fi
+
+  local my_host
+  my_host="$(knot_detect_hostname)"
+  if [ -z "$target" ] || [ "$target" = "local" ] || [ "$target" = "$my_host" ] || auth_is_local_node "$target"; then
+    knot_log_info "Launching interactive Antigravity CLI login on local node..."
+    agy
+    if ! auth_sync_credentials; then
+      knot_log_warn "Local Antigravity credentials could not be synchronized."
+    fi
+    if command -v systemctl >/dev/null; then
+      local r_out=""
+      if ! r_out="$(systemctl --user restart knot-agent.service 2>&1)"; then
+        knot_log_warn "Notice: knot-agent.service not running or restart failed: $r_out"
+      fi
+    fi
+    knot_log_ok "Authentication complete and credentials synced."
+    return 0
+  fi
+
+  if [ $gui_mode -eq 1 ]; then
+    knot_log_info "Opening terminal on '$target' display for Antigravity login..."
+    local uid="1000"
+    if [ "$target" = "steamdeck" ]; then
+      uid="1001"
+    fi
+    local log_file="/tmp/knot_konsole_agy.log"
+    ssh "$target" "WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/$uid nohup konsole -e agy > '$log_file' 2>&1 &"
+    knot_log_ok "Konsole opened on $target screen (logging to $log_file). Follow the on-screen prompt to log in."
+    return 0
+  fi
+
+  knot_log_info "Connecting to '$target' for interactive Antigravity login..."
+  echo -e "  ${C_YELLOW}1.${C_RESET} Select ${C_BOLD}1. Google OAuth${C_RESET} using Enter."
+  echo -e "  ${C_YELLOW}2.${C_RESET} Click or copy the displayed URL into your browser to log in."
+  echo -e "  ${C_YELLOW}3.${C_RESET} Copy the authorization code and paste it right into the prompt below."
+  echo ""
+  ssh -tt "$target" "agy && knot auth sync"
+}
+
 # Top-level dispatcher for `knot auth`
 cmd_auth() {
   # 1. Check for --node <node_id> / -n <node_id> flag in any position
@@ -1033,7 +1156,7 @@ cmd_auth() {
         return $?
         ;;
       sync)
-        antigravity_swarm_auth sync --all "$@"
+        auth_sync --all "$@"
         return $?
         ;;
       *)
@@ -1046,11 +1169,11 @@ cmd_auth() {
   # Check if first argument is a known node ID or hostname
   if auth_is_node "$sub"; then
     if [ $# -eq 0 ]; then
-      # Bare node targeting -> legacy interactive login
-      antigravity_swarm_auth "$sub"
+      # Bare node targeting -> interactive login
+      auth_login_remote "$sub"
       return $?
     elif [ "${1:-}" = "--gui" ]; then
-      antigravity_swarm_auth "$sub" "$@"
+      auth_login_remote "$sub" "$@"
       return $?
     fi
     local action="$1"
@@ -1061,7 +1184,7 @@ cmd_auth() {
         return $?
         ;;
       *)
-        antigravity_swarm_auth "$sub" "$action" "$@"
+        auth_login_remote "$sub" "$action" "$@"
         return $?
         ;;
     esac
@@ -1110,7 +1233,7 @@ cmd_auth() {
       auth_test_lock
       ;;
     sync)
-      antigravity_swarm_auth sync "$@"
+      auth_sync "$@"
       ;;
     -h|--help)
       echo -e "${C_BOLD}knot auth - Multi-Tenant Authentication & Local Profile Sandboxing${C_RESET}"
@@ -1146,7 +1269,7 @@ cmd_auth() {
         echo "Run 'knot auth --help' for usage." >&2
         return 1
       fi
-      antigravity_swarm_auth "$sub" "$@"
+      auth_login_remote "$sub" "$@"
       ;;
   esac
 }

@@ -36,7 +36,10 @@ To achieve zero-downtime fault tolerance across nodes that may sleep or drop con
 
 ---
 
-## Pillar 2: Decentralized & Resilient Memory Palace
+## Pillar 2: Decentralized & Resilient Memory Palace *(Superseded / Historical)*
+
+> [!NOTE] **Architecture Status: Superseded (Historical Reference)**
+> As ratified in the Code Surface Rationalization & Architecture Hardening Plan (`docs/AUDIT_JOURNAL.md`), the separate experimental `core/memory/` CRDT Memory Palace subsystem has been retired. Swarm state coordination, multi-agent workspace sharing, and distributed execution are now canonically unified under **Pillar 1: Linda Tuplespace & Blackboard Task Engine** and native operational skills (`runtime/skills/hardware-profiles/`). The architectural principles below are preserved for historical lineage and academic attribution.
 
 ### 1. The Memory Palace Architecture (*Method of Loci*)
 Rather than relying on lossy recursive summarization (where an LLM progressively erases critical nuances), the **Memory Palace** paradigm structures agent memory into a spatial-semantic hierarchy:

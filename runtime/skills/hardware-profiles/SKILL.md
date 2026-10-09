@@ -12,17 +12,11 @@ Formal system prompt profiles defining hardware specializations, operational bou
 - **Compute Worker** (`@laptop`): Worker Alpha, NVIDIA RTX 3050 CUDA acceleration, Python daemons (`knot-agent`, `knot-hub`), stateless MCP Gateway, in-process vector indexing, concurrency stress tests.
 - **Handheld Controller** (`@rog-ally`, `@steamdeck`): Worker Beta/Gamma, AMD Van Gogh APU / Ryzen Z1 Extreme, 7"-8" touch & gamepad UX, SteamOS immutable rootfs, Wayland/Gamescope compositor, <50MB RAM container constraint.
 
-## 2. Access via CLI & Python API
-```bash
-# Query role profile via Knot Memory CLI
-knot memory profile anchor_architect
-knot memory profile compute_worker
-knot memory profile handheld_controller
-```
+## 2. Inspecting Role Profiles
+Agents and operators inspect the profile markdown and JSON definitions directly within this skill directory:
 
-```python
-from core.memory.profiles import get_profile
-
-profile = get_profile("compute_worker")
-print(profile["system_prompt"])
-```
+- Markdown specifications: `runtime/skills/hardware-profiles/<role>.md`
+  - `anchor_architect.md`
+  - `compute_worker.md`
+  - `handheld_controller.md`
+- JSON specifications: `runtime/skills/hardware-profiles/<role>.json`

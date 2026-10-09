@@ -20,7 +20,6 @@ source "$KNOT_ROOT/core/modules/doctor.sh"
 source "$KNOT_ROOT/core/modules/antigravity.sh"
 source "$KNOT_ROOT/core/modules/auth.sh"
 source "$KNOT_ROOT/core/modules/hub.sh"
-source "$KNOT_ROOT/core/modules/memory.sh"
 source "$KNOT_ROOT/core/modules/shutdown.sh"
 source "$KNOT_ROOT/core/modules/topology.sh"
 source "$KNOT_ROOT/core/modules/swarm_sync.sh"
@@ -927,13 +926,9 @@ cmd_doctor() {
   fi
 }
 
-cmd_repair() {
-  doctor_repair "$@"
-}
-
 cmd_council() {
   if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-    echo "Usage: knot council <start|resume|status|reply|list|attach|reconcile|steer|challenge|db|board|heal|copy|clean|kill|audit|sync> [options]"
+    echo "Usage: knot council <start|resume|status|reply|list|attach|reconcile|steer|db|board|heal|copy|clean|kill|audit|sync> [options]"
     return 0
   fi
   local action="${1:-start}"
@@ -951,18 +946,17 @@ cmd_council() {
     clean) council_clean "$@" ;;
     kill) council_kill "$@" ;;
     steer) council_steer "$@" ;;
-    challenge) council_challenge "$@" ;;
     db) council_db "$@" ;;
     board|live|viewer) council_board "$@" ;;
     heal) council_heal "$@" ;;
     audit) bash "$KNOT_ROOT/runtime/skills/swarm-council/scripts/audit_tools.sh" "$@" ;;
     sync) bash "$KNOT_ROOT/runtime/skills/swarm-council/scripts/project_sync.sh" "$@" ;;
     -h|--help)
-      echo "Usage: knot council <start|resume|status|reply|list|attach|reconcile|steer|challenge|db|board|heal|copy|clean|kill|audit|sync> [options]"
+      echo "Usage: knot council <start|resume|status|reply|list|attach|reconcile|steer|db|board|heal|copy|clean|kill|audit|sync> [options]"
       return 0
       ;;
     *)
-      echo "Usage: knot council <start|resume|status|reply|list|attach|reconcile|steer|challenge|db|board|heal|copy|clean|kill|audit|sync> [options]" >&2
+      echo "Usage: knot council <start|resume|status|reply|list|attach|reconcile|steer|db|board|heal|copy|clean|kill|audit|sync> [options]" >&2
       return 1
       ;;
   esac
@@ -972,9 +966,13 @@ cmd_color() {
   python3 "$KNOT_ROOT/core/palette.py" "$@"
 }
 
+cmd_quota() {
+  antigravity_swarm_quota "$@"
+}
+
 cmd_swarm() {
   if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-    echo "Usage: knot swarm <status|quota [node|--all]|auth [node|--gui]|color [node]|test [node|--all]|exec <node> \"<prompt>\"|wave <wave_id> [--with-ladder]|switch <swarm_id>>"
+    echo "Usage: knot swarm <status|auth [options]|wave <wave_id> [--with-ladder]|switch <swarm_id>>"
     return 0
   fi
   local action="${1:-status}"
@@ -1074,31 +1072,8 @@ cmd_swarm() {
     status)
       antigravity_swarm_status
       ;;
-    quota)
-      antigravity_swarm_quota "$@"
-      ;;
-    test)
-      antigravity_swarm_test "$@"
-      ;;
-    exec)
-      if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-        echo "Usage: knot swarm exec <node> \"<prompt>\" [extra_flags]"
-        return 0
-      fi
-      if [ $# -lt 2 ]; then
-        knot_log_err "Usage: knot swarm exec <node> \"<prompt>\" [extra_flags]"
-        return 1
-      fi
-      local target="$1"
-      local prompt="$2"
-      shift 2
-      antigravity_exec_node "$target" "$prompt" "$@"
-      ;;
     auth)
-      antigravity_swarm_auth "$@"
-      ;;
-    color|colors|palette)
-      cmd_color "$@"
+      cmd_auth "$@"
       ;;
     wave)
       if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
@@ -1171,11 +1146,11 @@ EOF_PLAN
       fi
       ;;
     -h|--help)
-      echo "Usage: knot swarm <status|quota [node|--all]|auth [node|--gui]|color [node]|test [node|--all]|exec <node> \"<prompt>\"|wave <wave_id> [--with-ladder]|switch <swarm_id>>"
+      echo "Usage: knot swarm <status|auth [options]|wave <wave_id> [--with-ladder]|switch <swarm_id>>"
       return 0
       ;;
     *)
-      echo "Usage: knot swarm <status|quota [node|--all]|auth [node|--gui]|color [node]|test [node|--all]|exec <node> \"<prompt>\"|wave <wave_id> [--with-ladder]|switch <swarm_id>>" >&2
+      echo "Usage: knot swarm <status|auth [options]|wave <wave_id> [--with-ladder]|switch <swarm_id>>" >&2
       return 1
       ;;
   esac
@@ -1184,7 +1159,7 @@ EOF_PLAN
 
 cmd_kdeconnect() {
   if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-    echo "Usage: knot kdeconnect <status [--all]|sync [--all]|pair [<node_id>|--all]|reconcile|vmon <status|start|stop>|share --target <node> [<payload>]|sync-clipboard [--all|<node>]|test-clipboard [--all|<node>]|prune-stale>"
+    echo "Usage: knot kdeconnect <status [--all]|sync [--all]|pair [<node_id>|--all]|reconcile|share --target <node> [<payload>]|sync-clipboard [--all|<node>]|test-clipboard [--all|<node>]|prune-stale>"
     return 0
   fi
   local action="${1:-status}"
@@ -1232,38 +1207,14 @@ cmd_kdeconnect() {
       kdeconnect_set_clipboard "$@"
       ;;
     vmon|virtual-monitor)
-      if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-        echo "Usage: knot kdeconnect vmon <status [<node>]|start <node>|stop [<node>]>"
-        return 0
-      fi
-      local vmon_action="${1:-status}"
-      [ $# -gt 0 ] && shift
-      case "$vmon_action" in
-        status)
-          kdeconnect_vmon_status "$@"
-          ;;
-        start)
-          kdeconnect_vmon_start "$@"
-          ;;
-        stop)
-          kdeconnect_vmon_stop "$@"
-          ;;
-        -h|--help)
-          echo "Usage: knot kdeconnect vmon <status [<node>]|start <node>|stop [<node>]>"
-          return 0
-          ;;
-        *)
-          echo "Usage: knot kdeconnect vmon <status [<node>]|start <node>|stop [<node>]>" >&2
-          return 1
-          ;;
-      esac
+      cmd_display vmon "$@"
       ;;
     -h|--help)
-      echo "Usage: knot kdeconnect <status [--all]|sync [--all]|pair [<node_id>|--all]|reconcile|vmon <status|start|stop>|share --target <node> [<payload>]|sync-clipboard [--all|<node>]|test-clipboard [--all|<node>]|prune-stale>"
+      echo "Usage: knot kdeconnect <status [--all]|sync [--all]|pair [<node_id>|--all]|reconcile|share --target <node> [<payload>]|sync-clipboard [--all|<node>]|test-clipboard [--all|<node>]|prune-stale>"
       return 0
       ;;
     *)
-      echo "Usage: knot kdeconnect <status [--all]|sync [--all]|pair [<node_id>|--all]|reconcile|vmon <status|start|stop>|share --target <node> [<payload>]|sync-clipboard [--all|<node>]|test-clipboard [--all|<node>]|prune-stale>" >&2
+      echo "Usage: knot kdeconnect <status [--all]|sync [--all]|pair [<node_id>|--all]|reconcile|share --target <node> [<payload>]|sync-clipboard [--all|<node>]|test-clipboard [--all|<node>]|prune-stale>" >&2
       return 1
       ;;
   esac
@@ -2346,18 +2297,6 @@ case "${1:-}" in
     shift
     cmd_screen "$@"
     ;;
-  unlock)
-    shift
-    screen_unlock "$@"
-    ;;
-  lock)
-    shift
-    screen_lock "$@"
-    ;;
-  login)
-    shift
-    screen_login "$@"
-    ;;
   autologin)
     shift
     cmd_autologin "$@"
@@ -2384,7 +2323,7 @@ case "${1:-}" in
     ;;
   quota)
     shift
-    cmd_swarm quota "$@"
+    cmd_quota "$@"
     ;;
   auth)
     shift
@@ -2406,53 +2345,21 @@ case "${1:-}" in
     shift
     cmd_project "$@"
     ;;
-  chat)
-    shift
-    cmd_chat "$@"
-    ;;
-  artifact)
-    shift
-    cmd_artifact "$@"
-    ;;
-  sleep|power)
+  sleep)
     shift
     cmd_sleep "$@"
     ;;
-  kafe|cockpit|web)
+  kafe)
     shift
     cmd_web "$@"
-    ;;
-  memory)
-    shift
-    cmd_memory "$@"
     ;;
   doctor)
     shift
     cmd_doctor "$@"
     ;;
-  repair)
-    shift
-    cmd_repair "$@"
-    ;;
-  restart)
-    shift
-    if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-      echo "Usage: knot restart [kvm]"
-      exit 0
-    elif [ "${1:-}" = "kvm" ] || [ -z "${1:-}" ]; then
-      cmd_kvm restart
-    else
-      knot_log_err "Unknown restart target: $1"
-      exit 1
-    fi
-    ;;
   shutdown)
     shift
     cmd_shutdown "$@"
-    ;;
-  reboot)
-    shift
-    cmd_shutdown --reboot "$@"
     ;;
   topology)
     shift
@@ -2470,41 +2377,31 @@ case "${1:-}" in
     echo -e "${C_BOLD}Knot - Multi-Device Mesh Orchestrator${C_RESET}"
     echo "Usage:"
     echo "  knot update [--all|<node_id>] [--dev] Update Knot binaries & core modules (or dev git pull)"
-    echo "  knot topology [show|refresh]  Visual multi-screen spatial layout & photo refresh"
+    echo "  knot topology [show|align-internal] Visual multi-screen spatial layout"
     echo "  knot onboard [node_id]        Enroll current device into the mesh"
     echo "  knot sync [--all | <node_id>] [--dev] Reconcile keys, configs, layout, or heal dev drift"
     echo "  knot resolve <node_id> [port] Resolve active IP across 3 tiers"
     echo "  knot status                   Show live status of all mesh nodes"
     echo "  knot ledger generate [--json] Deterministic machine-readable cluster health ledger"
-    echo "  knot council <start|resume|status|reply|list|attach|reconcile|steer|challenge|db|board|heal|copy|clean|kill|audit|sync> Out-of-band multi-agent swarm coordination"
-    echo "  knot swarm [status|quota|test|exec|auth] Manage Antigravity AI agents across the mesh"
+    echo "  knot council <start|resume|status|reply|list|attach|reconcile|steer|db|board|heal|copy|clean|kill|audit|sync> Out-of-band multi-agent swarm coordination"
+    echo "  knot swarm [status|auth|wave|switch] Manage Antigravity AI agents across the mesh"
     echo "  knot quota [node|--all]       Show real-time 5h & weekly model quota limits"
     echo "  knot auth [<node_id>|--all] <login|import|list|status|switch|remove|test-lock> Manage profiles & authentication"
-    echo "  knot memory [store|recall|map|promote|relate|test] Manage Cognitive Memory Palace"
     echo "  knot hub <start|stop|restart|status|logs> Manage Blackboard Hub daemon"
     echo "  knot agent <start|stop|restart|status|logs> Manage Worker Agent daemon"
     echo "  knot task <post|list|batch|get|wait|watch> Manage Linda Tuplespace tasks"
-    echo "  knot project <list|get|sync|worktree> Manage native Antigravity multi-folder projects"
+    echo "  knot project <list|get>       Manage native Antigravity multi-folder projects"
     echo "  knot worktree <add|remove|list|normalize|provision|rebase-mesh> Cross-node git worktrees & parallel landing arbiter"
-    echo "  knot chat <channels|create|post|read> Manage Swarm Konversations channels"
-    echo "  knot artifact <list|lease|release|upload|pull> Manage Swarm Artifact lifecycle & leases"
     echo "  knot sleep <status|prevent|allow> Enforce wholesale prevent-sleep on AC power"
     echo "  knot kafe [open|dev|build]    Boot / open Knot Kommand Kafe cockpit"
-    echo "  knot web [dev|build|install]  Manage React & @assistant-ui Web Cockpit"
     echo "  knot doctor [node|--all]      Diagnose mesh, KVM, and portal health"
-    echo "  knot repair [node|--all]      Auto-repair KVM dropout and mesh state"
-    echo "  knot restart [kvm]            Restart software KVM or mesh services"
     echo "  knot shutdown [target] [opt]  Graceful swarm-wide shutdown or reboot (--all, -d, -r, -c)"
-    echo "  knot reboot [target] [opt]    Graceful swarm-wide reboot alias"
     echo "  knot exec [-P] <target|--all> <cmd> Run commands across mesh nodes (supports -P/--parallel)"
     echo "  knot socket <status|cleanup>  Manage OpenSSH ControlMaster multiplexing sockets"
     echo "  knot kvm <restart|status>     Manage software KVM across the mesh"
     echo "  knot screen <status|unlock|lock|login> Manage screen lock/login states"
-    echo "  knot unlock                   Convenience alias to unlock current screen"
-    echo "  knot lock                     Convenience alias to lock current screen"
-    echo "  knot login                    Convenience alias to auto-login display manager"
     echo "  knot autologin [status|check|doctor|migrate-dm|local|reconcile|fix-kwallet|purge-stale|configure-timer] Manage auto-login"
-    echo "  knot kdeconnect <status|sync|pair|reconcile|vmon|share|sync-clipboard|test-clipboard|prune-stale> Manage KDE Connect mesh clipboard & virtual displays"
+    echo "  knot kdeconnect <status|sync|pair|reconcile|share|sync-clipboard|test-clipboard|prune-stale> Manage KDE Connect mesh clipboard & virtual displays"
     echo "  knot display <status|extend|stop|launch|capture-fleet> Manage Wayland cockpits & headless fleet captures"
     echo "  knot mcp <gateway|sync|status> Manage Model Context Protocol (MCP) server & gateway"
     echo "  knot color [get|set|list]     Manage terminal colors and node palette"

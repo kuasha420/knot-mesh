@@ -48,15 +48,10 @@ fi
 if [ "$INTERACTIVE" != "1" ] && [ "$INTERACTIVE" != "true" ]; then
   echo "==> Staging prompt files and launchers across mesh..."
   pack=""
-  opening_node=""
   auth_profile=""
   if [ -f "$MISSIONS_DIR/meta.json" ]; then
     pack="$(jq -r '.pack // ""' "$MISSIONS_DIR/meta.json")"
-    opening_node="$(jq -r '.opening_node // .ring[0] // ""' "$MISSIONS_DIR/meta.json")"
     auth_profile="$(jq -r '.auth_profile // empty' "$MISSIONS_DIR/meta.json")"
-  fi
-  if [ -z "$opening_node" ]; then
-    opening_node="$LOCAL_NODE"
   fi
 
   resolved_hub="${KNOT_HUB_URL:-}"
@@ -84,67 +79,7 @@ if [ "$INTERACTIVE" != "1" ] && [ "$INTERACTIVE" != "true" ]; then
     node_id="$(basename "$pfile" | sed 's/_prompt.md//')"
     
     launcher_script="$MISSIONS_DIR/${node_id}_launch.sh"
-    if [ "$pack" = "tournament" ] && [ "$node_id" != "$opening_node" ]; then
-      cat << 'EOF_LAUNCH' > "$launcher_script"
-#!/usr/bin/env bash
-trap '' HUP
-export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:$PATH"
-export KNOT_NODE_ID="NODE_ID_PLACEHOLDER"
-export KNOT_RUN_ID="RUN_ID_PLACEHOLDER"
-export KNOT_COUNCIL_RUN_ID="RUN_ID_PLACEHOLDER"
-export KNOT_HUB_URL="HUB_URL_PLACEHOLDER"
-export KNOT_MESH_ANCHOR="ANCHOR_PLACEHOLDER"
-AUTH_PROFILE_PLACEHOLDER
-PROJECT_NAME="PROJECT_PLACEHOLDER"
 
-PROJECT_DIR="$(python3 -c '
-import sys, os, glob, json
-home = os.path.expanduser("~")
-pname = sys.argv[1].lower() if len(sys.argv) > 1 else ""
-pdir = os.path.join(home, ".gemini/config/projects")
-res = ""
-if os.path.isdir(pdir):
-    for f in glob.glob(os.path.join(pdir, "*.json")):
-        try:
-            with open(f) as jf:
-                d = json.load(jf)
-            if d.get("name", "").lower() == pname or d.get("id", "").lower() == pname:
-                for r in d.get("projectResources", {}).get("resources", []):
-                    u = r.get("gitFolder", {}).get("folderUri", "")
-                    if u.startswith("file://"):
-                        p = u[7:].rstrip("/")
-                        if os.path.isdir(p):
-                            res = p; break
-                        b = os.path.basename(p)
-                        for c in [os.path.join(home, "Dev", b), os.path.join(home, b), os.path.join(home, ".local/share", b)]:
-                            if os.path.isdir(c):
-                                res = c; break
-        except Exception as _err:
-            sys.stderr.write(f"Notice: [deliver] Failed reading project {f}: {_err}\n")
-if not res and pname and pname not in (".", "./"):
-    for c in [os.path.join(home, "Dev", pname), os.path.join(home, pname), os.path.join(home, ".local/share", pname)]:
-        if os.path.isdir(c):
-            res = c; break
-print(res or os.getcwd())
-' "$PROJECT_NAME")"
-
-if [ -d "$PROJECT_DIR" ]; then
-  cd "$PROJECT_DIR"
-fi
-echo -e "\033[1;36m╔══════════════════════════════════════════════════════════════════════╗\033[0m"
-echo -e "\033[1;36m║\033[0m  🛰️  \033[1mKnot Swarm Tournament Rally Player: @[NODE_ID_PLACEHOLDER]\033[0m"
-echo -e "\033[1;36m║\033[0m  Project:   \033[33mPROJECT_PLACEHOLDER\033[0m"
-echo -e "\033[1;36m║\033[0m  Registry:  \033[35mknot://mesh/council/RUN_ID_PLACEHOLDER\033[0m"
-echo -e "\033[1;36m║\033[0m  Mode:      \033[32mZero-Token Standby (Awaiting challenge volley)\033[0m"
-echo -e "\033[1;36m║\033[0m  Commands:  \033[32mknot council reply\033[0m | \033[32mknot council steer\033[0m"
-echo -e "\033[1;36m╚══════════════════════════════════════════════════════════════════════╝\033[0m"
-echo ""
-if [ -n "${KNOT_HUB_URL:-}" ] && command -v curl >/dev/null; then
-  curl -k -sS -o /dev/null -X POST "$KNOT_HUB_URL/strand/event" -H "Content-Type: application/json" -d "{\"run_id\":\"RUN_ID_PLACEHOLDER\",\"node_id\":\"NODE_ID_PLACEHOLDER\",\"event\":\"TURN_START\",\"details\":{\"mode\":\"standby\"}}" 2>&1 || echo "Notice: event bus report error" >&2
-fi
-exec agy --project "$PROJECT_NAME" --dangerously-skip-permissions
-EOF_LAUNCH
-    else
       cat << 'EOF_LAUNCH' > "$launcher_script"
 #!/usr/bin/env bash
 trap '' HUP
@@ -203,7 +138,6 @@ else
   exec agy --project "$PROJECT_NAME" --dangerously-skip-permissions -i "$(< "$PROMPT_FILE")"
 fi
 EOF_LAUNCH
-    fi
     sed -i "s|RUN_ID_PLACEHOLDER|$RUN_ID|g" "$launcher_script"
     sed -i "s|PROJECT_PLACEHOLDER|$PROJECT|g" "$launcher_script"
     sed -i "s|NODE_ID_PLACEHOLDER|$node_id|g" "$launcher_script"

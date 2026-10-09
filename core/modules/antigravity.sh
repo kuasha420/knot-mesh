@@ -88,29 +88,6 @@ antigravity_get_version() {
   fi
 }
 
-antigravity_ensure_shims() {
-  local shims_dir="$HOME/.local/share/knot/shims"
-  mkdir -p "$shims_dir"
-  local binaries=(
-    xdg-open kde-open kde-open5 kde-open6
-    kioexec kfmclient gio sensible-browser
-    x-www-browser chromium google-chrome-stable
-    google-chrome brave firefox
-  )
-  for b in "${binaries[@]}"; do
-    local p="$shims_dir/$b"
-    if [ ! -x "$p" ]; then
-      cat << 'EOF' > "$p"
-#!/bin/sh
-# Knot Headless Shim: Exit immediately to prevent GUI spawns
-exit 0
-EOF
-      chmod +x "$p"
-    fi
-  done
-  echo "$shims_dir"
-}
-
 # Run agy command inside local user systemd slice to ensure DBus & KWallet access
 antigravity_run_local_systemd() {
   local agy_path
@@ -120,12 +97,9 @@ antigravity_run_local_systemd() {
     return 1
   fi
 
-  local shims_dir
-  shims_dir="$(antigravity_ensure_shims)"
-
   if command -v systemd-run >/dev/null; then
     systemd-run --user --pipe \
-      --setenv="PATH=$shims_dir:/usr/local/bin:/usr/bin:/bin" \
+      --setenv="PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" \
       --setenv=BROWSER=/bin/true \
       --setenv=DE=generic \
       --setenv=XDG_CURRENT_DESKTOP="" \
@@ -133,7 +107,7 @@ antigravity_run_local_systemd() {
       --setenv=KDE_SESSION_VERSION="" \
       "$agy_path" "$@"
   else
-    PATH="$shims_dir:$PATH" BROWSER=/bin/true DE=generic XDG_CURRENT_DESKTOP="" "$agy_path" "$@"
+    PATH="$HOME/.local/bin:$PATH" BROWSER=/bin/true DE=generic XDG_CURRENT_DESKTOP="" "$agy_path" "$@"
   fi
 }
 
@@ -326,7 +300,7 @@ antigravity_exec_node() {
     # Dispatch remotely into the target user's graphical session slice
     ssh -o BatchMode=yes -o ConnectTimeout=8 -p "$port" "$target" \
       "systemd-run --user --pipe \
-         --setenv=\"PATH=\$HOME/.local/bin:\$HOME/.local/share/knot/shims:/usr/local/bin:/usr/bin:/bin\" \
+         --setenv=\"PATH=\$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin\" \
          --setenv=BROWSER=/bin/true \
          --setenv=DE=generic \
          --setenv=XDG_CURRENT_DESKTOP=\"\" \
@@ -501,7 +475,7 @@ antigravity_swarm_status() {
         fi
       else
         local remote_ver="" rv_rc=0
-        if remote_ver="$(timeout 5 "$KNOT_ROOT/bin/knot" exec "$id" "export PATH=\"\$HOME/.local/bin:\$HOME/.local/share/knot/shims:/usr/local/bin:/usr/bin:/bin:\$PATH\"; agy --version" 2>&1)"; then
+        if remote_ver="$(timeout 5 "$KNOT_ROOT/bin/knot" exec "$id" "export PATH=\"\$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:\$PATH\"; agy --version" 2>&1)"; then
           local parsed_ver
           parsed_ver="$(echo "$remote_ver" | tr -d '\r' | tail -n1 | awk '{print $NF}')"
           if [ -n "$parsed_ver" ] && [[ "$parsed_ver" =~ ^[0-9] ]]; then
@@ -560,7 +534,7 @@ antigravity_swarm_status() {
             latency="<10ms (hub)"
           else
             local remote_probe="" rp_rc=0
-            remote_probe="$(timeout 20 "$KNOT_ROOT/bin/knot" exec "$id" "systemd-run --user --pipe --setenv=\"PATH=\$HOME/.local/bin:\$HOME/.local/share/knot/shims:/usr/local/bin:/usr/bin:/bin\" --setenv=BROWSER=/bin/true --setenv=DE=generic --setenv=XDG_CURRENT_DESKTOP=\"\" --setenv=KDE_FULL_SESSION=\"\" --setenv=KDE_SESSION_VERSION=\"\" agy -p 'ping' --output-format json" 2>&1)" || rp_rc=$?
+            remote_probe="$(timeout 20 "$KNOT_ROOT/bin/knot" exec "$id" "systemd-run --user --pipe --setenv=\"PATH=\$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin\" --setenv=BROWSER=/bin/true --setenv=DE=generic --setenv=XDG_CURRENT_DESKTOP=\"\" --setenv=KDE_FULL_SESSION=\"\" --setenv=KDE_SESSION_VERSION=\"\" agy -p 'ping' --output-format json" 2>&1)" || rp_rc=$?
             if [ $rp_rc -eq 0 ] && echo "$remote_probe" | grep -q '"status":[[:space:]]*"SUCCESS"'; then
               auth_status="${C_GREEN}AUTHENTICATED${C_RESET}"
               local dur
@@ -697,7 +671,7 @@ antigravity_swarm_quota() {
     exec python3 "$KNOT_ROOT/core/hub/limit_visualizer.py" "$@"
   fi
 
-  python3 "$KNOT_ROOT/core/hub/quota_view.py" "$target" "$hub_url"
+  python3 "$KNOT_ROOT/core/hub/limit_visualizer.py" --render-once --hub-url "$hub_url"
 }
 
 
@@ -732,129 +706,3 @@ antigravity_get_my_node() {
   echo "$my_host"
 }
 
-# Interactive login and authentication for Antigravity CLI across mesh nodes
-antigravity_swarm_auth() {
-  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-    echo "Usage: knot auth [node_id|sync] [--gui]"
-    echo ""
-    echo "Authenticate or refresh Antigravity CLI Google login on mesh nodes."
-    echo ""
-    echo "Options:"
-    echo "  [node_id]   Target node ('desktop', 'laptop', 'steamdeck', or local default)"
-    echo "  sync        Synchronize tokens from KWallet/Secret Service to ~/.gemini/antigravity-cli/"
-    echo "  --gui       Launch Konsole directly on the target machine's graphical screen"
-    echo ""
-    echo "Examples:"
-    echo "  knot auth sync              Sync local token file from KWallet/Secret Service"
-    echo "  knot auth sync --all        Sync token files across all mesh nodes"
-    echo "  knot auth steamdeck         Interactive terminal login via SSH"
-    echo "  knot auth laptop            Interactive terminal login via SSH"
-    echo "  knot auth steamdeck --gui   Open terminal window on Steam Deck display"
-    return 0
-  fi
-
-  if [[ "${1:-}" == -* ]] && [ "${1:-}" != "--gui" ]; then
-    echo "Error: Unknown auth action or option '$1'" >&2
-    echo "Run 'knot auth --help' for usage." >&2
-    return 1
-  fi
-
-  if [ "${1:-}" = "sync" ]; then
-    shift
-    if [ "${1:-}" = "--all" ]; then
-      knot_log_info "Synchronizing Antigravity credentials across all mesh nodes..."
-      if ! antigravity_sync_credentials; then
-        knot_log_warn "Local Antigravity credentials could not be synchronized."
-      fi
-      local nodes_dirs=()
-      local primary_dir=""
-      if primary_dir="$(knot_get_nodes_dir)" && [ -d "$primary_dir" ]; then
-        nodes_dirs+=("$primary_dir")
-      fi
-      local user_home
-      user_home="$(knot_detect_user_home)"
-      for d in "$user_home/.config/knot/swarms"/*/nodes /etc/knot/swarms.d/*/nodes; do
-        [ -d "$d" ] || continue
-        if [[ ! " ${nodes_dirs[*]} " =~ " ${d} " ]]; then
-          nodes_dirs+=("$d")
-        fi
-      done
-      local seen_nodes=()
-      for ndir in "${nodes_dirs[@]}"; do
-        for manifest in "$ndir/"*.json; do
-          [ -e "$manifest" ] || continue
-          local id host
-          id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-          host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
-          [ -n "$id" ] || continue
-          if [[ " ${seen_nodes[*]:-} " =~ " ${id} " ]]; then continue; fi
-          seen_nodes+=("$id")
-          if [ "$host" != "$(knot_detect_hostname)" ] && [ "$id" != "$(knot_detect_hostname)" ]; then
-            local sync_err="" sync_rc=0
-            sync_err="$(ssh -o BatchMode=yes -o ConnectTimeout=4 "$id" "knot auth sync" 2>&1)" || sync_rc=$?
-            if [ $sync_rc -ne 0 ]; then
-              knot_log_warn "Failed to sync credentials to node '$id' (exit code $sync_rc): $sync_err"
-            fi
-          fi
-        done
-      done
-      knot_log_ok "Credential sync complete across swarm."
-      return 0
-    else
-      if ! antigravity_sync_credentials; then
-        knot_log_warn "Local Antigravity credentials could not be synchronized."
-      fi
-      local r_out=""
-      if ! r_out="$(systemctl --user restart knot-agent.service 2>&1)"; then
-        knot_log_warn "Notice: knot-agent.service not running or could not restart: $r_out"
-      fi
-      knot_log_ok "Local Antigravity credentials synchronized."
-      return 0
-    fi
-  fi
-
-  local my_node
-  my_node="$(antigravity_get_my_node)"
-  local target="${1:-$my_node}"
-  local gui_mode=0
-
-  if [ "$target" = "--gui" ]; then
-    gui_mode=1
-    target="${2:-$my_node}"
-  elif [ "${2:-}" = "--gui" ]; then
-    gui_mode=1
-  fi
-
-  if [ "$target" = "local" ] || [ "$target" = "$my_node" ]; then
-    knot_log_info "Launching interactive Antigravity CLI login on local node ($my_node)..."
-    agy
-    if ! antigravity_sync_credentials; then
-      knot_log_warn "Local Antigravity credentials could not be synchronized."
-    fi
-    local r_out=""
-    if ! r_out="$(systemctl --user restart knot-agent.service 2>&1)"; then
-      knot_log_warn "Notice: knot-agent.service not running or restart failed: $r_out"
-    fi
-    knot_log_ok "Authentication complete and credentials synced."
-    return 0
-  fi
-
-  if [ $gui_mode -eq 1 ]; then
-    knot_log_info "Opening terminal on '$target' display for Antigravity login..."
-    local uid="1000"
-    if [ "$target" = "steamdeck" ]; then
-      uid="1001"
-    fi
-    local log_file="/tmp/knot_konsole_agy.log"
-    ssh "$target" "WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/$uid nohup konsole -e agy > '$log_file' 2>&1 &"
-    knot_log_ok "Konsole opened on $target screen (logging to $log_file). Follow the on-screen prompt to log in."
-    return 0
-  fi
-
-  knot_log_info "Connecting to '$target' for interactive Antigravity login..."
-  echo -e "  ${C_YELLOW}1.${C_RESET} Select ${C_BOLD}1. Google OAuth${C_RESET} using Enter."
-  echo -e "  ${C_YELLOW}2.${C_RESET} Click or copy the displayed URL into your browser to log in."
-  echo -e "  ${C_YELLOW}3.${C_RESET} Copy the authorization code and paste it right into the prompt below."
-  echo ""
-  ssh -tt "$target" "agy && knot auth sync"
-}
