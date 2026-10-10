@@ -121,7 +121,7 @@ cat << 'EOF' > "$HOME/.config/knot/swarms/testswarm/nodes/peer1.json"
 {
   "id": "peer1",
   "hostname": "peer1-host",
-  "user": "kuasha",
+  "user": "testuser",
   "port": 22,
   "ip_hint": "192.168.1.101"
 }

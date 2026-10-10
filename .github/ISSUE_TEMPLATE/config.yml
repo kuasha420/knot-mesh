@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Knot Mesh Documentation
+    url: https://github.com/kuasha420/knot-mesh/tree/main/docs
+    about: Read the architectural documentation and operational guides.

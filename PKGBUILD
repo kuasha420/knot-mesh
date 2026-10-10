@@ -1,6 +1,6 @@
 # Maintainer: Arafat Zahan <kuasha420>
 pkgname=knot-mesh
-pkgver=1.0.0.rc5
+pkgver=1.0.0.rc6
 pkgrel=1
 pkgdesc="Distributed workspace mesh for Arch Linux / KDE Plasma 6 Wayland"
 arch=('any')
@@ -30,14 +30,14 @@ optdepends=(
     'ncurses: Terminal terminfo compiler and infocmp database tools'
     'kitty-terminfo: Terminal terminfo definitions for kitty remote control'
 )
-source=("knot-mesh-${pkgver}.tar.gz::https://github.com/kuasha420/knot-mesh/archive/refs/tags/v1.0.0-rc5.tar.gz")
+source=("knot-mesh-${pkgver}.tar.gz::https://github.com/kuasha420/knot-mesh/archive/refs/tags/v1.0.0-rc6.tar.gz")
 sha256sums=('SKIP')
 
 package() {
     if [ -d "${srcdir}/${pkgname}-${pkgver}" ]; then
         cd "${srcdir}/${pkgname}-${pkgver}"
-    elif [ -d "${srcdir}/${pkgname}-1.0.0-rc5" ]; then
-        cd "${srcdir}/${pkgname}-1.0.0-rc5"
+    elif [ -d "${srcdir}/${pkgname}-1.0.0-rc6" ]; then
+        cd "${srcdir}/${pkgname}-1.0.0-rc6"
     else
         cd "${srcdir}"
     fi

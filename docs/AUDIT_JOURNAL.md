@@ -1,6 +1,6 @@
 # KNOT MESH SYSTEMATIC CODEBASE AUDIT & HARDENING JOURNAL
 **Authoritative Engineering Audit & Production Transformation Log**  
-*Document Version:* `1.0.0` | *Audit Baseline Commit:* [`218d86c`](file:///home/kuasha/Dev/knot-mesh) (`origin/main`) | *Local Branch:* `backup-local-main` ([`ff6d6cc`](file:///home/kuasha/Dev/knot-mesh))  
+*Document Version:* `1.0.0` | *Audit Baseline Commit:* [`218d86c`](../) (`origin/main`) | *Local Branch:* `backup-local-main` ([`ff6d6cc`](../))  
 *Governance:* Universal PSL Gold Standard & Knot Mesh Engineering Charter (`AGENTS.md`)
 
 ---
@@ -16,10 +16,10 @@ Transform Knot Mesh from an AI-assisted rapid prototype and proof-of-concept int
 - **Current HEAD**: `218d86c` (`fix(wave3): harden strand event bus, subshell env propagation, terminfo and mirror sync`).
 - **Origin Alignment**: The local tracking branch `main` is fully synchronized with `origin/main`.
 - **Preserved Local Commits**: Four pre-existing local commits that diverged before upstream Wave 0–3 pushes have been isolated and preserved on branch `backup-local-main`:
-  1. [`ff6d6cc`](file:///home/kuasha/Dev/knot-mesh): `fix(council): add double-return submission key release in council_steer`
-  2. [`46133a7`](file:///home/kuasha/Dev/knot-mesh): `fix(council): default online nodes and ensure robust remote confluence staging`
-  3. [`287a8c6`](file:///home/kuasha/Dev/knot-mesh): `feat(swarm): harden remote display routing, board argument resilience, and quota visualizer`
-  4. [`b1dcbd3`](file:///home/kuasha/Dev/knot-mesh): `feat(swarm): harmonize multi-node orchestration, dynamic capabilities, and display decoupling`
+  1. [`ff6d6cc`](../): `fix(council): add double-return submission key release in council_steer`
+  2. [`46133a7`](../): `fix(council): default online nodes and ensure robust remote confluence staging`
+  3. [`287a8c6`](../): `feat(swarm): harden remote display routing, board argument resilience, and quota visualizer`
+  4. [`b1dcbd3`](../): `feat(swarm): harmonize multi-node orchestration, dynamic capabilities, and display decoupling`
   *Critical Action:* These 4 commits contain essential interactive terminal and steering fixes that must be rebased onto `main` during Phase 1 hardening.
 
 ---
@@ -45,50 +45,50 @@ Rule 5: Stop & Inquire        WARN      1 subsystem   Fake browser shims killing
 ### 2.1 Rule 1: Zero Error Swallowing & Strict Failure Transparency
 **Verdict: FAILED (24 Hidden Defects Discovered)**
 
-While the repository's native shell audit ([`tests/test_psl_integrity.sh`](file:///home/kuasha/Dev/knot-mesh/tests/test_psl_integrity.sh)) reported `0 defects found` for Bash scripts, a deep empirical scan across all Python code and embedded scripts uncovered extensive error swallowing:
+While the repository's native shell audit ([`tests/test_psl_integrity.sh`](../tests/test_psl_integrity.sh)) reported `0 defects found` for Bash scripts, a deep empirical scan across all Python code and embedded scripts uncovered extensive error swallowing:
 
 1. **Subprocess Pipe Suppression (`stderr=subprocess.DEVNULL` & `stdout=subprocess.DEVNULL`)**:
-   - [`runtime/skills/swarm-council/scripts/project_sync.sh:83, 158, 212, 282, 284, 285, 293, 302, 311, 316, 320, 321`](file:///home/kuasha/Dev/knot-mesh/runtime/skills/swarm-council/scripts/project_sync.sh) (12 occurrences suppressing git and knot CLI failures).
-   - [`runtime/skills/swarm-council/scripts/confluence.py:389-390`](file:///home/kuasha/Dev/knot-mesh/runtime/skills/swarm-council/scripts/confluence.py) (`stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL`).
-   - [`runtime/skills/swarm-council/scripts/gh_discussion.py:179`](file:///home/kuasha/Dev/knot-mesh/runtime/skills/swarm-council/scripts/gh_discussion.py) (`stderr=subprocess.DEVNULL`).
-   - [`runtime/skills/swarm-council/scripts/resolve_project.py:47, 115`](file:///home/kuasha/Dev/knot-mesh/runtime/skills/swarm-council/scripts/resolve_project.py).
-   - [`runtime/skills/swarm-council/scripts/scaffolder.py:85, 120`](file:///home/kuasha/Dev/knot-mesh/runtime/skills/swarm-council/scripts/scaffolder.py).
-   - [`core/hub/tls.py:25`](file:///home/kuasha/Dev/knot-mesh/core/hub/tls.py).
-   - [`core/hub/agent.py:909, 914, 919`](file:///home/kuasha/Dev/knot-mesh/core/hub/agent.py).
+   - [`runtime/skills/swarm-council/scripts/project_sync.sh:83, 158, 212, 282, 284, 285, 293, 302, 311, 316, 320, 321`](../runtime/skills/swarm-council/scripts/project_sync.sh) (12 occurrences suppressing git and knot CLI failures).
+   - [`runtime/skills/swarm-council/scripts/confluence.py:389-390`](../runtime/skills/swarm-council/scripts/confluence.py) (`stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL`).
+   - [`runtime/skills/swarm-council/scripts/gh_discussion.py:179`](../runtime/skills/swarm-council/scripts/gh_discussion.py) (`stderr=subprocess.DEVNULL`).
+   - [`runtime/skills/swarm-council/scripts/resolve_project.py:47, 115`](../runtime/skills/swarm-council/scripts/resolve_project.py).
+   - [`runtime/skills/swarm-council/scripts/scaffolder.py:85, 120`](../runtime/skills/swarm-council/scripts/scaffolder.py).
+   - [`core/hub/tls.py:25`](../core/hub/tls.py).
+   - [`core/hub/agent.py:909, 914, 919`](../core/hub/agent.py).
 
 2. **Silent Exception Swallowing (`except Exception: pass`)**:
-   - [`runtime/skills/swarm-council/scripts/deliver.sh:123, 184`](file:///home/kuasha/Dev/knot-mesh/runtime/skills/swarm-council/scripts/deliver.sh): `except Exception: pass`.
-   - [`core/modules/swarm_sync.sh:372, 386, 465`](file:///home/kuasha/Dev/knot-mesh/core/modules/swarm_sync.sh): `except Exception: pass`.
-   - [`core/modules/display.sh:240, 293`](file:///home/kuasha/Dev/knot-mesh/core/modules/display.sh): `except Exception: pass`.
-   - [`core/modules/telemetry.sh:30, 45`](file:///home/kuasha/Dev/knot-mesh/core/modules/telemetry.sh): `except Exception: pass`.
-   - [`scripts/ping_pong_tournament.py:113, 178, 190, 202`](file:///home/kuasha/Dev/knot-mesh/scripts/ping_pong_tournament.py): `except Exception: pass`.
-   - [`runtime/skills/swarm-council/scripts/project_sync.sh:73, 87, 106, 125, 146, 171, 175, 191, 265, 286, 304, 322`](file:///home/kuasha/Dev/knot-mesh/runtime/skills/swarm-council/scripts/project_sync.sh): 12 instances of bare multi-line `except Exception:\n pass`.
+   - [`runtime/skills/swarm-council/scripts/deliver.sh:123, 184`](../runtime/skills/swarm-council/scripts/deliver.sh): `except Exception: pass`.
+   - [`core/modules/swarm_sync.sh:372, 386, 465`](../core/modules/swarm_sync.sh): `except Exception: pass`.
+   - [`core/modules/display.sh:240, 293`](../core/modules/display.sh): `except Exception: pass`.
+   - [`core/modules/telemetry.sh:30, 45`](../core/modules/telemetry.sh): `except Exception: pass`.
+   - [`scripts/ping_pong_tournament.py:113, 178, 190, 202`](../scripts/ping_pong_tournament.py): `except Exception: pass`.
+   - [`runtime/skills/swarm-council/scripts/project_sync.sh:73, 87, 106, 125, 146, 171, 175, 191, 265, 286, 304, 322`](../runtime/skills/swarm-council/scripts/project_sync.sh): 12 instances of bare multi-line `except Exception:\n pass`.
 
 3. **Flaw in `tests/test_psl_integrity.sh`**:
-   - Line 171 of [`tests/test_psl_integrity.sh`](file:///home/kuasha/Dev/knot-mesh/tests/test_psl_integrity.sh#L171) explicitly excludes the `scripts/` directory: `[os.path.join(knot_root, d) for d in ["bin", "core", "runtime", "tests"]]`.
+   - Line 171 of [`tests/test_psl_integrity.sh`](../tests/test_psl_integrity.sh#L171) explicitly excludes the `scripts/` directory: `[os.path.join(knot_root, d) for d in ["bin", "core", "runtime", "tests"]]`.
    - Line 179 only audits files ending with `.py` or executables starting with `b"python"`. It completely bypasses embedded Python scripts inside `.sh` files (which constitute over 50% of the swallowed exceptions!).
-   - Line 214 of [`tests/test_psl_integrity.sh`](file:///home/kuasha/Dev/knot-mesh/tests/test_psl_integrity.sh#L214) itself contains: `except SyntaxError:\n pass`!
+   - Line 214 of [`tests/test_psl_integrity.sh`](../tests/test_psl_integrity.sh#L214) itself contains: `except SyntaxError:\n pass`!
 
 ### 2.2 Rule 2: Do Not Do the Product's Homework in Tests & Hermetic Isolation
 **Verdict: FAILED (Tests Access Live Network Hardware & Live LLM APIs)**
 
 1. **Non-Hermetic Live Network Calls in Unit Tests**:
-   - [`tests/test_swarm_council.sh:22`](file:///home/kuasha/Dev/knot-mesh/tests/test_swarm_council.sh#L22) invokes `audit_tools.sh`, which parses `knot status` and performs live sequential SSH calls across the physical mesh (`laptop`, `rog-ally`, `steamdeck`).
-   - [`tests/test_node_id_semantics.sh:610`](file:///home/kuasha/Dev/knot-mesh/tests/test_node_id_semantics.sh#L610) invokes `knot exec desktop` on port 4242 across physical network tiers.
+   - [`tests/test_swarm_council.sh:22`](../tests/test_swarm_council.sh#L22) invokes `audit_tools.sh`, which parses `knot status` and performs live sequential SSH calls across the physical mesh (`laptop`, `rog-ally`, `steamdeck`).
+   - [`tests/test_node_id_semantics.sh:610`](../tests/test_node_id_semantics.sh#L610) invokes `knot exec desktop` on port 4242 across physical network tiers.
    - If peer nodes are sleeping or the workstation is offline, test suites hang for up to 30–60 seconds per step awaiting SSH TCP timeouts.
 2. **Live External AI Invocations in Tests**:
-   - [`runtime/skills/swarm-council/scripts/classifier.py`](file:///home/kuasha/Dev/knot-mesh/runtime/skills/swarm-council/scripts/classifier.py) executes live `agy -p` CLI invocations during test runs in [`tests/test_swarm_council.sh:62, 69, 76`](file:///home/kuasha/Dev/knot-mesh/tests/test_swarm_council.sh#L62), each timing out after 3 seconds when offline. Tests must use deterministic hermetic mocks instead of live token-consuming LLMs.
+   - [`runtime/skills/swarm-council/scripts/classifier.py`](../runtime/skills/swarm-council/scripts/classifier.py) executes live `agy -p` CLI invocations during test runs in [`tests/test_swarm_council.sh:62, 69, 76`](../tests/test_swarm_council.sh#L62), each timing out after 3 seconds when offline. Tests must use deterministic hermetic mocks instead of live token-consuming LLMs.
 
 ### 2.3 Rule 3: Complete Package Deliveries & Confidentiality Hygiene
 **Verdict: FAILED (Dynamic Service Generation Writes Machine-Specific Paths)**
 
 Direct violation of `AGENTS.md` Section 6 (*"Public Git Tree: Clean, reproducible, and generic. Zero private IPs, personal usernames, local absolute paths"*):
-- While `systemd/knot-agent.service` and `systemd/knot-hub.service` in the git repository specify `%h/.local/bin/knot-agent` and `%h/.local/bin/knot-hub`, [`core/modules/hub.sh:56, 74`](file:///home/kuasha/Dev/knot-mesh/core/modules/hub.sh#L56) (`hub_ensure_services()`) programmatically overrides user systemd services with unescaped `$KNOT_ROOT` paths:
+- While `systemd/knot-agent.service` and `systemd/knot-hub.service` in the git repository specify `%h/.local/bin/knot-agent` and `%h/.local/bin/knot-hub`, [`core/modules/hub.sh:56, 74`](../core/modules/hub.sh#L56) (`hub_ensure_services()`) programmatically overrides user systemd services with unescaped `$KNOT_ROOT` paths:
   ```bash
   ExecStart=$KNOT_ROOT/core/hub/hub.py
   ExecStart=$KNOT_ROOT/core/hub/agent.py
   ```
-- When `knot hub` or `knot agent` is invoked in local development, it dynamically generates units containing the developer's absolute user path (`/home/kuasha/Dev/knot-mesh/...`), contaminating user configuration and breaking SteamOS immutable read-only filesystem invariants.
+- When `knot hub` or `knot agent` is invoked in local development, it dynamically generates units containing the developer's absolute user path (`/home/knot/Dev/knot-mesh/...`), contaminating user configuration and breaking SteamOS immutable read-only filesystem invariants.
 
 ### 2.4 Rule 4: Zero "Homework" in Verification
 **Verdict: FAILED (2 Empirical Test Failures Discovered in Full Suite Execution)**
@@ -101,7 +101,7 @@ When executing all 29 native test suites sequentially (`task-79`):
    === [Side Quest 1] SteamOS Read-Only Rootfs & User-Space Confinement ===
    FAIL: systemd/knot-agent.service does not use %h/.local/bin
    ```
-   [`tests/test_steamdeck_sidequest.sh:20`](file:///home/kuasha/Dev/knot-mesh/tests/test_steamdeck_sidequest.sh#L20) asserts that all primary service units strictly use `%h/.local/bin`. Once `systemd/` units are restored to repository defaults, `tests/test_steamdeck_sidequest.sh` passes 100% green. The dynamic generator in `core/modules/hub.sh` must be updated to emit `%h/.local/bin/knot-*` to permanently eliminate this regression.
+   [`tests/test_steamdeck_sidequest.sh:20`](../tests/test_steamdeck_sidequest.sh#L20) asserts that all primary service units strictly use `%h/.local/bin`. Once `systemd/` units are restored to repository defaults, `tests/test_steamdeck_sidequest.sh` passes 100% green. The dynamic generator in `core/modules/hub.sh` must be updated to emit `%h/.local/bin/knot-*` to permanently eliminate this regression.
 
 2. **Failure 2: `tests/test_virtual_monitor.sh` (Test 8)**:
    ```bash
@@ -109,7 +109,7 @@ When executing all 29 native test suites sequentially (`task-79`):
      [✗] FAIL: kdeconnect_resolve_device_id failed (1): 
    Total Tests: 20 | Passed: 19 | Failed: 1
    ```
-   [`tests/test_virtual_monitor.sh:163-175`](file:///home/kuasha/Dev/knot-mesh/tests/test_virtual_monitor.sh#L163) calls `kdeconnect_resolve_device_id laptop` without hermetic mocks. Because the host's KDE Connect DBus daemon has devices named `psl-0000`, `devbox`, and `steamdeck-eos` instead of `laptop`, it falls back to SSH (`ssh -o ConnectTimeout=2 laptop kdeconnect-cli --my-id`), which fails or times out. This proves the test suite is non-hermetic and tightly coupled to physical workstation state.
+   [`tests/test_virtual_monitor.sh:163-175`](../tests/test_virtual_monitor.sh#L163) calls `kdeconnect_resolve_device_id laptop` without hermetic mocks. Because the host's KDE Connect DBus daemon has devices named `psl-0000`, `devbox`, and `steamdeck-eos` instead of `laptop`, it falls back to SSH (`ssh -o ConnectTimeout=2 laptop kdeconnect-cli --my-id`), which fails or times out. This proves the test suite is non-hermetic and tightly coupled to physical workstation state.
 
 *Pytest Baseline:* 65 passed in 63.15s.  
 *Web Cockpit Baseline:* TypeScript (`tsc --noEmit`) passes with 0 errors.
@@ -117,42 +117,42 @@ When executing all 29 native test suites sequentially (`task-79`):
 ### 2.5 Rule 5: Stop & Inquire Before Overengineering Workarounds
 **Verdict: WARNING (Synthetic Browser Suppression Shims)**
 
-[`core/modules/antigravity.sh:91-112`](file:///home/kuasha/Dev/knot-mesh/core/modules/antigravity.sh#L91-L112) (`antigravity_ensure_shims`) dynamically synthesizes dummy executable files in `~/.local/share/knot/shims` for `xdg-open`, `firefox`, `chromium`, `google-chrome-stable`, `brave`, `gio`, etc., containing `exit 0` to prevent GUI spawns when running headless agents.  
+[`core/modules/antigravity.sh:91-112`](../core/modules/antigravity.sh#L91-L112) (`antigravity_ensure_shims`) dynamically synthesizes dummy executable files in `~/.local/share/knot/shims` for `xdg-open`, `firefox`, `chromium`, `google-chrome-stable`, `brave`, `gio`, etc., containing `exit 0` to prevent GUI spawns when running headless agents.  
 *Issue:* Instead of cleanly decoupling headless agent daemon processes from the user's graphical session, it hijacks the `$PATH` with synthetic dummy scripts.
 
 ---
 
 ## 3. The CLI User Surface: Inventory & Structural Breakdown
 
-The CLI surface was audited by inspecting [`bin/knot`](file:///home/kuasha/Dev/knot-mesh/bin/knot) (2,465 lines) and auxiliary executables in `bin/`.
+The CLI surface was audited by inspecting [`bin/knot`](../bin/knot) (2,465 lines) and auxiliary executables in `bin/`.
 
 ### 3.1 Top-Level Subcommand Architecture
 The CLI supports **26 top-level subcommands**, but their implementation is architecturally fractured:
 
 | Subcommand | Implementation Location | Sub-Actions / Flags | Defect / Architectural Smell |
 | :--- | :--- | :--- | :--- |
-| `onboard` | [`bin/knot:29-142`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L29) | `[node_id]` | Directly embeds 113 lines in `bin/knot`; does not use `bin/knot-installer`. |
-| `sync` | [`bin/knot:143-337`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L143) | `[--all\|<node>] [--dev] [--force-prod\|--force-dev]` | Monolithic 194 lines in `bin/knot` mixed with `core/modules/swarm_sync.sh`. |
-| `resolve` | [`bin/knot:338-341`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L338) | `<node_id> [port]` | Delegates to `core/resolver.sh`. |
-| `status` | [`bin/knot:342-440`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L342) | None | Embedded awk/curl formatter in `bin/knot`. |
-| `ledger` | [`bin/knot:441-451`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L441) | `generate [--json]` | Delegates to `core/modules/telemetry.sh`. |
-| `exec` | [`bin/knot:452-747`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L452) | `[-P\|--parallel] <node\|--all> <cmd>` | 295 lines in `bin/knot` handling SSH multiplexing, subshells, environment exports. |
-| `socket` | [`bin/knot:748-768`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L748) | `<status\|cleanup>` | OpenSSH ControlMaster socket management. |
-| `kvm` | [`bin/knot:769-896`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L769) | `<restart\|status\|lock\|unlock\|log>` | Deskflow process supervisor embedded in `bin/knot`. |
-| `doctor` | [`bin/knot:897-913`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L897) | `[node\|--all\|local] [--repair]` | Delegates to `core/modules/doctor.sh`. |
-| `repair` | [`bin/knot:914-917`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L914) | `[node\|--all\|local]` | Alias to `doctor --repair`. |
-| `council` | [`bin/knot:918-954`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L918) | 16 subcommands | Delegates to `core/modules/council.sh`. |
-| `color` | [`bin/knot:955-958`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L955) | `[get\|set\|list]` | Delegates to `core/palette.py`. |
-| `swarm` | [`bin/knot:959-1168`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L959) | `status, quota, test, exec, switch` | 209 lines embedded in `bin/knot` mixed with `antigravity.sh`. |
-| `kdeconnect`| [`bin/knot:1169-1255`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L1169)| 9 subcommands | Delegates to `core/modules/kdeconnect.sh`. |
-| `display` | [`bin/knot:1256-1294`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L1256)| `status, extend, stop, launch, capture` | Delegates to `core/modules/display.sh` and `kdeconnect.sh`. |
-| `autologin`| [`bin/knot:1295-1340`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L1295)| 8 subcommands | Delegates to `core/modules/autologin.sh`. |
-| `screen` | [`bin/knot:1341-1375`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L1341)| `status, unlock, lock, login` | Delegates to `autounlock.sh` and `autologin.sh`. |
-| `shutdown` | [`bin/knot:1376-1477`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L1376)| `[target] [--all\|-d\|-r\|-c]` | Swarm-wide shutdown/reboot coordinator. |
-| `mcp` | [`bin/knot:1478-1540`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L1478)| `gateway, sync, status` | Delegates to `core/mcp/gateway.py` and `sync.py`. |
-| `update` | [`bin/knot:1744-2092`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L1744)| `[--all\|<node>] [--dev]` | Massive 348 lines in `bin/knot` implementing fleet updating. |
-| `worktree` | [`bin/knot:2093-2257`](file:///home/kuasha/Dev/knot-mesh/bin/knot#L2093)| `add, remove, list, normalize, provision, rebase-mesh` | GitOps mesh worktree manager. |
-| `auth` | Dispatched line 2345 | 7 subcommands | **Not defined in `bin/knot`!** Implemented in [`core/modules/auth.sh:982`](file:///home/kuasha/Dev/knot-mesh/core/modules/auth.sh#L982). |
+| `onboard` | [`bin/knot:29-142`](../bin/knot#L29) | `[node_id]` | Directly embeds 113 lines in `bin/knot`; does not use `bin/knot-installer`. |
+| `sync` | [`bin/knot:143-337`](../bin/knot#L143) | `[--all\|<node>] [--dev] [--force-prod\|--force-dev]` | Monolithic 194 lines in `bin/knot` mixed with `core/modules/swarm_sync.sh`. |
+| `resolve` | [`bin/knot:338-341`](../bin/knot#L338) | `<node_id> [port]` | Delegates to `core/resolver.sh`. |
+| `status` | [`bin/knot:342-440`](../bin/knot#L342) | None | Embedded awk/curl formatter in `bin/knot`. |
+| `ledger` | [`bin/knot:441-451`](../bin/knot#L441) | `generate [--json]` | Delegates to `core/modules/telemetry.sh`. |
+| `exec` | [`bin/knot:452-747`](../bin/knot#L452) | `[-P\|--parallel] <node\|--all> <cmd>` | 295 lines in `bin/knot` handling SSH multiplexing, subshells, environment exports. |
+| `socket` | [`bin/knot:748-768`](../bin/knot#L748) | `<status\|cleanup>` | OpenSSH ControlMaster socket management. |
+| `kvm` | [`bin/knot:769-896`](../bin/knot#L769) | `<restart\|status\|lock\|unlock\|log>` | Deskflow process supervisor embedded in `bin/knot`. |
+| `doctor` | [`bin/knot:897-913`](../bin/knot#L897) | `[node\|--all\|local] [--repair]` | Delegates to `core/modules/doctor.sh`. |
+| `repair` | [`bin/knot:914-917`](../bin/knot#L914) | `[node\|--all\|local]` | Alias to `doctor --repair`. |
+| `council` | [`bin/knot:918-954`](../bin/knot#L918) | 16 subcommands | Delegates to `core/modules/council.sh`. |
+| `color` | [`bin/knot:955-958`](../bin/knot#L955) | `[get\|set\|list]` | Delegates to `core/palette.py`. |
+| `swarm` | [`bin/knot:959-1168`](../bin/knot#L959) | `status, quota, test, exec, switch` | 209 lines embedded in `bin/knot` mixed with `antigravity.sh`. |
+| `kdeconnect`| [`bin/knot:1169-1255`](../bin/knot#L1169)| 9 subcommands | Delegates to `core/modules/kdeconnect.sh`. |
+| `display` | [`bin/knot:1256-1294`](../bin/knot#L1256)| `status, extend, stop, launch, capture` | Delegates to `core/modules/display.sh` and `kdeconnect.sh`. |
+| `autologin`| [`bin/knot:1295-1340`](../bin/knot#L1295)| 8 subcommands | Delegates to `core/modules/autologin.sh`. |
+| `screen` | [`bin/knot:1341-1375`](../bin/knot#L1341)| `status, unlock, lock, login` | Delegates to `autounlock.sh` and `autologin.sh`. |
+| `shutdown` | [`bin/knot:1376-1477`](../bin/knot#L1376)| `[target] [--all\|-d\|-r\|-c]` | Swarm-wide shutdown/reboot coordinator. |
+| `mcp` | [`bin/knot:1478-1540`](../bin/knot#L1478)| `gateway, sync, status` | Delegates to `core/mcp/gateway.py` and `sync.py`. |
+| `update` | [`bin/knot:1744-2092`](../bin/knot#L1744)| `[--all\|<node>] [--dev]` | Massive 348 lines in `bin/knot` implementing fleet updating. |
+| `worktree` | [`bin/knot:2093-2257`](../bin/knot#L2093)| `add, remove, list, normalize, provision, rebase-mesh` | GitOps mesh worktree manager. |
+| `auth` | Dispatched line 2345 | 7 subcommands | **Not defined in `bin/knot`!** Implemented in [`core/modules/auth.sh:982`](../core/modules/auth.sh#L982). |
 | `hub` | Dispatched line 2349 | `start, stop, restart, status, logs` | **Defined in `core/modules/hub.sh:88`!** |
 | `agent` | Dispatched line 2353 | `start, stop, restart, status, logs` | **Defined in `core/modules/hub.sh:149`!** |
 | `task` | Dispatched line 2357 | `post, list, batch, get, wait, watch`| **Defined in `core/modules/hub.sh:195`!** |
@@ -175,7 +175,7 @@ The CLI dispatcher violates separation of concerns:
 ## 4. Third-Party Integrations Deep Dive
 
 ### 4.1 KDE Connect Integration
-- **File**: [`core/modules/kdeconnect.sh`](file:///home/kuasha/Dev/knot-mesh/core/modules/kdeconnect.sh) (**2,086 lines**)
+- **File**: [`core/modules/kdeconnect.sh`](../core/modules/kdeconnect.sh) (**2,086 lines**)
 - **Responsibilities**:
   1. DBus clipboard bridge (`wl-paste` <-> Klipper DBus `org.kde.klipper`).
   2. Mesh device discovery and auto-pairing (`kdeconnect-cli`).
@@ -191,9 +191,9 @@ The CLI dispatcher violates separation of concerns:
 
 ### 4.2 Deskflow Integration (Software KVM)
 - **Files**:
-  - [`core/modules/deskflow.sh`](file:///home/kuasha/Dev/knot-mesh/core/modules/deskflow.sh) (752 lines): Service supervisor, lock manager, mute/unmute toggles.
-  - [`core/modules/compile_deskflow.py`](file:///home/kuasha/Dev/knot-mesh/core/modules/compile_deskflow.py) (268 lines): Compiles `topology.json` into `deskflow-server.conf`.
-  - [`core/shim/input_capture_shim.c`](file:///home/kuasha/Dev/knot-mesh/core/shim/input_capture_shim.c) (402 lines): C-level `LD_PRELOAD` shared library.
+  - [`core/modules/deskflow.sh`](../core/modules/deskflow.sh) (752 lines): Service supervisor, lock manager, mute/unmute toggles.
+  - [`core/modules/compile_deskflow.py`](../core/modules/compile_deskflow.py) (268 lines): Compiles `topology.json` into `deskflow-server.conf`.
+  - [`core/shim/input_capture_shim.c`](../core/shim/input_capture_shim.c) (402 lines): C-level `LD_PRELOAD` shared library.
 - **Implementation Quality**:
   - The `input_capture_shim.c` is high quality. It intercepts `xdp_portal_create_input_capture_session` calls to persist the Wayland authorization token (`TOKEN_FILE_REL`), avoiding repeated authorization prompts on KDE Plasma 6 Wayland.
   - `compile_deskflow.py` cleanly handles fractional spans, edge alignments, and anchor cursor locking.
@@ -203,12 +203,12 @@ The CLI dispatcher violates separation of concerns:
 
 ### 4.3 Antigravity AI Agent Orchestration & MCP Gateway
 - **Files**:
-  - [`core/modules/antigravity.sh`](file:///home/kuasha/Dev/knot-mesh/core/modules/antigravity.sh) (860 lines)
-  - [`core/modules/auth.sh`](file:///home/kuasha/Dev/knot-mesh/core/modules/auth.sh) (1,152 lines)
-  - [`core/hub/hub.py`](file:///home/kuasha/Dev/knot-mesh/core/hub/hub.py) (4,171 lines)
-  - [`core/hub/agent.py`](file:///home/kuasha/Dev/knot-mesh/core/hub/agent.py) (1,590 lines)
-  - [`core/mcp/gateway.py`](file:///home/kuasha/Dev/knot-mesh/core/mcp/gateway.py) (826 lines)
-  - [`core/memory/palace.py`](file:///home/kuasha/Dev/knot-mesh/core/memory/palace.py) (1,821 lines)
+  - [`core/modules/antigravity.sh`](../core/modules/antigravity.sh) (860 lines)
+  - [`core/modules/auth.sh`](../core/modules/auth.sh) (1,152 lines)
+  - [`core/hub/hub.py`](../core/hub/hub.py) (4,171 lines)
+  - [`core/hub/agent.py`](../core/hub/agent.py) (1,590 lines)
+  - [`core/mcp/gateway.py`](../core/mcp/gateway.py) (826 lines)
+  - [`core/memory/palace.py`](../core/memory/palace.py) (1,821 lines)
 - **Implementation Quality & Hygiene**:
   - **Auth Sandboxing**: `core/modules/auth.sh` provides rigorous permission hardening (0700 directories, 0600 token files) and atomic profile switching via symlinks.
   - **Memory Palace**: `palace.py` implements an embedded SQLite cognitive graph with CRDT synchronization and in-process cosine similarity embeddings.
@@ -222,7 +222,7 @@ The CLI dispatcher violates separation of concerns:
 
 ### 5.1 Hardcoded Physical Node Fingerprints in Committed Files
 Direct evidence of prototype vibe-coding where personal hardware was hardcoded into production trees:
-1. [`scripts/ping_pong_tournament.py:25-50`](file:///home/kuasha/Dev/knot-mesh/scripts/ping_pong_tournament.py#L25-L50):
+1. [`scripts/ping_pong_tournament.py:25-50`](../scripts/ping_pong_tournament.py#L25-L50):
    ```python
    NODE_ROLES = {
        "desktop": {"hw_type": "AMD Ryzen 9 3900X (12C/24T) + AMD RX 6600"},
@@ -231,18 +231,18 @@ Direct evidence of prototype vibe-coding where personal hardware was hardcoded i
        "steamdeck": {"hw_type": "Custom AMD Aerith APU (4C/8T, Zen 2 + RDNA 2)"}
    }
    ```
-2. [`leaderboard_summary.md`](file:///home/kuasha/Dev/knot-mesh/leaderboard_summary.md) & [`docs/LEADERBOARD.md`](file:///home/kuasha/Dev/knot-mesh/docs/LEADERBOARD.md):
+2. [`leaderboard_summary.md`](../leaderboard_summary.md) & [`docs/LEADERBOARD.md`](../docs/LEADERBOARD.md):
    Tracks tournament run `run_20260920_020639_217e3cfe` with hardcoded scores, thermal telemetry (42.9°C), and specific hardware clocks. These belong in ephemeral run artifacts or gitignored data, not tracked documentation.
 
 ### 5.2 Binary Bytecode Patching of Upstream Libraries
-[`bin/knot-vmon-patch-krdp`](file:///home/kuasha/Dev/knot-mesh/bin/knot-vmon-patch-krdp) (125 lines):
+[`bin/knot-vmon-patch-krdp`](../bin/knot-vmon-patch-krdp) (125 lines):
 - Performs raw binary search for bytecode `b"\x6a\x04"` inside `/usr/lib/libKRdp.so.6*` and modifies the opcode to `b"\x6a\x02"` to force embedded cursor rendering for KRdp.
 - Uses static fallback offsets `[0x157D5, 0x18F01, 0x19241]` specifically tuned for libKRdp 6.7.5.
 - *Fragility:* Any minor update to KDE KRdp (`pacman -Syu`) will invalidate these static offsets or risk binary corruption.
 
 ### 5.3 Redundant and Legacy Configuration Trees
-- **Legacy `.agent/` directory**: Contains legacy rule documents ([`00-devops-hygiene.md`](file:///home/kuasha/Dev/knot-mesh/.agent/rules/00-devops-hygiene.md), [`01-git-conventions.md`](file:///home/kuasha/Dev/knot-mesh/.agent/rules/01-git-conventions.md), etc.) that predate the modern `.agents/` and root `AGENTS.md` standard.
-- **Skill Duplication**: Skills exist in both [`runtime/skills/`](file:///home/kuasha/Dev/knot-mesh/runtime/skills) and [`.agents/skills/`](file:///home/kuasha/Dev/knot-mesh/.agents/skills) (symlinked, but causing cognitive clutter).
+- **Legacy `.agent/` directory**: Contains legacy rule documents ([`00-devops-hygiene.md`](../.agent/rules/00-devops-hygiene.md), [`01-git-conventions.md`](../.agent/rules/01-git-conventions.md), etc.) that predate the modern `.agents/` and root `AGENTS.md` standard.
+- **Skill Duplication**: Skills exist in both [`runtime/skills/`](../runtime/skills) and [`.agents/skills/`](../.agents/skills) (symlinked, but causing cognitive clutter).
 
 ---
 
@@ -292,7 +292,7 @@ A critical architectural flaw in Knot Mesh is the **interleaving of physical dev
 | **Execution** | Systemd user units, AC/battery power gating, thermal limits | Antigravity CLI (`agy`), turn loops, code reviews | Headless agents are throttled by desktop browser shims. |
 
 ### 7.2 Entanglement Case Study: `council.sh` Kitty Keystroke Injection
-In [`core/modules/council.sh:562-624`](file:///home/kuasha/Dev/knot-mesh/core/modules/council.sh#L562-L624), the A2A coordination engine (`council_steer`) interacts with workers by sending raw terminal keystrokes to a Kitty Unix domain socket:
+In [`core/modules/council.sh:562-624`](../core/modules/council.sh#L562-L624), the A2A coordination engine (`council_steer`) interacts with workers by sending raw terminal keystrokes to a Kitty Unix domain socket:
 ```bash
 kitty @ --to "unix:$sock" send-text --match "title:.*${node}.*" --stdin
 kitty @ --to "unix:$sock" send-key --match "title:.*${node}.*" return

@@ -2,7 +2,7 @@
 
 > **Governing Standard**: PSL Gold Standard Engineering Guidelines ([AGENTS.md](../AGENTS.md))  
 > **Topology**: 4-Node Physical Mesh (`desktop`, `laptop`, `rog-ally`, `steamdeck`)  
-> **Current Version**: v1.0.0-rc5  
+> **Current Version**: v1.0.0-rc6  
 
 ---
 

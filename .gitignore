@@ -37,3 +37,4 @@ local-override.sh
 
 # Agent Workspace Artifacts Bridge
 .agents/artifacts
+.agents/teamwork/

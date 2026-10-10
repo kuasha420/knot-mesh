@@ -176,7 +176,7 @@ class KnotMCPGateway:
             },
             "serverInfo": {
                 "name": "knot-mcp-gateway",
-                "version": "1.0.0-rc5"
+                "version": "1.0.0-rc6"
             }
         }
 

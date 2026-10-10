@@ -4,7 +4,7 @@ After=network.target default.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/knot-guard --immediate
+ExecStart=/bin/sh -c 'if [ -x %h/.local/bin/knot-guard ]; then exec %h/.local/bin/knot-guard --immediate; elif [ -x /usr/local/bin/knot-guard ]; then exec /usr/local/bin/knot-guard --immediate; else echo "[knot-guard] Notice: knot-guard runner not installed; skipping immediate run." >&2; fi'
 RemainAfterExit=yes
 
 [Install]

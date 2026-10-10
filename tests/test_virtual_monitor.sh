@@ -274,10 +274,55 @@ fi
 # Test 12: Deskflow Link Muting Layout Compilation
 # -------------------------------------------------------------
 echo -e "\n\033[1m[Test 12] Deskflow Link Muting Layout Compilation...\033[0m"
+mute_tmp_dir="$(mktemp -d)"
+mkdir -p "$mute_tmp_dir/nodes"
+cat << 'EOF' > "$mute_tmp_dir/nodes/desktop.json"
+{
+  "id": "desktop",
+  "hostname": "anchor-desktop",
+  "role": "anchor",
+  "display": {"resolution": "2560x1440"}
+}
+EOF
+cat << 'EOF' > "$mute_tmp_dir/nodes/laptop.json"
+{
+  "id": "laptop",
+  "hostname": "peer-laptop",
+  "role": "strand",
+  "display": {"resolution": "1920x1080"}
+}
+EOF
+cat << 'EOF' > "$mute_tmp_dir/nodes/steamdeck.json"
+{
+  "id": "steamdeck",
+  "hostname": "peer-deck",
+  "role": "strand",
+  "display": {"resolution": "1280x800"}
+}
+EOF
+cat << 'EOF' > "$mute_tmp_dir/topology.json"
+{
+  "anchor": "desktop",
+  "screens": ["desktop", "laptop", "steamdeck"],
+  "layout": {
+    "desktop": {
+      "left": {
+        "node": "laptop",
+        "span": [0, 100]
+      },
+      "down": {
+        "node": "steamdeck",
+        "span": [0, 100]
+      }
+    }
+  }
+}
+EOF
+
 mute_test_out="" mute_test_rc=0
 mute_test_out=$(python3 "$KNOT_ROOT/core/modules/compile_deskflow.py" \
-  --topology "$HOME/.config/knot/swarms/home/topology.json" \
-  --nodes-dir "$HOME/.config/knot/swarms/home/nodes" \
+  --topology "$mute_tmp_dir/topology.json" \
+  --nodes-dir "$mute_tmp_dir/nodes" \
   --mode unlocked \
   --mute-node laptop 2>&1) || mute_test_rc=$?
 
@@ -295,11 +340,12 @@ for line in text.splitlines():
     elif in_links:
         links_text += line + "\n"
 
-if "= devbox" not in links_text and "devbox(" not in links_text and "psl-0000" in links_text:
+if "= peer-laptop" not in links_text and "peer-laptop(" not in links_text and "anchor-desktop" in links_text:
     print("MUTED_OK")
 else:
     sys.exit(1)
 ' "$mute_test_out" 2>&1) || mv_rc=$?
+rm -rf "$mute_tmp_dir"
 
 if [ $mute_test_rc -eq 0 ] && [ $mv_rc -eq 0 ] && [ "$mute_verify" = "MUTED_OK" ]; then
   pass "compile_deskflow.py --mute-node laptop successfully omits laptop links while preserving other nodes"
@@ -367,7 +413,7 @@ spec = importlib.util.spec_from_loader("knot_stripd", loader)
 mod = importlib.util.module_from_spec(spec)
 loader.exec_module(mod)
 
-ctrl = mod.KnotEdgeController("laptop", "left", "#00f0ff", [0, 100], {"laptop", "devbox"}, {"192.168.68.145"})
+ctrl = mod.KnotEdgeController("laptop", "left", "#00f0ff", [0, 100], {"laptop", "peer-laptop"}, {"192.168.1.102"})
 ctrl.set_connected(True)
 ctrl.set_locked(False)
 assert not ctrl.muted, "Default muted should be False"

@@ -1,0 +1,43 @@
+name: Knot Mesh CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: PSL Integrity & Test Suites
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-client iproute2
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest typeguard anyio platformdirs
+
+      - name: Run PSL Universal Integrity Audit
+        run: bash tests/test_psl_integrity.sh
+
+      - name: Run CLI Help Coverage Suite
+        run: bash tests/test_cli_help.sh
+
+      - name: Run Pytest Suite
+        run: pytest -v
+
+      - name: Run Bootstrap Installer & PKGBUILD Validation
+        run: bash tests/test_bootstrap_installer.sh

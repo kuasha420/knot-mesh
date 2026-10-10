@@ -1,7 +1,7 @@
 # Knot Mesh — Architectural Specification & Design
 
 > **Production-grade distributed workspace mesh for Arch Linux / KDE Plasma 6 Wayland.**  
-> Version: `v1.0.0-rc5`
+> Version: `v1.0.0-rc6`
 
 ---
 

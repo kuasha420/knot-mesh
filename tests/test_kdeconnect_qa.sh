@@ -174,12 +174,12 @@ case "${1:-}" in
     echo "mock-device-id-qa-1234"
     ;;
   -l)
-    echo "- psl-0000: 1e5a1fc88ac847748f1cf8b109899543 on 192.168.68.147 via LAN (reachable)"
-    echo "- devbox: 2eea46b4fa5942d49286ef3ba8e6df56 on 192.168.68.145 via LAN (reachable)"
+    echo "- peer-anchor: 1e5a1fc88ac847748f1cf8b109899543 on 192.168.1.101 via LAN (reachable)"
+    echo "- peer-laptop: 2eea46b4fa5942d49286ef3ba8e6df56 on 192.168.1.102 via LAN (reachable)"
     echo "2 devices found"
     ;;
   -a)
-    echo "1 device found: - devbox: 2eea46b4fa5942d49286ef3ba8e6df56 on 192.168.68.145 via LAN (paired and reachable)"
+    echo "1 device found: - peer-laptop: 2eea46b4fa5942d49286ef3ba8e6df56 on 192.168.1.102 via LAN (paired and reachable)"
     ;;
   --pair)
     echo "Pairing requested to ${3:-unknown}"

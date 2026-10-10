@@ -118,7 +118,7 @@ export const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
     if (s.includes('deck') || s.includes('ally') || s.includes('handheld')) {
       return <Gamepad2 className="w-4 h-4 text-amber-400" />;
     }
-    if (s.includes('laptop') || s.includes('devbox')) {
+    if (s.includes('laptop') || s.includes('notebook')) {
       return <Laptop className="w-4 h-4 text-sky-400" />;
     }
     return <Monitor className="w-4 h-4 text-night-cyan" />;
@@ -146,7 +146,7 @@ export const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
     const resolution =
       topoNode?.display?.resolution ||
       outputs[0]?.resolution ||
-      (nodeId.includes('deck') ? '800×1280' : nodeId.includes('devbox') ? '1920×1080' : '2560×1440');
+      (nodeId.includes('deck') ? '800×1280' : nodeId.includes('laptop') ? '1920×1080' : '2560×1440');
     return {
       id: nodeId,
       hostname: topoNode?.hostname || liveNode?.node_id || nodeId,
@@ -379,7 +379,7 @@ export const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
 
             {/* Main Center Row: Left Flank <-> Anchor <-> Right Flank */}
             <div className="flex flex-wrap md:flex-nowrap items-center justify-center gap-3 w-full">
-              {/* Left Screen (e.g. devbox laptop) */}
+              {/* Left Screen (e.g. laptop strand) */}
               {leftNodeId ? (
                 renderScreenCard(leftNodeId, 'Left Flank')
               ) : (
