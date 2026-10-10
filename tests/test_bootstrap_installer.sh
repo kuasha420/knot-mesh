@@ -17,13 +17,27 @@ echo "  -> Zero error swallowing: OK"
 
 echo "=== [Test 2] PKGBUILD Metadata Validation ==="
 cd "$KNOT_ROOT"
-SRCINFO="$(makepkg --printsrcinfo)"
-echo "$SRCINFO" | grep -q "pkgname = knot-mesh"
-echo "$SRCINFO" | grep -q "pkgver = 1.0.0.rc6"
-echo "$SRCINFO" | grep -q "depends = python"
-echo "$SRCINFO" | grep -q "depends = deskflow"
-echo "$SRCINFO" | grep -q "optdepends = kscreen-doctor"
-echo "  -> makepkg --printsrcinfo generation: OK"
+if command -v makepkg >/dev/null; then
+  SRCINFO="$(makepkg --printsrcinfo)"
+  echo "$SRCINFO" | grep -q "pkgname = knot-mesh"
+  echo "$SRCINFO" | grep -q "pkgver = 1.0.0.rc6"
+  echo "$SRCINFO" | grep -q "depends = python"
+  echo "$SRCINFO" | grep -q "depends = deskflow"
+  echo "$SRCINFO" | grep -q "optdepends = kscreen-doctor"
+  echo "  -> makepkg --printsrcinfo generation: OK"
+else
+  echo "  -> Notice: makepkg not installed on this host (non-Arch platform); validating PKGBUILD directly"
+  (
+    # shellcheck source=PKGBUILD
+    source "$KNOT_ROOT/PKGBUILD"
+    [ "$pkgname" = "knot-mesh" ]
+    [ "$pkgver" = "1.0.0.rc6" ]
+    printf '%s\n' "${depends[@]}" | grep -q "^python$"
+    printf '%s\n' "${depends[@]}" | grep -q "^deskflow$"
+    printf '%s\n' "${optdepends[@]}" | grep -q "^kscreen-doctor:"
+  )
+  echo "  -> PKGBUILD direct evaluation: OK"
+fi
 
 echo "=== [Test 2b] PKGBUILD Packaging Verification ==="
 PKG_TEST_DIR="$(mktemp -d)"
