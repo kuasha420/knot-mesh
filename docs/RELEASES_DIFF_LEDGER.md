@@ -17,8 +17,8 @@ Over these six milestone boundaries, Knot Mesh transformed from a single-machine
 1. **Boundary 1 (`rc1` → `rc2`)**: Greenfield migration purge, cryptographic GPG history re-signing, and dynamic LayerShell neon boundary indicators (`knot-stripd`).
 2. **Boundary 2 (`rc2` → `rc3`)**: Hardening daemon lifecycles (`bin/knot-hub`), multi-target topology rendering, and strict variable initialization under `set -u`.
 3. **Boundary 3 (`rc3` → `rc4`)**: Transition from single-node execution to fleet-wide management via `knot sync`, `knot update`, and modular system documentation.
-4. **Boundary 4 (`rc4` → `v1.0.0` GA)**: Emergence of the multi-agent cognitive layer (Swarm Council, Kitty Confluence multiplexing, CRDT Memory Palace, and Kafe Tauri v2 shell).
-5. **Boundary 5 (`v1.0.0` GA → `rc5`)**: First major audit and privacy purge: strict user-space confinement (`%h/.local/bin`), MCP dead code pruning, and version reset to restore open-source release engineering rigor.
+4. **Boundary 4 (`rc4` → `rc5` via premature `v1.0.0` tag)**: Emergence of the multi-agent cognitive layer (Swarm Council, Kitty Confluence multiplexing, CRDT Memory Palace, and Kafe Tauri v2 shell). *(Note: A `v1.0.0` GA tag was prematurely published at commit `d5f9964` during this development arc, but was formally retracted and deleted; the repository remains strictly on the RC track).*
+5. **Boundary 5 (`rc4/premature-v1.0.0` → `rc5`)**: First major audit and privacy purge: strict user-space confinement (`%h/.local/bin`), MCP dead code pruning, and version reset to `1.0.0-rc5` to restore open-source release engineering rigor.
 6. **Boundary 6 (`rc5` → `HEAD`)**: Horizon 2 maturity: Wayland Virtual Monitor fabric (Epic #63), multi-tenant profile sandboxing (Epic #60), Wave 0–3 closures, and radical AI slop pruning (-13,750+ lines excised).
 
 ---
@@ -199,18 +199,17 @@ f27994c 2026-09-18 merge: fix(agent): handle locked KWallet gracefully on autolo
 
 ---
 
-### 3.4 Boundary 4: `v1.0.0-rc4` → `v1.0.0` GA
+### 3.4 Boundary 4: `v1.0.0-rc4` → Commit `d5f9964` (Premature GA Arc, Retracted)
 
 #### Git & Tag Metadata
 - **Start Reference**: Tag `v1.0.0-rc4` (`a8b4ea6`, Date: `2026-09-19 06:05:08 +0600`)
-- **End Reference**: Tag `v1.0.0`
-  - Tag Object SHA: `cd45bb5bd49d31408c4c2e0c87c627a51a10555b`
+- **End Reference**: Commit `d5f9964` (`chore(release): lock canonical KNOT_VERSION to 1.0.0`)
   - Target Commit SHA: `d5f99649730f95fc24a71199744aa5912f8de26f`
   - Date: `2026-09-20 06:12:36 +0600`
-  - Tag Message: `Release Knot Mesh v1.0.0 GA` (PGP Signed)
+  - *Retraction Status*: A `v1.0.0` GA tag was briefly published here, but was premature as the project remains in Release Candidate phase. The tag and GitHub release have been formally deleted/retracted.
 - **Lineage & Ancestry**: Direct sequential descendant (`a8b4ea6` is parent of `f5f447e`).
 - **Empirical Metrics**:
-  - `git diff --shortstat v1.0.0-rc4 v1.0.0`: **96 files changed, 19,023 insertions(+), 1,340 deletions(-)**
+  - `git diff --shortstat v1.0.0-rc4 d5f9964`: **96 files changed, 19,023 insertions(+), 1,340 deletions(-)**
   - Commit Count: **46 commits**
   - Net Line Churn: **+17,683 lines**
 
@@ -286,10 +285,10 @@ f5f447e 2026-09-19 feat(council): implement Swarm Council multi-agent coordinati
 
 ---
 
-### 3.5 Boundary 5: `v1.0.0` GA → `v1.0.0-rc5` (Phase 2 Refactor & Data Purge)
+### 3.5 Boundary 5: Commit `d5f9964` → `v1.0.0-rc5` (Phase 2 Refactor & Version Reset)
 
 #### Git & Tag Metadata
-- **Start Reference**: Tag `v1.0.0` (`d5f9964`, Date: `2026-09-20 06:12:36 +0600`)
+- **Start Reference**: Commit `d5f9964` (`2026-09-20 06:12:36 +0600`)
 - **End Reference**: Tag `v1.0.0-rc5`
   - Tag Object SHA: `8829774c87d9c4785a5e5225b2f69c58252938d7`
   - Target Commit SHA: `8b915a5e37d085f377818740c46b8fb814caedc1`
@@ -297,7 +296,7 @@ f5f447e 2026-09-19 feat(council): implement Swarm Council multi-agent coordinati
   - Tag Message: `Release v1.0.0-rc5` (PGP Signed)
 - **Lineage & Ancestry**: Direct sequential descendant (`d5f9964` is parent of `5832167`).
 - **Empirical Metrics**:
-  - `git diff --shortstat v1.0.0 v1.0.0-rc5`: **81 files changed, 2,138 insertions(+), 1,709 deletions(-)**
+  - `git diff --shortstat d5f9964 v1.0.0-rc5`: **81 files changed, 2,138 insertions(+), 1,709 deletions(-)**
   - Commit Count: **13 commits**
   - Net Line Churn: **+429 lines**
 
