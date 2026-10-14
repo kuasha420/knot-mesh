@@ -1,18 +1,18 @@
 ---
 name: psl-test-python
 description: >-
-  Modular Python test runner skill for Google Antigravity harnesses. Codifies hermetic
+  Modular Python test runner skill for Agyis Harness. Codifies hermetic
   pytest, unittest discovery, clean-room temporary directory isolation, sub-second benchmark invariants,
   and zero error-swallowing execution standards.
 ---
-<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- SPDX-License-Identifier: MIT -->
 <!-- Copyright (c) 2026 Arafat Zahan (@kuasha420) -->
 <!-- Corporate Stewardship & Infrastructure: Purrfect Software Limited (PSL) -->
 <!-- Governed by: ICARO-42/b Ordinance (Company-Supported Personal IP Framework) -->
 
 # PSL Test Skill: Python Test Runner & Hermetic Verification
 
-This skill establishes standardized execution contracts and hermetic benchmarking standards for Python unit and integration testing across Google Antigravity harnesses.
+This skill establishes standardized execution contracts and hermetic benchmarking standards for Python unit and integration testing across Agyis Harness.
 
 ---
 
@@ -22,7 +22,7 @@ This skill establishes standardized execution contracts and hermetic benchmarkin
 - Always invoke the test suite via the unified CLI or standard hermetic module runners:
   ```bash
   # Primary test suite runner
-  python3 -m harness.cli test
+  agyis test
 
   # Standard unittest discovery
   python3 -m unittest discover -s tests -p "test_*.py"
