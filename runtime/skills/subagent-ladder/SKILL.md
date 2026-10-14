@@ -2,10 +2,13 @@
 name: subagent-ladder
 description: >-
   Strictly user-invoked SWE ladder protocol (/subagent-ladder). Coordinates multi-agent
-  execution pipelines (Executioner -> Hammer -> Custodian -> Auditor) for multi-phase engineering tasks.
-  Activate ONLY when explicitly commanded by the user (e.g., 'run subagent ladder',
-  'use subagent flow', '/subagent-ladder', 'execute ladder'). Never auto-trigger autonomously.
+  execution pipelines (Executioner -> Hammer -> Custodian -> Auditor) for multi-phase engineering tasks,
+  with support for multi-node swarm PR ingestion. Activate ONLY when explicitly commanded by the user.
 ---
+<!-- SPDX-License-Identifier: MIT -->
+<!-- Copyright (c) 2026 Arafat Zahan (@kuasha420) -->
+<!-- Corporate Stewardship & Infrastructure: Purrfect Software Limited (PSL) -->
+<!-- Governed by: ICARO-42/b Ordinance (Company-Supported Personal IP Framework) -->
 
 # Subagent Ladder: Multi-Agent SWE Execution Protocol 🪜🤖
 
@@ -28,7 +31,7 @@ The Subagent Ladder partitions execution across specialized subagent roles:
 
 ---
 
-## 2. The Phase Lifecycle Ladder
+## 2. The Phase Lifecycle Ladder (6-Stage Pipeline)
 
 Every milestone progresses through a strict 6-stage pipeline:
 
@@ -49,12 +52,9 @@ Every milestone progresses through a strict 6-stage pipeline:
                                      ▼                                                              │
 ┌─────────────────────────────────────────────────────────────────────────┐                         │
 │ STAGE 3: CODE & PSL REVIEW (`subagent-X-hammer`)                        │                         │
-│ - Ruthlessly audits all changes against the 5 Ground Rules in AGENTS.md:│                         │
-│   • Rule 1: Zero error swallowing & strict failure transparency.        │                         │
-│   • Rule 2: Do not do the product's homework in tests.                  │                         │
-│   • Rule 3: Complete package deliveries (code + types + tests + docs).  │                         │
-│   • Rule 4: Zero homework in verification (automated proof).            │                         │
-│   • Rule 5: Stop and inquire before overengineering workarounds.        │                         │
+│ - Ruthlessly audits all changes against the 8 Empirical Rules in        │                         │
+│   AGENTS.md (zero error swallowing, no product homework in tests,       │                         │
+│   complete packages, automated verification, stop & inquire, etc.).     │                         │
 │ - Verdict: PASS or REJECT with specific line-by-line defect list.       │                         │
 └──────────────────┬───────────────────────────────────▲──────────────────┘                         │
                    │ (Passed Hammer Review)            │                                            │
@@ -63,6 +63,7 @@ Every milestone progresses through a strict 6-stage pipeline:
 │ STAGE 4: GIT COMMIT GATE & WORKSPACE CUSTODY     │   │                                            │
 │ (`subagent-X-custodian`)                         │   │                                            │
 │ - Audits git status & porcelain tree state.      │   │                                            │
+│ - DRY & Code Deduplication Audit across codebase.│   │                                            │
 │ - Stages strictly intended deliverables.         │   │                                            │
 │ - Validates atomic commit message matches phase. │   │                                            │
 │ - Verdict: COMMITTED or REJECT with defect report│   │                                            │
@@ -122,7 +123,33 @@ Every milestone progresses through a strict 6-stage pipeline:
 
 ---
 
-## 4. Subagent Roles & Responsibilities
+## 4. Multi-Node Swarm PR Ingestion Protocol
+
+When coordinating distributed campaigns across the Knot mesh (Desktop Anchor, Laptop CUDA Worker, Steam Deck):
+
+### 4.1 Distributed PR & Branch Discovery
+Strand workers push branches or open Pull Requests asynchronously. The Ladder coordinator discovers and ingests remote PRs using GitHub CLI (`gh`):
+```bash
+# Ingest open PRs across fleet
+gh pr list --state open --json number,title,headRefName,author,updatedAt
+
+# Inspect specific strand PR diff
+gh pr diff <pr_number>
+```
+
+### 4.2 Swarm Ingestion Lifecycle
+1. **Branch Fetch & Isolation**: Coordinator fetches strand worktrees into dedicated tracking branches (`git fetch origin pull/<id>/head:pr-<id>`).
+2. **Phase Partitioning**: Coordinator maps ingested PR branches to Ladder milestones in `implementation_plan.md`.
+3. **Ladder Verification Sweep**:
+   - `subagent-X-executioner`: Integrates or rebases strand changes cleanly against upstream HEAD.
+   - `subagent-X-hammer`: Audits multi-node diffs against PSL invariants.
+   - `subagent-X-custodian`: Re-verifies clean staging and executes DRY deduplication check across merged strand modules.
+   - `subagent-X-auditor`: Executes local hermetic tests (`agyis test`) and dispatches SSH probes across physical nodes.
+4. **Automated Review Approval**: On Auditor PASS, Coordinator approves or merges the PR via `gh pr merge --squash` or `gh pr review --approve`.
+
+---
+
+## 5. Subagent Roles & Responsibilities
 
 | Role | Name Pattern | Mandate | Permitted Tools |
 | :--- | :--- | :--- | :--- |
@@ -133,11 +160,11 @@ Every milestone progresses through a strict 6-stage pipeline:
 
 ---
 
-## 5. Workspace Artifact Bridge (`.agents/artifacts/`)
+## 6. Workspace Artifact Bridge (`.agents/artifacts/`)
 
 To prevent subagents from wasting context and tool calls hunting for plan artifacts:
 
-### 5.1 The Standard
+### 6.1 The Standard
 1. **Bridge Symlink**: `.agents/artifacts` in the workspace root points to the active Coordinator brain directory:
    ```bash
    python3 runtime/skills/subagent-ladder/scripts/bridge_artifacts.py --setup "<brain_dir>"
@@ -146,14 +173,14 @@ To prevent subagents from wasting context and tool calls hunting for plan artifa
 3. **Prompt Standard**: Coordinator prompts strictly reference `.agents/artifacts/<plan_name>.md`.
 4. **Tool Compatibility**: `view_file` resolves the symlink natively on Step 2 (the first tool call) with zero search pollution.
 
-### 5.2 Forbidden Prompt Anti-Patterns
+### 6.2 Forbidden Prompt Anti-Patterns
 - ❌ **Bare filenames**: `Read phase_2_plan.md` (subagent wastes turns grepping the workspace).
 - ❌ **`file://` URIs**: `view_file("file:///home/...")` (causes `invalid tool call error: path is not absolute`).
 - ❌ **Raw machine paths**: `Read /home/username/.gemini/...` (leaks usernames, host paths, and session UUIDs into prompt history, violating OSS confidentiality).
 
 ---
 
-## 6. Remote Fleet Probing Safeguards
+## 7. Remote Fleet Probing Safeguards
 
 When testing distributed multi-node mesh topologies:
 1. **Mandatory Execution Ceilings**: All remote SSH checks must enforce hard timeouts and TCP keepalives:
@@ -161,28 +188,3 @@ When testing distributed multi-node mesh topologies:
    timeout 10 ssh -o ConnectTimeout=3 -o ServerAliveInterval=2 -o ServerAliveCountMax=2 <node> "<command>"
    ```
 2. **Headless Execution Only**: Never invoke interactive graphical binaries (e.g. Electron GUI `/usr/bin/antigravity`) headlessly over SSH; probe daemon sockets, CLI endpoints, or D-Bus services.
-
----
-
-## 7. Model Selection Hierarchy
-
-* **Gemini 3.8 Flash (`flash`)**: The standard workhorse model for `Executioner`, `Hammer`, and `Auditor`. Delivers modern knowledge, sub-minute step latencies, sharp instruction following, and high concurrency.
-* **Gemini 3.1 Pro (`pro`)**: Reserved exclusively for high-ambiguity architectural design or complex formal proofs. Avoid for standard ladder execution.
-
----
-
-## 8. CLI Helpers & Tooling
-
-The skill bundles dedicated CLI helpers in `scripts/`:
-
-```bash
-# 1. Setup or inspect the workspace artifact bridge
-python3 runtime/skills/subagent-ladder/scripts/bridge_artifacts.py --setup <brain_dir>
-python3 runtime/skills/subagent-ladder/scripts/bridge_artifacts.py --check
-
-# 2. Scaffold subagent invocation payloads
-python3 runtime/skills/subagent-ladder/scripts/scaffold_ladder.py --phase 1 --role executioner --plan .agents/artifacts/phase_1_plan.md
-
-# 3. Verify session state machine adherence (audit transcript for Hammer bypasses)
-python3 runtime/skills/subagent-ladder/scripts/verify_ladder_state.py --log <transcript.jsonl>
-```
