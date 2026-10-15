@@ -853,7 +853,7 @@ vmon_stop() {
       deskflow_unmute_node "$target_node"
       knot_log_info "Deskflow KVM crossover to '$target_node' unmuted"
     else
-      for f in /run/knot/vmon_muted_deskflow_*; do
+      for f in /run/knot/vmon_muted_deskflow_* "$home/.local/state/knot/vmon_muted_deskflow_"*; do
         [ -e "$f" ] || continue
         local nid="${f##*vmon_muted_deskflow_}"
         deskflow_unmute_node "$nid"
