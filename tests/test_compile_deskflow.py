@@ -330,5 +330,35 @@ class TestCompileDeskflow(unittest.TestCase):
         self.assertIn("down(50,100) = deck-eos(0,100)", conf)
         self.assertIn("up(0,100) = arch-desktop(50,100)", conf)
 
+    def test_custom_options_switch_delay(self):
+        topo = {
+            "anchor": "desktop",
+            "screens": ["desktop", "laptop"],
+            "layout": {
+                "desktop": {
+                    "left": {"node": "laptop"}
+                }
+            },
+            "options": {
+                "switchDelay": 150,
+                "switchCornerSize": 10
+            }
+        }
+        topo_path = self.tmp_path / "topology_opts.json"
+        with open(topo_path, "w") as f:
+            json.dump(topo, f, indent=2)
+
+        conf = compile_deskflow.compile_deskflow(str(topo_path), str(self.nodes_dir), mode="unlocked")
+        self.assertIn("switchDelay = 150", conf)
+        self.assertIn("switchCornerSize = 10", conf)
+
+        # Default fallback test
+        del topo["options"]
+        with open(topo_path, "w") as f:
+            json.dump(topo, f, indent=2)
+        conf_def = compile_deskflow.compile_deskflow(str(topo_path), str(self.nodes_dir), mode="unlocked")
+        self.assertIn("switchDelay = 250", conf_def)
+        self.assertIn("switchCornerSize = 0", conf_def)
+
 if __name__ == "__main__":
     unittest.main()
