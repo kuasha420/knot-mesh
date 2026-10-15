@@ -39,6 +39,34 @@ assert_cmd_succeeds() {
   echo "  [PASS] $desc (exit 0)"
 }
 
+assert_cmd_stdout_contains() {
+  local expected_substr="$1"
+  local desc="$2"
+  shift 2
+  local cmd=("$@")
+
+  test_total=$((test_total + 1))
+  local actual_rc=0
+  local output=""
+  output="$("${cmd[@]}" 2>&1)" || actual_rc=$?
+
+  if [ "$actual_rc" -ne 0 ]; then
+    echo "  [FAIL] $desc: Expected exit code 0, got $actual_rc" >&2
+    echo "         Command: ${cmd[*]}" >&2
+    echo "         Output : $output" >&2
+    exit 1
+  fi
+
+  if ! echo "$output" | grep -qF "$expected_substr"; then
+    echo "  [FAIL] $desc: Output did not contain expected substring: '$expected_substr'" >&2
+    echo "         Output : $output" >&2
+    exit 1
+  fi
+
+  test_passed=$((test_passed + 1))
+  echo "  [PASS] $desc (exit 0 and matches '$expected_substr')"
+}
+
 assert_cmd_fails_with_code() {
   local expected_rc="$1"
   local expected_err_substr="$2"
@@ -190,14 +218,30 @@ for link in topo.get("links", []):
         sys.stderr.write(f"  [FAIL] {desc}: Old id '{old_id}' referenced in links: {link}\n")
         sys.exit(1)
 
-# Verify fractional span preservation for desktop.right target pointing to new_id
-if "desktop" in layout and "right" in layout["desktop"]:
-    desktop_right = layout["desktop"]["right"]
-    if isinstance(desktop_right, list):
-        target_entry = next((item for item in desktop_right if isinstance(item, dict) and item.get("node") == new_id), None)
-        if target_entry:
-            if target_entry.get("span") != [0, 50] or target_entry.get("target_span") != [0, 100]:
-                sys.stderr.write(f"  [FAIL] {desc}: Fractional span corrupted for {new_id}: {target_entry}\n")
+# Dynamically target the active anchor node
+anchor_node = topo.get("anchor")
+if anchor_node and anchor_node in layout and "right" in layout[anchor_node]:
+    anchor_right = layout[anchor_node]["right"]
+    if isinstance(anchor_right, list):
+        # Positively assert deck-prime (or steamdeck) sliced span
+        prime_target = "deck-prime" if "deck-prime" in screens else ("steamdeck" if "steamdeck" in screens else None)
+        if prime_target:
+            deck_entry = next((item for item in anchor_right if isinstance(item, dict) and item.get("node") == prime_target), None)
+            if not deck_entry:
+                sys.stderr.write(f"  [FAIL] {desc}: Missing entry for '{prime_target}' in layout['{anchor_node}']['right']\n")
+                sys.exit(1)
+            if deck_entry.get("span") != [0, 50] or deck_entry.get("target_span") != [0, 100]:
+                sys.stderr.write(f"  [FAIL] {desc}: Fractional span corrupted for {prime_target}: {deck_entry}\n")
+                sys.exit(1)
+
+        # Positively assert sibling sliced span for rog-ally is preserved without corruption
+        if "rog-ally" in screens:
+            rog_entry = next((item for item in anchor_right if isinstance(item, dict) and item.get("node") == "rog-ally"), None)
+            if not rog_entry:
+                sys.stderr.write(f"  [FAIL] {desc}: Missing sibling entry for 'rog-ally' in layout['{anchor_node}']['right']\n")
+                sys.exit(1)
+            if rog_entry.get("span") != [50, 100] or rog_entry.get("target_span") != [0, 100]:
+                sys.stderr.write(f"  [FAIL] {desc}: Sibling sliced span corrupted for rog-ally: {rog_entry}\n")
                 sys.exit(1)
 
 sys.exit(0)
@@ -207,10 +251,11 @@ PYEOF_INNER
 }
 
 assert_ssh_clean() {
-  local conf_file="$HOME/.ssh/config"
   local old_id="$1"
   local new_id="$2"
   local desc="$3"
+  local unaffected_hosts="${4:-}"
+  local conf_file="$HOME/.ssh/config"
 
   test_total=$((test_total + 1))
   if [ ! -f "$conf_file" ]; then
@@ -228,22 +273,30 @@ assert_ssh_clean() {
     exit 1
   fi
 
+  if [ -n "$unaffected_hosts" ]; then
+    IFS=',' read -r -a host_arr <<< "$unaffected_hosts"
+    for h in "${host_arr[@]}"; do
+      h="$(echo "$h" | tr -d '[:space:]')"
+      [ -n "$h" ] || continue
+      if ! grep -qE "^[[:space:]]*Host[[:space:]]+(.*[[:space:]])?${h}([[:space:]]|\.|$)" "$conf_file"; then
+        echo "  [FAIL] $desc: Expected unaffected Host block for '$h' missing from $conf_file" >&2
+        exit 1
+      fi
+    done
+  fi
+
   test_passed=$((test_passed + 1))
-  echo "  [PASS] $desc (SSH config has Host '$new_id' and zero occurrences of '$old_id')"
+  echo "  [PASS] $desc (SSH config has Host '$new_id', purged '$old_id', retained unaffected hosts: ${unaffected_hosts:-none specified})"
 }
 
 assert_deskflow_clean() {
   local conf_file="$1"
   local old_id="$2"
-  local new_host="$3"
-  local desc="$4"
-
-  if [ $# -eq 3 ]; then
-    conf_file="$HOME/.config/Deskflow/deskflow-server.conf"
-    old_id="$1"
-    new_host="$2"
-    desc="$3"
-  fi
+  local new_id="$3"
+  local host_name="$4"
+  local desc="$5"
+  local unaffected_screens="${6:-}"
+  local unaffected_aliases="${7:-}"
 
   test_total=$((test_total + 1))
   if [ ! -f "$conf_file" ]; then
@@ -251,18 +304,53 @@ assert_deskflow_clean() {
     exit 1
   fi
 
-  if grep -qE "(^|[[:space:]])${old_id}:" "$conf_file"; then
-    echo "  [FAIL] $desc: Stale Deskflow screen entry for '$old_id' found in $conf_file" >&2
+  # Assert stale old node id is absent from aliases and screen blocks
+  if grep -qE "^[[:space:]]+${old_id}[[:space:]]*$" "$conf_file" || grep -qE "(^|[[:space:]])${old_id}:" "$conf_file"; then
+    echo "  [FAIL] $desc: Stale old node id '${old_id}' found in $conf_file" >&2
     exit 1
   fi
 
-  if ! grep -qE "(^|[[:space:]])${new_host}:" "$conf_file"; then
-    echo "  [FAIL] $desc: Expected Deskflow screen entry for '$new_host' missing from $conf_file" >&2
+  # Assert hostname screen block exists
+  if ! grep -qE "(^|[[:space:]])${host_name}:" "$conf_file"; then
+    echo "  [FAIL] $desc: Expected screen block for hostname '${host_name}:' missing from $conf_file" >&2
     exit 1
+  fi
+
+  # Assert new node id is registered in aliases section
+  if ! grep -qE "^[[:space:]]+${new_id}[[:space:]]*$" "$conf_file"; then
+    echo "  [FAIL] $desc: Expected alias '${new_id}' missing from aliases section in $conf_file" >&2
+    exit 1
+  fi
+
+  # Positively assert unaffected screens remain present
+  if [ -n "$unaffected_screens" ]; then
+    IFS=',' read -r -a screen_arr <<< "$unaffected_screens"
+    for scr in "${screen_arr[@]}"; do
+      scr="$(echo "$scr" | tr -d '[:space:]')"
+      [ -n "$scr" ] || continue
+      local clean_scr="${scr%:}"
+      if ! grep -qE "(^|[[:space:]])${clean_scr}:" "$conf_file"; then
+        echo "  [FAIL] $desc: Expected unaffected screen '${clean_scr}:' missing from $conf_file" >&2
+        exit 1
+      fi
+    done
+  fi
+
+  # Positively assert unaffected aliases remain present
+  if [ -n "$unaffected_aliases" ]; then
+    IFS=',' read -r -a alias_arr <<< "$unaffected_aliases"
+    for al in "${alias_arr[@]}"; do
+      al="$(echo "$al" | tr -d '[:space:]')"
+      [ -n "$al" ] || continue
+      if ! grep -qE "^[[:space:]]+${al}[[:space:]]*$" "$conf_file"; then
+        echo "  [FAIL] $desc: Expected unaffected alias '${al}' missing from aliases section in $conf_file" >&2
+        exit 1
+      fi
+    done
   fi
 
   test_passed=$((test_passed + 1))
-  echo "  [PASS] $desc (Deskflow server config has '$new_host' and zero occurrences of '$old_id')"
+  echo "  [PASS] $desc (Deskflow server config has '$host_name' screen, alias '$new_id', zero occurrences of '$old_id')"
 }
 
 # -------------------------------------------------------------
@@ -534,10 +622,14 @@ assert_cmd_succeeds "Initial Deskflow server config compile" \
 # -------------------------------------------------------------
 echo ""
 echo "=== [Phase 2] CLI Help Invocations (Exit 0) ==="
-assert_cmd_succeeds "knot node rename -h" "$KNOT_BIN" node rename -h
-assert_cmd_succeeds "knot node rename --help" "$KNOT_BIN" node rename --help
-assert_cmd_succeeds "knot node -h" "$KNOT_BIN" node -h
-assert_cmd_succeeds "knot node --help" "$KNOT_BIN" node --help
+assert_cmd_stdout_contains "Usage: knot node rename <old_id> <new_id>" \
+  "knot node rename -h displays usage" "$KNOT_BIN" node rename -h
+assert_cmd_stdout_contains "Usage: knot node rename <old_id> <new_id>" \
+  "knot node rename --help displays usage" "$KNOT_BIN" node rename --help
+assert_cmd_stdout_contains "knot node rename <old_id> <new_id>" \
+  "knot node -h displays rename subcommand" "$KNOT_BIN" node -h
+assert_cmd_stdout_contains "knot node rename <old_id> <new_id>" \
+  "knot node --help displays rename subcommand" "$KNOT_BIN" node --help
 
 # -------------------------------------------------------------
 # Phase 3: Pre-Flight Validation Failures (Exit 1 & Zero State Mutation)
@@ -575,7 +667,24 @@ assert_cmd_fails_with_code 1 "Cannot rename node 'steamdeck' to itself" \
   "knot node rename self-rename" \
   "$KNOT_BIN" node rename steamdeck steamdeck
 
-# 3g. Invalid identifier syntax
+# 3g. Invalid source identifier syntax
+assert_cmd_fails_with_code 1 "Invalid source node identifier" \
+  "knot node rename with invalid source symbol '@'" \
+  "$KNOT_BIN" node rename "steam@deck" deck-prime
+
+assert_cmd_fails_with_code 1 "Invalid source node identifier" \
+  "knot node rename with invalid source leading hyphen" \
+  "$KNOT_BIN" node rename "-steamdeck" deck-prime
+
+assert_cmd_fails_with_code 1 "Invalid source node identifier" \
+  "knot node rename with invalid source trailing hyphen" \
+  "$KNOT_BIN" node rename "steamdeck-" deck-prime
+
+assert_cmd_fails_with_code 1 "Invalid source node identifier" \
+  "knot node rename with invalid source space" \
+  "$KNOT_BIN" node rename "steam deck" deck-prime
+
+# 3h. Invalid target identifier syntax
 assert_cmd_fails_with_code 1 "Invalid target node identifier" \
   "knot node rename with symbol '@'" \
   "$KNOT_BIN" node rename steamdeck "deck@jupiter"
@@ -621,12 +730,15 @@ assert_topology_state "$TOPO_FILE" "desktop,laptop,deck-prime,rog-ally" "desktop
 
 # 4c. Assert Deskflow Recompilation
 assert_deskflow_clean "$HOME/.config/Deskflow/deskflow-server.conf" \
-  "steamdeck" "steamdeck-jupiter" \
-  "Deskflow server configuration recompiled for deck-prime"
+  "steamdeck" "deck-prime" "steamdeck-jupiter" \
+  "Deskflow server configuration recompiled for deck-prime" \
+  "desktop-anchor,laptop-thinkpad,rog-ally-handheld" \
+  "desktop,laptop,rog-ally"
 
 # 4d. Assert SSH Client Config Regeneration
 assert_ssh_clean "steamdeck" "deck-prime" \
-  "SSH client config updated with Host deck-prime and purged steamdeck"
+  "SSH client config updated with Host deck-prime and purged steamdeck" \
+  "laptop,rog-ally,desktop"
 
 # 4e. Assert Mute Marker File Migration
 assert_file_not_exists "$HOME/.local/state/knot/vmon_muted_deskflow_steamdeck" \
@@ -668,7 +780,19 @@ assert_manifest_state "$NODES_DIR/desktop-alpha.json" "desktop-alpha" "desktop-a
 assert_topology_state "$TOPO_FILE" "desktop-alpha,laptop,deck-prime,rog-ally" "desktop-alpha" \
   "desktop" "desktop-alpha" "Topology anchor and references migrated to desktop-alpha"
 
-# 5c. Assert Swarm Profile Migration (ANCHOR_ID in swarm.conf)
+# 5c. Assert Deskflow Recompilation for Anchor Rename
+assert_deskflow_clean "$HOME/.config/Deskflow/deskflow-server.conf" \
+  "desktop" "desktop-alpha" "desktop-anchor" \
+  "Deskflow server configuration recompiled for desktop-alpha" \
+  "laptop-thinkpad,steamdeck-jupiter,rog-ally-handheld" \
+  "laptop,deck-prime,rog-ally"
+
+# 5d. Assert SSH Client Config Regeneration for Anchor Rename
+assert_ssh_clean "desktop" "desktop-alpha" \
+  "SSH client config updated with Host desktop-alpha and purged desktop" \
+  "laptop,rog-ally,deck-prime"
+
+# 5e. Assert Swarm Profile Migration (ANCHOR_ID in swarm.conf)
 test_total=$((test_total + 1))
 if ! grep -qE '^ANCHOR_ID="desktop-alpha"' "$SWARM_DIR/swarm.conf"; then
   echo "  [FAIL] ANCHOR_ID in $SWARM_DIR/swarm.conf was not updated to desktop-alpha:" >&2
@@ -678,7 +802,7 @@ fi
 test_passed=$((test_passed + 1))
 echo "  [PASS] swarm.conf ANCHOR_ID updated to desktop-alpha"
 
-# 5d. Assert Local Node ID marker updated
+# 5f. Assert Local Node ID marker updated
 test_total=$((test_total + 1))
 if [ -f "$HOME/.config/knot/node_id" ] && [ "$(tr -d '[:space:]' < "$HOME/.config/knot/node_id")" = "desktop-alpha" ]; then
   test_passed=$((test_passed + 1))
@@ -688,7 +812,7 @@ else
   exit 1
 fi
 
-# 5e. Assert Zero Ghost Status for Anchor
+# 5g. Assert Zero Ghost Status for Anchor
 test_total=$((test_total + 1))
 status_out="$("$KNOT_BIN" status 2>&1)"
 if echo "$status_out" | grep -qE "(^|[[:space:]])desktop([[:space:]]|$)"; then
