@@ -247,7 +247,13 @@ node_rename() {
     return 1
   fi
 
-  # 4. Target identifier syntax validation
+  # 4. Source identifier syntax validation
+  if ! [[ "$old_id" =~ ^[a-zA-Z0-9]([-_a-zA-Z0-9]*[a-zA-Z0-9])?$ ]]; then
+    echo "Error: Invalid source node identifier '$old_id'. Identifier must start and end with alphanumeric characters and may contain hyphens and underscores." >&2
+    return 1
+  fi
+
+  # 5. Target identifier syntax validation
   if ! [[ "$new_id" =~ ^[a-zA-Z0-9]([-_a-zA-Z0-9]*[a-zA-Z0-9])?$ ]]; then
     echo "Error: Invalid target node identifier '$new_id'. Identifier must start and end with alphanumeric characters and may contain hyphens and underscores." >&2
     return 1
