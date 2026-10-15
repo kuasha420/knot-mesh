@@ -2377,7 +2377,7 @@ case "${1:-}" in
     echo -e "${C_BOLD}Knot - Multi-Device Mesh Orchestrator${C_RESET}"
     echo "Usage:"
     echo "  knot update [--all|<node_id>] [--dev] Update Knot binaries & core modules (or dev git pull)"
-    echo "  knot topology [show|align-internal] Visual multi-screen spatial layout"
+    echo "  knot topology [show|link|unlink|remove|set-anchor|align-internal] Visual multi-screen spatial layout"
     echo "  knot onboard [node_id]        Enroll current device into the mesh"
     echo "  knot sync [--all | <node_id>] [--dev] Reconcile keys, configs, layout, or heal dev drift"
     echo "  knot resolve <node_id> [port] Resolve active IP across 3 tiers"
