@@ -164,22 +164,40 @@ assert_ssh_clean() {
   local desc="$3"
 
   test_total=$((test_total + 1))
-  if [ -f "$auth_file" ]; then
-    if grep -qF "$forbidden_key_substr" "$auth_file"; then
-      echo "  [FAIL] $desc: Forbidden pubkey for '$forbidden_node' found in $auth_file" >&2
-      exit 1
-    fi
+  if [ ! -f "$auth_file" ]; then
+    echo "  [FAIL] $desc: Expected SSH authorized_keys file does not exist: $auth_file" >&2
+    exit 1
   fi
 
-  if [ -f "$conf_file" ]; then
-    if grep -qE "(^|[[:space:]])Host[[:space:]]+.*(^|[[:space:]])${forbidden_node}([[:space:]]|\.|$)" "$conf_file"; then
-      echo "  [FAIL] $desc: Forbidden Host block for '$forbidden_node' found in $conf_file" >&2
-      exit 1
-    fi
+  if [ ! -f "$conf_file" ]; then
+    echo "  [FAIL] $desc: Expected SSH config file does not exist: $conf_file" >&2
+    exit 1
+  fi
+
+  if grep -qF "$forbidden_key_substr" "$auth_file"; then
+    echo "  [FAIL] $desc: Forbidden pubkey for '$forbidden_node' found in $auth_file" >&2
+    exit 1
+  fi
+
+  if grep -qE "(^|[[:space:]])Host[[:space:]]+.*(^|[[:space:]])${forbidden_node}([[:space:]]|\.|$)" "$conf_file"; then
+    echo "  [FAIL] $desc: Forbidden Host block for '$forbidden_node' found in $conf_file" >&2
+    exit 1
+  fi
+
+  # Positive assertion: verify surviving node's pubkey ('laptop' / AAAAC3NzaC1lZDI1NTE5AAAAI_LAPTOP_KEY) remains present in $auth_file
+  if ! grep -qF "AAAAC3NzaC1lZDI1NTE5AAAAI_LAPTOP_KEY" "$auth_file"; then
+    echo "  [FAIL] $desc: Surviving pubkey for 'laptop' missing from $auth_file" >&2
+    exit 1
+  fi
+
+  # Positive assertion: verify surviving Host block ('Host laptop') remains present in $conf_file
+  if ! grep -qE "(^|[[:space:]])Host[[:space:]]+laptop([[:space:]]|$)" "$conf_file"; then
+    echo "  [FAIL] $desc: Surviving Host block 'Host laptop' missing from $conf_file" >&2
+    exit 1
   fi
 
   test_passed=$((test_passed + 1))
-  echo "  [PASS] $desc (SSH authorized_keys & ~/.ssh/config free of '$forbidden_node')"
+  echo "  [PASS] $desc (SSH authorized_keys & ~/.ssh/config free of '$forbidden_node', surviving 'laptop' verified)"
 }
 
 assert_deskflow_clean() {
@@ -189,18 +207,27 @@ assert_deskflow_clean() {
   local desc="$3"
 
   test_total=$((test_total + 1))
-  if [ -f "$conf_file" ]; then
-    if grep -qE "(^|[[:space:]])${forbidden_node}:" "$conf_file" || \
-       grep -qE "(^|[[:space:]])${forbidden_host}:" "$conf_file" || \
-       grep -qE "to[[:space:]]+${forbidden_node}([[:space:]]|$)" "$conf_file" || \
-       grep -qE "to[[:space:]]+${forbidden_host}([[:space:]]|$)" "$conf_file"; then
-      echo "  [FAIL] $desc: Forbidden Deskflow routing entry for '$forbidden_node' ($forbidden_host) found in $conf_file" >&2
-      exit 1
-    fi
+  if [ ! -f "$conf_file" ]; then
+    echo "  [FAIL] $desc: Expected Deskflow server configuration file does not exist: $conf_file" >&2
+    exit 1
+  fi
+
+  if grep -qE "(^|[[:space:]])${forbidden_node}:" "$conf_file" || \
+     grep -qE "(^|[[:space:]])${forbidden_host}:" "$conf_file" || \
+     grep -qE "to[[:space:]]+${forbidden_node}([[:space:]]|$)" "$conf_file" || \
+     grep -qE "to[[:space:]]+${forbidden_host}([[:space:]]|$)" "$conf_file"; then
+    echo "  [FAIL] $desc: Forbidden Deskflow routing entry for '$forbidden_node' ($forbidden_host) found in $conf_file" >&2
+    exit 1
+  fi
+
+  # Positive assertion: verify surviving screen ('laptop:') remains present in $conf_file
+  if ! grep -qE "(^|[[:space:]])(laptop|laptop-thinkpad):" "$conf_file"; then
+    echo "  [FAIL] $desc: Surviving screen 'laptop:' missing from Deskflow config: $conf_file" >&2
+    exit 1
   fi
 
   test_passed=$((test_passed + 1))
-  echo "  [PASS] $desc (Deskflow server configuration free of '$forbidden_node' & '$forbidden_host')"
+  echo "  [PASS] $desc (Deskflow server configuration free of '$forbidden_node' & '$forbidden_host', surviving screen 'laptop:' verified)"
 }
 
 # -------------------------------------------------------------
@@ -334,7 +361,7 @@ if [ "$1" = "org.kde.kdeconnect" ] && [[ "$2" =~ ^/modules/kdeconnect/devices/([
     case "$dev" in
       kde-device-steamdeck) echo "steamdeck-jupiter" ;;
       kde-device-rogally) echo "rog-ally-handheld" ;;
-      kde-device-laptop) echo "laptop-thinkpad" ;;
+      kde-device-laptop) echo "laptop" ;;
       *) echo "$dev" ;;
     esac
     exit 0
@@ -429,6 +456,12 @@ echo "testswarm" > "$HOME/.local/state/knot/active_swarm"
 echo "testswarm" > "$HOME/.config/knot/active_swarm"
 echo "desktop" > "$HOME/.config/knot/node_id"
 
+# Seed KDE Connect configuration fixture
+cat << 'KDE_EOF' > "$HOME/.config/kdeconnect/config"
+[General]
+customDevices=192.168.1.10,192.168.1.20,192.168.1.30
+KDE_EOF
+
 # 4 Node Manifests
 cat << 'NODE_EOF' > "$NODES_DIR/desktop.json"
 {
@@ -446,7 +479,7 @@ NODE_EOF
 cat << 'NODE_EOF' > "$NODES_DIR/laptop.json"
 {
   "id": "laptop",
-  "hostname": "laptop-thinkpad",
+  "hostname": "laptop",
   "role": "strand",
   "port": 22,
   "user": "laptopuser",
@@ -530,7 +563,10 @@ cat << 'TOPO_EOF' > "$TOPO_FILE"
       }
     }
   },
-  "links": [],
+  "links": [
+    {"from": "desktop", "to": "steamdeck"},
+    {"from": "desktop", "to": "laptop"}
+  ],
   "locked": false
 }
 TOPO_EOF
@@ -553,6 +589,7 @@ assert_file_exists "$NODES_DIR/rog-ally.json" "Baseline rog-ally manifest"
 assert_file_exists "$HOME/.ssh/authorized_keys" "Baseline authorized_keys"
 assert_file_exists "$HOME/.ssh/config" "Baseline ssh config"
 assert_file_exists "$HOME/.config/Deskflow/deskflow-server.conf" "Baseline deskflow conf"
+assert_file_exists "$HOME/.config/kdeconnect/config" "Baseline kdeconnect config"
 
 echo "  -> Baseline environment configured successfully."
 
@@ -663,6 +700,27 @@ PYEOF
 test_passed=$((test_passed + 1))
 echo "  [PASS] Fractional span coordinates [50, 100] preserved for sibling 'rog-ally'"
 
+# 2b. Assert links in topology.json purged steamdeck while preserving desktop -> laptop
+test_total=$((test_total + 1))
+python3 - << 'PYEOF' "$TOPO_FILE"
+import json, sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    topo = json.load(f)
+links = topo.get("links", [])
+deck_link = [l for l in links if l.get("from") == "steamdeck" or l.get("to") == "steamdeck"]
+laptop_link = [l for l in links if l.get("from") == "desktop" and l.get("to") == "laptop"]
+
+if deck_link:
+    sys.stderr.write(f"steamdeck link was not purged from links: {deck_link}\n")
+    sys.exit(1)
+if not laptop_link:
+    sys.stderr.write(f"Surviving link desktop -> laptop was unexpectedly purged: {links}\n")
+    sys.exit(1)
+sys.exit(0)
+PYEOF
+test_passed=$((test_passed + 1))
+echo "  [PASS] Surviving link {'from': 'desktop', 'to': 'laptop'} preserved in links, steamdeck purged"
+
 # 3. Assert SSH authorized_keys and config regenerated without steamdeck
 assert_ssh_clean "steamdeck" "AAAAC3NzaC1lZDI1NTE5AAAAI_STEAMDECK_KEY" \
   "SSH authorized_keys and config regenerated without steamdeck"
@@ -679,6 +737,21 @@ if [ ! -f "$LOG_DIR/kdeconnect_unpaired.log" ] || ! grep -qE "(kde-device-steamd
 fi
 test_passed=$((test_passed + 1))
 echo "  [PASS] KDE Connect unpair called for steamdeck"
+
+# 5b. Assert KDE Connect customDevices pruned steamdeck IP (192.168.1.20)
+test_total=$((test_total + 1))
+kde_cfg="$HOME/.config/kdeconnect/config"
+if [ ! -f "$kde_cfg" ]; then
+  echo "  [FAIL] KDE Connect config file does not exist: $kde_cfg" >&2
+  exit 1
+fi
+if ! grep -qF "customDevices=192.168.1.10,192.168.1.30" "$kde_cfg"; then
+  echo "  [FAIL] KDE Connect customDevices was not correctly pruned. Expected 'customDevices=192.168.1.10,192.168.1.30':" >&2
+  cat "$kde_cfg" >&2
+  exit 1
+fi
+test_passed=$((test_passed + 1))
+echo "  [PASS] KDE Connect customDevices pruned steamdeck IP (customDevices=192.168.1.10,192.168.1.30)"
 
 # 6. Assert Muted marker file cleaned
 assert_file_not_exists "$HOME/.local/state/knot/vmon_muted_deskflow_steamdeck" \
