@@ -145,6 +145,7 @@ NESTED_COMMANDS=(
   "screen login"
   "screen status"
   "node remove"
+  "node rename"
   "node list"
 )
 
