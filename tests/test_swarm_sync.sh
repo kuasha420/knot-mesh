@@ -101,6 +101,9 @@ export PATH="$MOCK_BIN:$PATH"
 cat << 'MOCK_SSH_EOF' > "$MOCK_BIN/ssh"
 #!/usr/bin/env bash
 set -euo pipefail
+if [ "${MOCK_SSH_FAIL:-0}" -eq 1 ]; then
+  exit 1
+fi
 target=""
 cmd=""
 while [ $# -gt 0 ]; do
@@ -140,7 +143,12 @@ if [[ "$cmd" =~ readlink\ -f ]]; then
 fi
 
 if [[ "$cmd" =~ command\ -v\ rsync ]]; then
-  exit 1 # simulate minimal system without rsync
+  if [ "${MOCK_ENABLE_RSYNC:-0}" -eq 1 ]; then
+    echo "/usr/bin/rsync"
+    exit 0
+  else
+    exit 1 # simulate minimal system without rsync
+  fi
 fi
 
 if [[ "$cmd" =~ knot.*sync ]]; then
@@ -169,6 +177,68 @@ eval "$cmd"
 exit 0
 MOCK_SSH_EOF
 chmod +x "$MOCK_BIN/ssh"
+
+cat << 'MOCK_RSYNC_EOF' > "$MOCK_BIN/rsync"
+#!/usr/bin/env bash
+set -euo pipefail
+if [ -n "${RSYNC_LOG:-}" ]; then
+  echo "$*" >> "$RSYNC_LOG"
+fi
+if [ -x /usr/bin/rsync ]; then
+  exec /usr/bin/rsync "$@"
+fi
+exit 0
+MOCK_RSYNC_EOF
+chmod +x "$MOCK_BIN/rsync"
+
+cat << 'MOCK_CURL_EOF' > "$MOCK_BIN/curl"
+#!/usr/bin/env bash
+set -euo pipefail
+url=""
+out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    -*) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+
+if [[ "$url" =~ /topology ]]; then
+  cat << 'TOPO' > "${out:-/dev/stdout}"
+{
+  "anchor": "desktop",
+  "screens": ["desktop", "laptop"]
+}
+TOPO
+  exit 0
+fi
+
+if [[ "$url" =~ /nodes ]]; then
+  cat << 'NODES' > "${out:-/dev/stdout}"
+[
+  {
+    "id": "desktop",
+    "hostname": "test-anchor",
+    "role": "anchor",
+    "port": 42069,
+    "user": "anchoruser"
+  },
+  {
+    "id": "laptop",
+    "hostname": "test-strand",
+    "role": "strand",
+    "port": 22,
+    "user": "stranduser"
+  }
+]
+NODES
+  exit 0
+fi
+
+exit 1
+MOCK_CURL_EOF
+chmod +x "$MOCK_BIN/curl"
 
 cat << 'MOCK_SYS_EOF' > "$MOCK_BIN/systemctl"
 #!/usr/bin/env bash
@@ -273,6 +343,140 @@ if [ ! -d "$MOCK_REMOTE_HOME/.terminfo" ]; then
   echo "Error: terminfo directory was not created on remote strand!" >&2
   exit 1
 fi
-echo "  -> swarm_sync_terminfo successfully synced terminfo: OK"
+echo "=== [Test 7] Transport A: Primary Rsync Push Deletion Parity (Issue #84) ==="
+export HOME="$TMP_DIR/home"
+export MOCK_REMOTE_HOME="$TMP_DIR/remote_home"
+REMOTE_SWARM_DIR="$MOCK_REMOTE_HOME/.config/knot/swarms/testswarm"
+mkdir -p "$REMOTE_SWARM_DIR/nodes"
+
+# Seed a decommissioned node manifest on remote strand
+echo '{"id":"decommissioned_a","role":"strand"}' > "$REMOTE_SWARM_DIR/nodes/decommissioned_a.json"
+
+# Ensure Anchor nodes directory does NOT contain the decommissioned node
+if [ -f "$HOME/.config/knot/swarms/testswarm/nodes/decommissioned_a.json" ]; then
+  rm -f "$HOME/.config/knot/swarms/testswarm/nodes/decommissioned_a.json"
+fi
+
+export MOCK_ENABLE_RSYNC=1
+export RSYNC_LOG="$TMP_DIR/rsync_args.log"
+if [ -f "$RSYNC_LOG" ]; then
+  rm -f "$RSYNC_LOG"
+fi
+
+swarm_sync_anchor_push "laptop" "testswarm" "$HOME/.config/knot/swarms/testswarm/nodes" "$HOME/.config/knot/swarms/testswarm/topology.json" "$HOME/.config/knot/swarms/testswarm/swarm.conf"
+
+# Assertion 1: Assert --delete flag was passed to rsync
+if [ ! -f "$RSYNC_LOG" ] || ! grep -q -- "--delete" "$RSYNC_LOG"; then
+  echo "Error: rsync push was not invoked with --delete flag!" >&2
+  exit 1
+fi
+
+# Assertion 2: Stale manifest must be deleted on remote strand
+if [ -f "$REMOTE_SWARM_DIR/nodes/decommissioned_a.json" ]; then
+  echo "Error: stale manifest 'decommissioned_a.json' was not pruned by rsync push on remote strand!" >&2
+  exit 1
+fi
+
+# Assertion 3: Active manifests must be present on remote strand
+if [ ! -f "$REMOTE_SWARM_DIR/nodes/desktop.json" ] || [ ! -f "$REMOTE_SWARM_DIR/nodes/laptop.json" ]; then
+  echo "Error: active manifests missing on remote strand after rsync push!" >&2
+  exit 1
+fi
+
+export MOCK_ENABLE_RSYNC=0
+echo "  -> Primary rsync push deletion parity verified (--delete passed & remote manifest removed): OK"
+
+echo "=== [Test 8] Transport B: Streaming Tar Fallback Push Deletion Parity (Issue #84) ==="
+export HOME="$TMP_DIR/home"
+export MOCK_REMOTE_HOME="$TMP_DIR/remote_home"
+REMOTE_SWARM_DIR="$MOCK_REMOTE_HOME/.config/knot/swarms/testswarm"
+
+# Seed a decommissioned node manifest on remote strand
+echo '{"id":"decommissioned_b","role":"strand"}' > "$REMOTE_SWARM_DIR/nodes/decommissioned_b.json"
+
+# Disable rsync to force streaming tar fallback
+export MOCK_ENABLE_RSYNC=0
+
+swarm_sync_anchor_push "laptop" "testswarm" "$HOME/.config/knot/swarms/testswarm/nodes" "$HOME/.config/knot/swarms/testswarm/topology.json" "$HOME/.config/knot/swarms/testswarm/swarm.conf"
+
+# Assertion 1: Stale manifest must be deleted on remote strand
+if [ -f "$REMOTE_SWARM_DIR/nodes/decommissioned_b.json" ]; then
+  echo "Error: stale manifest 'decommissioned_b.json' was not pruned by streaming tar fallback push!" >&2
+  exit 1
+fi
+
+# Assertion 2: Active manifests must be present on remote strand
+if [ ! -f "$REMOTE_SWARM_DIR/nodes/desktop.json" ] || [ ! -f "$REMOTE_SWARM_DIR/nodes/laptop.json" ]; then
+  echo "Error: active manifests missing on remote strand after tar fallback push!" >&2
+  exit 1
+fi
+
+echo "  -> Streaming tar fallback push deletion parity verified (stale node manifest removed on strand): OK"
+
+echo "=== [Test 9] Transport C: Strand SSH Tar Pull Deletion Parity (Issue #84) ==="
+export HOME="$TMP_DIR/strand_home"
+export MOCK_REMOTE_HOME="$TMP_DIR/home"
+STRAND_SWARM_DIR="$HOME/.config/knot/swarms/testswarm"
+mkdir -p "$STRAND_SWARM_DIR/nodes"
+
+# Seed a decommissioned node manifest locally on strand
+echo '{"id":"decommissioned_c","role":"strand"}' > "$STRAND_SWARM_DIR/nodes/decommissioned_c.json"
+
+# Ensure Anchor does NOT contain the decommissioned node
+if [ -f "$MOCK_REMOTE_HOME/.config/knot/swarms/testswarm/nodes/decommissioned_c.json" ]; then
+  rm -f "$MOCK_REMOTE_HOME/.config/knot/swarms/testswarm/nodes/decommissioned_c.json"
+fi
+
+export MOCK_SSH_FAIL=0
+
+swarm_sync_strand_pull
+
+# Assertion 1: Stale manifest must be pruned locally on the strand
+if [ -f "$STRAND_SWARM_DIR/nodes/decommissioned_c.json" ]; then
+  echo "Error: stale manifest 'decommissioned_c.json' was not pruned by strand SSH tar pull!" >&2
+  exit 1
+fi
+
+# Assertion 2: Active manifests must be present on strand
+if [ ! -f "$STRAND_SWARM_DIR/nodes/desktop.json" ] || [ ! -f "$STRAND_SWARM_DIR/nodes/laptop.json" ]; then
+  echo "Error: active manifests missing on strand after SSH tar pull!" >&2
+  exit 1
+fi
+
+echo "  -> Strand SSH tar pull deletion parity verified (stale node manifest removed locally): OK"
+
+echo "=== [Test 10] Transport D: Anchor Hub API Pull Deletion Parity & Zero Ghost Status (Issue #84) ==="
+export HOME="$TMP_DIR/strand_home"
+STRAND_SWARM_DIR="$HOME/.config/knot/swarms/testswarm"
+
+# Seed a decommissioned node manifest locally on strand
+echo '{"id":"decommissioned_d","role":"strand"}' > "$STRAND_SWARM_DIR/nodes/decommissioned_d.json"
+
+# Force SSH failure to trigger Anchor Hub API fallback
+export MOCK_SSH_FAIL=1
+
+swarm_sync_strand_pull
+
+# Assertion 1: Stale manifest must be pruned locally by Hub API pull extractor
+if [ -f "$STRAND_SWARM_DIR/nodes/decommissioned_d.json" ]; then
+  echo "Error: stale manifest 'decommissioned_d.json' was not pruned by Anchor Hub API pull!" >&2
+  exit 1
+fi
+
+# Assertion 2: Active manifests must be present on strand
+if [ ! -f "$STRAND_SWARM_DIR/nodes/desktop.json" ] || [ ! -f "$STRAND_SWARM_DIR/nodes/laptop.json" ]; then
+  echo "Error: active manifests missing on strand after Hub API pull!" >&2
+  exit 1
+fi
+
+# Assertion 3: knot status must produce ZERO ghost or offline entries for decommissioned node
+STATUS_OUT="$("$KNOT_ROOT/bin/knot" status 2>&1)"
+if echo "$STATUS_OUT" | grep -q "decommissioned_d"; then
+  echo "Error: knot status still displays decommissioned node 'decommissioned_d' as ghost or offline entry!" >&2
+  exit 1
+fi
+
+export MOCK_SSH_FAIL=0
+echo "  -> Anchor Hub API pull deletion parity & zero ghost status verified: OK"
 
 echo "=== [✓] ALL SWARM SYNC TESTS PASSED! ==="

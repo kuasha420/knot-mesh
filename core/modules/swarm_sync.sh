@@ -71,7 +71,7 @@ swarm_sync_anchor_push() {
 
   if [ "$has_rsync" -eq 1 ]; then
     local rsync_err=""
-    if ! rsync_err="$(rsync -az -e "ssh -o BatchMode=yes -o ConnectTimeout=5" "$nodes_dir/" "${target}:.config/knot/swarms/${active_swarm}/nodes/" 2>&1)"; then
+    if ! rsync_err="$(rsync -az --delete -e "ssh -o BatchMode=yes -o ConnectTimeout=5" "$nodes_dir/" "${target}:.config/knot/swarms/${active_swarm}/nodes/" 2>&1)"; then
       knot_log_err "Failed to rsync node manifests to '$target': $rsync_err"
       return 1
     fi
@@ -104,7 +104,13 @@ swarm_sync_anchor_push() {
     local staging_dir
     staging_dir="$(mktemp -d)"
     mkdir -p "$staging_dir/nodes"
-    cp -r "$nodes_dir"/* "$staging_dir/nodes/"
+    if [ -d "$nodes_dir" ]; then
+      for f in "$nodes_dir"/*; do
+        if [ -e "$f" ]; then
+          cp -r "$f" "$staging_dir/nodes/"
+        fi
+      done
+    fi
     if [ -n "$topo_file" ] && [ -r "$topo_file" ]; then
       cp "$topo_file" "$staging_dir/topology.json"
     fi
@@ -113,8 +119,33 @@ swarm_sync_anchor_push() {
       cp "$swarm_conf" "$staging_dir/${active_swarm}.conf"
     fi
 
+    local remote_unpack_cmd="
+      set -euo pipefail
+      target_dir=\"\$HOME/.config/knot/swarms/${active_swarm}\"
+      mkdir -p \"\$target_dir\"
+      stage_dir=\"\$(mktemp -d \"\$target_dir/.stage.XXXXXX\")\"
+      if tar -xzf - -C \"\$stage_dir\"; then
+        if [ -d \"\$stage_dir/nodes\" ]; then
+          rm -rf \"\$target_dir/nodes.stale\"
+          if [ -d \"\$target_dir/nodes\" ]; then
+            mv \"\$target_dir/nodes\" \"\$target_dir/nodes.stale\"
+          fi
+          mv \"\$stage_dir/nodes\" \"\$target_dir/nodes\"
+          rm -rf \"\$target_dir/nodes.stale\"
+        fi
+        for f in \"\$stage_dir\"/*; do
+          if [ -e \"\$f\" ]; then
+            cp -f \"\$f\" \"\$target_dir/\"
+          fi
+        done
+        rm -rf \"\$stage_dir\"
+      else
+        rm -rf \"\$stage_dir\"
+        exit 1
+      fi"
+
     local tar_err=""
-    if ! tar_err="$(tar -czf - -C "$staging_dir" . | ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "tar -xzf - -C \$HOME/.config/knot/swarms/${active_swarm}/" 2>&1)"; then
+    if ! tar_err="$(tar -czf - -C "$staging_dir" . | ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$remote_unpack_cmd" 2>&1)"; then
       rm -rf "$staging_dir"
       knot_log_err "Failed to stream swarm archive to '$target': $tar_err"
       return 1
@@ -228,12 +259,29 @@ swarm_sync_strand_pull() {
       local remote_home
       if remote_home="$(ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=accept-new "$candidate" 'echo $HOME' 2>&1)" && [ -n "$remote_home" ]; then
         local remote_swarm_dir="$remote_home/.config/knot/swarms/${active_swarm}"
+        local stage_dir
+        stage_dir="$(mktemp -d "$target_swarm_dir/.stage.XXXXXX")"
         local stream_err=""
-        if stream_err="$(ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new "$candidate" "tar -czf - -C \"$remote_swarm_dir\" topology.json swarm.conf nodes 2>&1" | tar -xzf - -C "$target_swarm_dir" 2>&1)"; then
+        if stream_err="$(ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new "$candidate" "tar -czf - -C \"$remote_swarm_dir\" topology.json swarm.conf nodes 2>&1" | tar -xzf - -C "$stage_dir" 2>&1)"; then
           pulled=1
+          if [ -d "$stage_dir/nodes" ]; then
+            rm -rf "$target_swarm_dir/nodes.stale"
+            if [ -d "$target_swarm_dir/nodes" ]; then
+              mv "$target_swarm_dir/nodes" "$target_swarm_dir/nodes.stale"
+            fi
+            mv "$stage_dir/nodes" "$target_swarm_dir/nodes"
+            rm -rf "$target_swarm_dir/nodes.stale"
+          fi
+          for f in topology.json swarm.conf; do
+            if [ -f "$stage_dir/$f" ]; then
+              cp -f "$stage_dir/$f" "$target_swarm_dir/$f"
+            fi
+          done
+          rm -rf "$stage_dir"
           knot_log_ok "Successfully pulled latest swarm topology and manifests from Anchor ($candidate) via SSH."
           break
         else
+          rm -rf "$stage_dir"
           knot_log_warn "Notice: SSH archive pull from $candidate failed: $stream_err"
         fi
       fi
@@ -251,20 +299,50 @@ swarm_sync_strand_pull() {
 
       local nodes_json=""
       if nodes_json="$(curl -kfsSL "https://${anchor_host}:${hub_port}/nodes" 2>&1)"; then
-        python3 -c "
-import json, sys, os
+        local extract_err=""
+        if ! extract_err="$(python3 -c '
+import json, sys, os, re
 try:
     data = json.loads(sys.argv[1])
-    nodes = data if isinstance(data, dict) else {}
-    if 'nodes' in nodes and isinstance(nodes['nodes'], dict):
-        nodes = nodes['nodes']
+    raw_nodes = data.get("nodes", data) if isinstance(data, dict) else data
+    nodes_map = {}
+    if isinstance(raw_nodes, list):
+        for item in raw_nodes:
+            if isinstance(item, dict) and item.get("id"):
+                nodes_map[str(item["id"])] = item
+    elif isinstance(raw_nodes, dict):
+        for k, v in raw_nodes.items():
+            if isinstance(v, dict):
+                nid = v.get("id") or str(k)
+                nodes_map[str(nid)] = v
     nodes_dir = sys.argv[2]
-    for nid, ndata in nodes.items():
-        with open(os.path.join(nodes_dir, f'{nid}.json'), 'w') as f:
+    os.makedirs(nodes_dir, exist_ok=True)
+    valid_files = set()
+    for nid, ndata in nodes_map.items():
+        if not re.match(r"^[a-zA-Z0-9_-]+$", nid):
+            continue
+        fname = f"{nid}.json"
+        valid_files.add(fname)
+        fpath = os.path.join(nodes_dir, fname)
+        with open(fpath, "w", encoding="utf-8") as f:
             json.dump(ndata, f, indent=2)
+    if valid_files and os.path.isdir(nodes_dir):
+        for fname in os.listdir(nodes_dir):
+            if fname.endswith(".json") and fname not in valid_files:
+                fpath = os.path.join(nodes_dir, fname)
+                if os.path.isfile(fpath):
+                    try:
+                        os.remove(fpath)
+                    except OSError as e:
+                        sys.stderr.write(f"Notice: Failed to prune {fname}: {e}\n")
 except Exception as e:
-    sys.stderr.write(f'Notice: node extraction: {e}\n')
-" "$nodes_json" "$target_swarm_dir/nodes"
+    sys.stderr.write(f"Notice: node extraction: {e}\n")
+    sys.exit(1)
+' "$nodes_json" "$target_swarm_dir/nodes" 2>&1)"; then
+          knot_log_warn "Notice: Hub node extraction failed: $extract_err"
+        fi
+      else
+        knot_log_warn "Notice: Hub nodes endpoint pull failed: $nodes_json"
       fi
     else
       knot_log_warn "Notice: Anchor Hub pull failed: $hub_err"
