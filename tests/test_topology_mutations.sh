@@ -7,16 +7,16 @@ set -euo pipefail
 # 1. CLI help flags (-h, --help) exit 0 across all subcommands
 # 2. Valid directional links with automatic reciprocal edge generation
 # 3. Fractional sliced spans (e.g. 0-50, 50-100) along same direction without clobbering siblings
-# 4. Bounds validation rejection (0 <= MIN < MAX <= 100)
-# 5. Interval interior overlap rejection on source and reciprocal targets; abutting spans allowed
-# 6. Self-link rejection
+# 4. Bounds validation rejection (0 <= MIN < MAX <= 100), negative bounds, malformed delimiters, and state invariance
+# 5. Interval interior overlap rejection on source and reciprocal targets with zero state mutation
+# 6. Self-link rejection with zero state mutation
 # 7. Targeted unlink (specific destination slice) with symmetric reciprocal pruning
 # 8. Full unlink (all links on direction) with symmetric reciprocal pruning
 # 9. Active anchor removal protection with exact diagnostic error
 # 10. Node removal purging screens, layout[node], and incoming references across entire topology
 # 11. Set-anchor mutation and validation
-# 12. Deskflow server configuration recompilation
-# 13. Visual 2D ASCII layout rendering (knot topology show)
+# 12. Deskflow server configuration recompilation with explicit screens/links/options directives
+# 13. Visual 2D ASCII layout rendering and link descriptor validation (knot topology show)
 # 14. PSL Gold Standard: Zero error swallowing, zero || true, strict shell hygiene
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -61,8 +61,10 @@ assert_output_contains() {
   local actual=0
   local output=""
   output="$("${cmd[@]}" 2>&1)" || actual=$?
+  local clean_output
+  clean_output="$(printf '%s\n' "$output" | sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g')"
 
-  if echo "$output" | grep -qF "$pattern"; then
+  if printf '%s\n' "$clean_output" | grep -qF "$pattern"; then
     test_passed=$((test_passed + 1))
     echo "  [PASS] $description (contains '$pattern')"
   else
@@ -71,6 +73,36 @@ assert_output_contains() {
     echo "         Output : $output"
     return 1
   fi
+}
+
+assert_state_invariant() {
+  local description="$1"
+  local expected_content="$2"
+
+  test_total=$((test_total + 1))
+  local actual_content
+  actual_content="$(cat "$TOPO_FILE")"
+
+  if [ "$actual_content" = "$expected_content" ]; then
+    test_passed=$((test_passed + 1))
+    echo "  [PASS] $description (state invariant)"
+  else
+    echo "  [FAIL] $description (topology.json modified unexpectedly)"
+    diff -u <(printf '%s\n' "$expected_content") <(printf '%s\n' "$actual_content") || [ $? -eq 1 ]
+    return 1
+  fi
+}
+
+assert_reject_with_invariance() {
+  local description="$1"
+  shift
+  local cmd=("$@")
+
+  local state_before
+  state_before="$(cat "$TOPO_FILE")"
+
+  assert_exit_code 1 "$description" "${cmd[@]}"
+  assert_state_invariant "$description (zero state mutation)" "$state_before"
 }
 
 # --- Setup Isolated Hermetic Test Environment ---
@@ -236,29 +268,41 @@ else
 fi
 
 echo ""
-echo "--- 5. Bounds Validation Rejection (0 <= MIN < MAX <= 100) ---"
-assert_exit_code 1 "Reject MIN == MAX (50-50)" "$KNOT_BIN" topology link desktop right rog-ally --span 50-50
-assert_exit_code 1 "Reject MIN > MAX (100-0)" "$KNOT_BIN" topology link desktop right rog-ally --span 100-0
-assert_exit_code 1 "Reject negative MIN (-10-50)" "$KNOT_BIN" topology link desktop right rog-ally --span -10-50
-assert_exit_code 1 "Reject MAX > 100 (0-150)" "$KNOT_BIN" topology link desktop right rog-ally --span 0-150
-assert_exit_code 1 "Reject non-numeric span (abc-def)" "$KNOT_BIN" topology link desktop right rog-ally --span abc-def
-assert_exit_code 1 "Reject invalid target-span bounds (50-50)" "$KNOT_BIN" topology link desktop right rog-ally --target-span 50-50
-assert_exit_code 1 "Reject target-span > 100 (0-120)" "$KNOT_BIN" topology link desktop right rog-ally --target-span 0-120
+echo "--- 5. Bounds Validation Rejection (0 <= MIN < MAX <= 100) & State Invariance ---"
+sec5_before="$(cat "$TOPO_FILE")"
+assert_reject_with_invariance "Reject MIN == MAX (50-50)" "$KNOT_BIN" topology link desktop right rog-ally --span 50-50
+assert_reject_with_invariance "Reject MIN > MAX (100-0)" "$KNOT_BIN" topology link desktop right rog-ally --span 100-0
+assert_reject_with_invariance "Reject negative MIN (-10-50)" "$KNOT_BIN" topology link desktop right rog-ally --span -10-50
+assert_reject_with_invariance "Reject MAX > 100 (0-150)" "$KNOT_BIN" topology link desktop right rog-ally --span 0-150
+assert_reject_with_invariance "Reject non-numeric span (abc-def)" "$KNOT_BIN" topology link desktop right rog-ally --span abc-def
+assert_reject_with_invariance "Reject invalid target-span bounds (50-50)" "$KNOT_BIN" topology link desktop right rog-ally --target-span 50-50
+assert_reject_with_invariance "Reject target-span > 100 (0-120)" "$KNOT_BIN" topology link desktop right rog-ally --target-span 0-120
+assert_reject_with_invariance "Reject negative target-span (-10-50)" "$KNOT_BIN" topology link desktop right rog-ally --target-span -10-50
+assert_reject_with_invariance "Reject inverted target-span (80-20)" "$KNOT_BIN" topology link desktop right rog-ally --target-span 80-20
+assert_reject_with_invariance "Reject malformed span without delimiter (50)" "$KNOT_BIN" topology link desktop right rog-ally --span 50
+assert_reject_with_invariance "Reject malformed span with multiple delimiters (0-50-100)" "$KNOT_BIN" topology link desktop right rog-ally --span 0-50-100
+assert_reject_with_invariance "Reject malformed target-span without delimiter (50)" "$KNOT_BIN" topology link desktop right rog-ally --target-span 50
+assert_reject_with_invariance "Reject malformed target-span with multiple delimiters (0-50-100)" "$KNOT_BIN" topology link desktop right rog-ally --target-span 0-50-100
+assert_state_invariant "Section 5: State invariant across all bounds rejection tests" "$sec5_before"
 
 echo ""
-echo "--- 6. Interval Interior Overlap Rejection ---"
+echo "--- 6. Interval Interior Overlap Rejection & State Invariance ---"
+sec6_before="$(cat "$TOPO_FILE")"
 # desktop.down currently has [0, 50] and [50, 100]
-assert_exit_code 1 "Reject span overlapping both slices (25-75)" "$KNOT_BIN" topology link desktop down rog-ally --span 25-75
-assert_exit_code 1 "Reject exact duplicate span (0-50)" "$KNOT_BIN" topology link desktop down rog-ally --span 0-50
-assert_exit_code 1 "Reject partial interior overlap (49-60)" "$KNOT_BIN" topology link desktop down rog-ally --span 49-60
+assert_reject_with_invariance "Reject span overlapping both slices (25-75)" "$KNOT_BIN" topology link desktop down rog-ally --span 25-75
+assert_reject_with_invariance "Reject exact duplicate span (0-50)" "$KNOT_BIN" topology link desktop down rog-ally --span 0-50
+assert_reject_with_invariance "Reject partial interior overlap (49-60)" "$KNOT_BIN" topology link desktop down rog-ally --span 49-60
 
 # Reciprocal overlap: laptop.up has [0, 100] pointing to desktop
 # Linking rog-ally down laptop with target-span 0-100 would overlap on laptop.up
-assert_exit_code 1 "Reject reciprocal interior overlap on target" "$KNOT_BIN" topology link rog-ally down laptop --target-span 0-100
+assert_reject_with_invariance "Reject reciprocal interior overlap on target" "$KNOT_BIN" topology link rog-ally down laptop --target-span 0-100
+assert_state_invariant "Section 6: State invariant across all interior overlap tests" "$sec6_before"
 
 echo ""
-echo "--- 7. Self-Link Rejection ---"
-assert_exit_code 1 "Reject linking node to itself" "$KNOT_BIN" topology link desktop left desktop
+echo "--- 7. Self-Link Rejection & State Invariance ---"
+sec7_before="$(cat "$TOPO_FILE")"
+assert_reject_with_invariance "Reject linking node to itself" "$KNOT_BIN" topology link desktop left desktop
+assert_state_invariant "Section 7: State invariant across self-link rejection test" "$sec7_before"
 
 echo ""
 echo "--- 8. Targeted Unlink (Pruning Single Slice & Reciprocal) ---"
@@ -398,24 +442,27 @@ assert_exit_code 0 "Link steamdeck left rog-ally" "$KNOT_BIN" topology link stea
 
 test_total=$((test_total + 1))
 if [ -f "$DESKFLOW_CFG_DIR/deskflow-server.conf" ]; then
-  if grep -q "rog-ally" "$DESKFLOW_CFG_DIR/deskflow-server.conf"; then
-    test_passed=$((test_passed + 1))
-    echo "  [PASS] Deskflow server configuration compiled and contains updated topology"
-  else
-    echo "  [FAIL] deskflow-server.conf does not contain 'rog-ally'"
-    cat "$DESKFLOW_CFG_DIR/deskflow-server.conf"
-    exit 1
-  fi
+  test_passed=$((test_passed + 1))
+  echo "  [PASS] Deskflow server configuration file created"
 else
   echo "  [FAIL] deskflow-server.conf not created at $DESKFLOW_CFG_DIR/deskflow-server.conf"
   exit 1
 fi
+
+assert_output_contains "section: screens" "Deskflow config contains 'section: screens'" cat "$DESKFLOW_CFG_DIR/deskflow-server.conf"
+assert_output_contains "section: links" "Deskflow config contains 'section: links'" cat "$DESKFLOW_CFG_DIR/deskflow-server.conf"
+assert_output_contains "left(0,100) = ally-arch(0,100)" "Deskflow config contains 'left(0,100) = ally-arch(0,100)'" cat "$DESKFLOW_CFG_DIR/deskflow-server.conf"
+assert_output_contains "right(0,100) = deck-eos(0,100)" "Deskflow config contains 'right(0,100) = deck-eos(0,100)'" cat "$DESKFLOW_CFG_DIR/deskflow-server.conf"
+assert_output_contains "section: options" "Deskflow config contains 'section: options'" cat "$DESKFLOW_CFG_DIR/deskflow-server.conf"
 
 echo ""
 echo "--- 15. Visual 2D ASCII Layout Rendering (knot topology show) ---"
 assert_exit_code 0 "knot topology show exits code 0" "$KNOT_BIN" topology show
 assert_output_contains "Knot Multi-Screen Mesh Topology" "Verify header rendered" "$KNOT_BIN" topology show
 assert_output_contains "Bidirectional Reciprocal Links" "Verify links rendered" "$KNOT_BIN" topology show
+assert_output_contains "steamdeck" "Verify steamdeck anchor node rendered in layout" "$KNOT_BIN" topology show
+assert_output_contains "rog-ally" "Verify rog-ally adjacent screen node rendered in layout" "$KNOT_BIN" topology show
+assert_output_contains "steamdeck --[left span=0-100% -> rog-ally span=0-100%]--> rog-ally" "Verify directional reciprocal link descriptor rendered" "$KNOT_BIN" topology show
 
 echo ""
 echo "--- 16. PSL Gold Standard Integrity & Syntax Verifications ---"
