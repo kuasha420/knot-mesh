@@ -223,12 +223,17 @@ def compile_deskflow(topology_file: str, nodes_dir: str, mode: str = "unlocked",
     lines.append("end\n")
 
     # 4. Section: options
+    topo_options = topo.get("options", {})
+    switch_delay = topo_options.get("switchDelay", 250)
+    switch_corners = topo_options.get("switchCorners", "none")
+    switch_corner_size = topo_options.get("switchCornerSize", 0)
+
     lines.append("section: options")
     lines.append("\trelativeMouseMoves = false")
     lines.append("\tclipboardSharing = false")
-    lines.append("\tswitchCorners = none")
-    lines.append("\tswitchCornerSize = 0")
-    lines.append("\tswitchDelay = 0")
+    lines.append(f"\tswitchCorners = {switch_corners}")
+    lines.append(f"\tswitchCornerSize = {switch_corner_size}")
+    lines.append(f"\tswitchDelay = {switch_delay}")
     lines.append("\tkeystroke(ScrollLock) = lockCursorToScreen(toggle)")
     lines.append("\tkeystroke(super+Escape) = lockCursorToScreen(toggle)")
     lines.append("end")

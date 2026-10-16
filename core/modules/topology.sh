@@ -142,7 +142,7 @@ topology_align_internal() {
     local fresh_disp="" disp_rc=0
     if fresh_disp="$("$KNOT_ROOT/core/installer/display.sh" --json)"; then
       if [ -n "$fresh_disp" ]; then
-        for target_mf in "$home/.config/knot/swarms/${active_swarm}/nodes/${my_host}.json" "$home/.config/knot/swarms/${active_swarm}/nodes/rog-ally.json"; do
+        for target_mf in "$home/.config/knot/swarms/${active_swarm}/nodes/${my_host}.json" "$home/.config/knot/swarms/${active_swarm}/nodes/steamdeck.json" "$home/.config/knot/swarms/${active_swarm}/nodes/rog-ally.json"; do
           if [ -f "$target_mf" ]; then
             local py_err="" py_rc=0
             py_err="$(python3 -c "

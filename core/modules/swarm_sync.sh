@@ -71,7 +71,7 @@ swarm_sync_anchor_push() {
 
   if [ "$has_rsync" -eq 1 ]; then
     local rsync_err=""
-    if ! rsync_err="$(rsync -az -e "ssh -o BatchMode=yes -o ConnectTimeout=5" "$nodes_dir/" "${target}:.config/knot/swarms/${active_swarm}/nodes/" 2>&1)"; then
+    if ! rsync_err="$(rsync -az --delete -e "ssh -o BatchMode=yes -o ConnectTimeout=5" "$nodes_dir/" "${target}:.config/knot/swarms/${active_swarm}/nodes/" 2>&1)"; then
       knot_log_err "Failed to rsync node manifests to '$target': $rsync_err"
       return 1
     fi
