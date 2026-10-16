@@ -24,6 +24,7 @@ source "$KNOT_ROOT/core/modules/shutdown.sh"
 source "$KNOT_ROOT/core/modules/topology.sh"
 source "$KNOT_ROOT/core/modules/swarm_sync.sh"
 source "$KNOT_ROOT/core/modules/council.sh"
+source "$KNOT_ROOT/core/modules/node.sh"
 
 cmd_onboard() {
   local node_id="${1:-}"
@@ -2254,6 +2255,10 @@ cmd_worktree() {
 }
 
 case "${1:-}" in
+  node)
+    shift
+    cmd_node "$@"
+    ;;
   worktree)
     shift
     cmd_worktree "$@"
@@ -2379,6 +2384,7 @@ case "${1:-}" in
     echo "  knot update [--all|<node_id>] [--dev] Update Knot binaries & core modules (or dev git pull)"
     echo "  knot topology [show|align-internal] Visual multi-screen spatial layout"
     echo "  knot onboard [node_id]        Enroll current device into the mesh"
+    echo "  knot node <rename|list>       Migrate node identity across cluster"
     echo "  knot sync [--all | <node_id>] [--dev] Reconcile keys, configs, layout, or heal dev drift"
     echo "  knot resolve <node_id> [port] Resolve active IP across 3 tiers"
     echo "  knot status                   Show live status of all mesh nodes"
