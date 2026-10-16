@@ -156,6 +156,11 @@ These operational rules govern cognitive behavior and human-in-the-loop alignmen
 *Explicit CLI palettes yield 10x lower human intervention rates:*
 
 ```bash
+# 🧪 Project Verification & Native Toolchain
+pytest                                         # Run complete project test suite
+python3 -m unittest discover -s tests -v       # Standard unittest runner
+bash tests/*.sh                                # Run bash test suites
+
 # 🩺 Environment Diagnostics & Auto-Healing
 agyis doctor                                   # Audit workstation runtimes & auto-heal
 agyis status                                   # Print harness health, active hooks & telemetry
