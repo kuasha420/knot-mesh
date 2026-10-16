@@ -80,6 +80,8 @@ SUBCOMMANDS=(
   "mcp"
   "socket"
   "ledger"
+  "node"
+  "offboard"
 )
 
 for sub in "${SUBCOMMANDS[@]}"; do
@@ -138,6 +140,8 @@ NESTED_COMMANDS=(
   "screen lock"
   "screen login"
   "screen status"
+  "node remove"
+  "node list"
 )
 
 for nested in "${NESTED_COMMANDS[@]}"; do
@@ -168,6 +172,7 @@ assert_exit_code 1 "knot repair (purged command)" "$KNOT_BIN" repair
 assert_exit_code 1 "knot kafe unknown-action" "$KNOT_BIN" kafe unknown-action
 assert_exit_code 1 "knot sleep unknown-action" "$KNOT_BIN" sleep unknown-action
 assert_exit_code 1 "knot topology unknown-sub" "$KNOT_BIN" topology unknown-sub
+assert_exit_code 1 "knot node unknown-action" "$KNOT_BIN" node unknown-action
 
 echo ""
 echo "--- 6. Unknown Flags (Exit 1) ---"
@@ -179,6 +184,8 @@ assert_exit_code 1 "knot mcp --unknown-flag" "$KNOT_BIN" mcp --unknown-flag
 assert_exit_code 1 "knot swarm --unknown-flag" "$KNOT_BIN" swarm --unknown-flag
 assert_exit_code 1 "knot display --unknown-flag" "$KNOT_BIN" display --unknown-flag
 assert_exit_code 1 "knot kdeconnect --unknown-flag" "$KNOT_BIN" kdeconnect --unknown-flag
+assert_exit_code 1 "knot node --unknown-flag" "$KNOT_BIN" node --unknown-flag
+assert_exit_code 1 "knot offboard --unknown-flag" "$KNOT_BIN" offboard --unknown-flag
 
 echo ""
 echo "================================================================================"
