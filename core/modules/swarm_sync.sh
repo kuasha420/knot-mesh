@@ -601,41 +601,56 @@ swarm_sync_dev() {
       fi
 
       local sync_count=0
-      for manifest in "$nodes_dir/"*.json; do
-        [ -e "$manifest" ] || continue
-        local id role
-        id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-        role="$(awk -F'"' '/"role":/ {print $4}' "$manifest")"
-        if [ "$role" = "anchor" ] || [ "$id" = "$my_host" ]; then
-          continue
-        fi
+      local strands_meta="" s_rc=0
+      strands_meta="$(python3 -c "
+import json, os, sys, glob
+nodes_dir = sys.argv[1]
+m_host = sys.argv[2]
+res = []
+for mf in sorted(glob.glob(os.path.join(nodes_dir, '*.json'))):
+    try:
+        with open(mf, 'r', encoding='utf-8') as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            nid = d.get('id') or os.path.splitext(os.path.basename(mf))[0]
+            role = d.get('role') or 'strand'
+            if role != 'anchor' and nid != m_host:
+                res.append(nid)
+    except (OSError, ValueError):
+        continue
+print('\n'.join(res))
+" "$nodes_dir" "$my_host" 2>&1)" || s_rc=$?
+      if [ $s_rc -eq 0 ] && [ -n "$strands_meta" ]; then
+        while IFS= read -r id; do
+          [ -n "$id" ] || continue
 
-        # Probe remote install type
-        local r_type=""
-        if ! r_type="$(ssh -o BatchMode=yes -o ConnectTimeout=4 "$id" '
-          if [ -f "$HOME/.config/knot/install_type" ]; then
-            tr -d "[:space:]" < "$HOME/.config/knot/install_type"
-          elif [ -d "$HOME/Dev/knot-mesh/.git" ] || [ -d "$HOME/knot-mesh/.git" ]; then
-            echo "dev"
-          else
-            echo "prod"
+          # Probe remote install type
+          local r_type=""
+          if ! r_type="$(ssh -o BatchMode=yes -o ConnectTimeout=4 "$id" '
+            if [ -f "$HOME/.config/knot/install_type" ]; then
+              tr -d "[:space:]" < "$HOME/.config/knot/install_type"
+            elif [ -d "$HOME/Dev/knot-mesh/.git" ] || [ -d "$HOME/knot-mesh/.git" ]; then
+              echo "dev"
+            else
+              echo "prod"
+            fi
+          ' 2>&1)"; then
+            knot_log_warn "Notice: Unable to probe install type on '$id': $r_type"
+            r_type="unknown"
           fi
-        ' 2>&1)"; then
-          knot_log_warn "Notice: Unable to probe install type on '$id': $r_type"
-          r_type="unknown"
-        fi
 
-        if [ "$r_type" = "prod" ] && [ "$force" -eq 0 ]; then
-          knot_log_warn "Strand '$id' is a PRODUCTION installation. Skipping dev drift healing (use --force-dev to override)."
-          swarm_sync_anchor_push "$id" "$active_swarm" "$nodes_dir" "$topo_file" "$swarm_conf" 0 1
+          if [ "$r_type" = "prod" ] && [ "$force" -eq 0 ]; then
+            knot_log_warn "Strand '$id' is a PRODUCTION installation. Skipping dev drift healing (use --force-dev to override)."
+            swarm_sync_anchor_push "$id" "$active_swarm" "$nodes_dir" "$topo_file" "$swarm_conf" 0 1
+            sync_count=$((sync_count + 1))
+            continue
+          fi
+
+          swarm_sync_dev_heal_remote "$id"
+          swarm_sync_anchor_push "$id" "$active_swarm" "$nodes_dir" "$topo_file" "$swarm_conf" 1
           sync_count=$((sync_count + 1))
-          continue
-        fi
-
-        swarm_sync_dev_heal_remote "$id"
-        swarm_sync_anchor_push "$id" "$active_swarm" "$nodes_dir" "$topo_file" "$swarm_conf" 1
-        sync_count=$((sync_count + 1))
-      done
+        done <<< "$strands_meta"
+      fi
       knot_log_ok "Mesh-wide development synchronization complete ($sync_count Strands updated and healed)."
     elif [ -n "$target" ] && [ "$target" != "$my_host" ] && [ "$target" != "local" ] && [ "$target" != "localhost" ]; then
       local r_type=""
@@ -711,17 +726,34 @@ swarm_sync_mirrors() {
   else
     local nodes_dir=""
     if nodes_dir="$(knot_get_nodes_dir)"; then
-      for manifest in "$nodes_dir/"*.json; do
-        [ -e "$manifest" ] || continue
-        local id host role
-        id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-        host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
-        role="$(awk -F'"' '/"role":/ {print $4}' "$manifest")"
-        if [ "$id" = "$anchor_id" ] || [ "$host" = "$anchor_host" ] || [ "$id" = "$my_host" ] || [ "$host" = "$my_host" ] || [ "$role" = "anchor" ]; then
-          continue
-        fi
-        nodes_to_sync+=("$id")
-      done
+      local m_targets="" m_rc=0
+      m_targets="$(python3 -c "
+import json, os, sys, glob
+nodes_dir = sys.argv[1]
+a_id = sys.argv[2]
+a_host = sys.argv[3]
+m_host = sys.argv[4]
+res = []
+for mf in sorted(glob.glob(os.path.join(nodes_dir, '*.json'))):
+    try:
+        with open(mf, 'r', encoding='utf-8') as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            nid = d.get('id') or os.path.splitext(os.path.basename(mf))[0]
+            host = d.get('hostname') or ''
+            role = d.get('role') or 'strand'
+            if nid != a_id and host != a_host and nid != m_host and host != m_host and role != 'anchor':
+                res.append(nid)
+    except (OSError, ValueError):
+        continue
+print('\n'.join(res))
+" "$nodes_dir" "$anchor_id" "$anchor_host" "$my_host" 2>&1)" || m_rc=$?
+      if [ $m_rc -eq 0 ] && [ -n "$m_targets" ]; then
+        while IFS= read -r nid; do
+          [ -n "$nid" ] || continue
+          nodes_to_sync+=("$nid")
+        done <<< "$m_targets"
+      fi
     fi
   fi
 
@@ -794,17 +826,34 @@ swarm_sync_terminfo() {
   else
     local nodes_dir=""
     if nodes_dir="$(knot_get_nodes_dir)"; then
-      for manifest in "$nodes_dir/"*.json; do
-        [ -e "$manifest" ] || continue
-        local id host role
-        id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-        host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
-        role="$(awk -F'"' '/"role":/ {print $4}' "$manifest")"
-        if [ "$id" = "$anchor_id" ] || [ "$host" = "$anchor_host" ] || [ "$id" = "$my_host" ] || [ "$host" = "$my_host" ] || [ "$role" = "anchor" ]; then
-          continue
-        fi
-        nodes_to_sync+=("$id")
-      done
+      local m_targets="" m_rc=0
+      m_targets="$(python3 -c "
+import json, os, sys, glob
+nodes_dir = sys.argv[1]
+a_id = sys.argv[2]
+a_host = sys.argv[3]
+m_host = sys.argv[4]
+res = []
+for mf in sorted(glob.glob(os.path.join(nodes_dir, '*.json'))):
+    try:
+        with open(mf, 'r', encoding='utf-8') as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            nid = d.get('id') or os.path.splitext(os.path.basename(mf))[0]
+            host = d.get('hostname') or ''
+            role = d.get('role') or 'strand'
+            if nid != a_id and host != a_host and nid != m_host and host != m_host and role != 'anchor':
+                res.append(nid)
+    except (OSError, ValueError):
+        continue
+print('\n'.join(res))
+" "$nodes_dir" "$anchor_id" "$anchor_host" "$my_host" 2>&1)" || m_rc=$?
+      if [ $m_rc -eq 0 ] && [ -n "$m_targets" ]; then
+        while IFS= read -r nid; do
+          [ -n "$nid" ] || continue
+          nodes_to_sync+=("$nid")
+        done <<< "$m_targets"
+      fi
     fi
   fi
 

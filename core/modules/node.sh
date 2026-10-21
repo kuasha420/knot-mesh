@@ -347,7 +347,18 @@ node_remove() {
   fi
 
   # 4. Manifest role check for anchor
-  if grep -qE '"role"[[:space:]]*:[[:space:]]*"anchor"' "$manifest_path"; then
+  local m_role="" m_role_rc=0
+  m_role="$(python3 -c "
+import json, sys
+try:
+    with open(sys.argv[1], 'r', encoding='utf-8') as f:
+        d = json.load(f)
+    if isinstance(d, dict):
+        print(d.get('role') or '')
+except (OSError, ValueError):
+    sys.exit(0)
+" "$manifest_path" 2>&1)" || m_role_rc=$?
+  if [ $m_role_rc -eq 0 ] && [ "$m_role" = "anchor" ]; then
     echo "Error: Cannot remove active Anchor node '$node_id'. The Anchor coordinates cluster synchronization and consensus. Migrate Anchor role before decommissioning." >&2
     return 1
   fi

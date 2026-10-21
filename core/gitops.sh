@@ -291,10 +291,27 @@ gitops_provision_worktree_mesh() {
   if [ -z "$nodes_arg" ] || [ "$nodes_arg" = "--all" ]; then
     local nodes_dir=""
     if nodes_dir="$(knot_get_nodes_dir)"; then
-      for mf in "$nodes_dir/"*.json; do
-        [ -e "$mf" ] || continue
-        nodes+=("$(awk -F'"' '/"id":/ {print $4}' "$mf")")
-      done
+      local py_nodes="" p_rc=0
+      py_nodes="$(python3 -c "
+import json, os, sys, glob
+nodes_dir = sys.argv[1]
+res = []
+for mf in sorted(glob.glob(os.path.join(nodes_dir, '*.json'))):
+    try:
+        with open(mf, 'r', encoding='utf-8') as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            res.append(d.get('id') or os.path.splitext(os.path.basename(mf))[0])
+    except (OSError, ValueError):
+        continue
+print('\n'.join(res))
+" "$nodes_dir" 2>&1)" || p_rc=$?
+      if [ $p_rc -eq 0 ] && [ -n "$py_nodes" ]; then
+        while IFS= read -r nid; do
+          [ -n "$nid" ] || continue
+          nodes+=("$nid")
+        done <<< "$py_nodes"
+      fi
     fi
   else
     IFS=',' read -ra split_nodes <<< "$nodes_arg"
@@ -495,10 +512,27 @@ gitops_worktree_rebase_mesh() {
     if [ "$nodes_arg" = "--all" ]; then
       local nodes_dir=""
       if nodes_dir="$(knot_get_nodes_dir 2>&1)"; then
-        for mf in "$nodes_dir/"*.json; do
-          [ -e "$mf" ] || continue
-          nodes+=("$(awk -F'"' '/"id":/ {print $4}' "$mf")")
-        done
+        local py_nodes="" p_rc=0
+        py_nodes="$(python3 -c "
+import json, os, sys, glob
+nodes_dir = sys.argv[1]
+res = []
+for mf in sorted(glob.glob(os.path.join(nodes_dir, '*.json'))):
+    try:
+        with open(mf, 'r', encoding='utf-8') as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            res.append(d.get('id') or os.path.splitext(os.path.basename(mf))[0])
+    except (OSError, ValueError):
+        continue
+print('\n'.join(res))
+" "$nodes_dir" 2>&1)" || p_rc=$?
+        if [ $p_rc -eq 0 ] && [ -n "$py_nodes" ]; then
+          while IFS= read -r nid; do
+            [ -n "$nid" ] || continue
+            nodes+=("$nid")
+          done <<< "$py_nodes"
+        fi
       fi
     else
       IFS=',' read -ra split_nodes <<< "$nodes_arg"

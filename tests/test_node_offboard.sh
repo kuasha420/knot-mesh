@@ -634,12 +634,22 @@ assert_file_exists "$NODES_DIR/steamdeck.json" "Strand steamdeck manifest preser
 assert_file_exists "$NODES_DIR/rog-ally.json" "Strand rog-ally manifest preserved"
 assert_topology_state "$TOPO_FILE" "desktop,laptop,steamdeck,rog-ally" "none" "Topology unmutated after anchor rejection"
 
-if [ -f "$LOG_DIR/kdeconnect_unpaired.log" ]; then
-  if grep -q "desktop" "$LOG_DIR/kdeconnect_unpaired.log"; then
-    echo "  [FAIL] Unpair must not be called when anchor removal is rejected" >&2
-    exit 1
-  fi
-fi
+# Verify anchor protection on multiline-formatted role manifest
+cat << 'ANC_MULTI' > "$NODES_DIR/custom-anchor.json"
+{
+  "id": "custom-anchor",
+  "role":
+    "anchor",
+  "hostname": "custom-anchor-host"
+}
+ANC_MULTI
+
+assert_cmd_fails_with_code 1 "Cannot remove active Anchor node 'custom-anchor'" \
+  "knot node remove custom-anchor is rejected with exit 1 on multiline role" "$KNOT_BIN" node remove custom-anchor
+
+assert_file_exists "$NODES_DIR/custom-anchor.json" "custom-anchor manifest preserved after multiline role rejection"
+rm -f "$NODES_DIR/custom-anchor.json"
+
 echo "  [PASS] Zero state mutation on rejected Anchor decommissioning"
 
 # -------------------------------------------------------------

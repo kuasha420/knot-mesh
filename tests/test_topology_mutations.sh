@@ -385,6 +385,20 @@ assert_exit_code 0 "Link desktop right laptop" "$KNOT_BIN" topology link desktop
 assert_exit_code 0 "Link laptop down steamdeck --target-span 0-50" "$KNOT_BIN" topology link laptop down steamdeck --target-span 0-50
 assert_exit_code 0 "Link desktop down steamdeck --target-span 50-100" "$KNOT_BIN" topology link desktop down steamdeck --target-span 50-100
 
+# Seed schema nodes and links entries to verify cluster-wide schema pruning
+python3 -c "
+import json
+with open('$TOPO_FILE', 'r') as f:
+    d = json.load(f)
+d['nodes'] = {'laptop': {'screens': ['laptop']}, 'steamdeck': {'screens': ['steamdeck']}}
+d['links'] = [
+    {'from': 'desktop', 'to': 'laptop', 'direction': 'right'},
+    {'from': 'desktop', 'to': 'steamdeck', 'direction': 'down'}
+]
+with open('$TOPO_FILE', 'w') as f:
+    json.dump(d, f, indent=2)
+"
+
 # Remove laptop
 assert_exit_code 0 "knot topology remove laptop" "$KNOT_BIN" topology remove laptop
 
@@ -399,6 +413,9 @@ assert 'right' not in d['layout']['desktop'], 'desktop.right pointing to laptop 
 assert d['layout']['desktop']['down']['node'] == 'steamdeck', 'desktop.down to steamdeck must be intact'
 assert d['layout']['steamdeck']['up']['node'] == 'desktop', 'steamdeck.up to desktop must be intact'
 assert d['layout']['steamdeck']['up']['span'] == [50, 100], 'steamdeck.up span must be preserved at [50, 100]'
+assert 'laptop' not in d.get('nodes', {}), 'laptop must be purged from nodes dictionary'
+assert not any(l.get('from') == 'laptop' or l.get('to') == 'laptop' for l in d.get('links', [])), 'laptop links must be pruned from links list'
+assert any(l.get('to') == 'steamdeck' for l in d.get('links', [])), 'surviving steamdeck link in links list must be preserved'
 print('OK')
 ")"
 if [ "$remove_purged" = "OK" ]; then

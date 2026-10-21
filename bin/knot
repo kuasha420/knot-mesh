@@ -274,20 +274,35 @@ cmd_sync() {
       fi
 
       local sync_count=0
-      for manifest in "$nodes_dir/"*.json; do
-        [ -e "$manifest" ] || continue
-        local id host role
-        id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-        host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
-        role="$(awk -F'"' '/"role":/ {print $4}' "$manifest")"
-
-        if [ "$id" = "$anchor_id" ] || [ "$host" = "$anchor_host" ] || [ "$id" = "$my_host" ] || [ "$host" = "$my_host" ] || [ "$role" = "anchor" ]; then
-          continue
-        fi
-
-        swarm_sync_anchor_push "$id" "$active_swarm" "$nodes_dir" "$topo_file" "$swarm_conf" 0 "$force_prod"
-        sync_count=$((sync_count + 1))
-      done
+      local strands_meta="" s_rc=0
+      strands_meta="$(python3 -c "
+import json, os, sys, glob
+nodes_dir = sys.argv[1]
+a_id = sys.argv[2]
+a_host = sys.argv[3]
+m_host = sys.argv[4]
+res = []
+for mf in sorted(glob.glob(os.path.join(nodes_dir, '*.json'))):
+    try:
+        with open(mf, 'r', encoding='utf-8') as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            nid = d.get('id') or os.path.splitext(os.path.basename(mf))[0]
+            host = d.get('hostname') or ''
+            role = d.get('role') or 'strand'
+            if nid != a_id and host != a_host and nid != m_host and host != m_host and role != 'anchor':
+                res.append(nid)
+    except (OSError, ValueError):
+        continue
+print('\n'.join(res))
+" "$nodes_dir" "$anchor_id" "$anchor_host" "$my_host" 2>&1)" || s_rc=$?
+      if [ $s_rc -eq 0 ] && [ -n "$strands_meta" ]; then
+        while IFS= read -r id; do
+          [ -n "$id" ] || continue
+          swarm_sync_anchor_push "$id" "$active_swarm" "$nodes_dir" "$topo_file" "$swarm_conf" 0 "$force_prod"
+          sync_count=$((sync_count + 1))
+        done <<< "$strands_meta"
+      fi
       knot_log_ok "Mesh-wide swarm synchronization complete ($sync_count Strands updated)."
     elif [ -n "$target" ] && [ "$target" != "$my_node_id" ] && [ "$target" != "$my_host" ] && [ "$target" != "$anchor_id" ] && [ "$target" != "local" ] && [ "$target" != "localhost" ]; then
       # Targeted Strand sync from Anchor

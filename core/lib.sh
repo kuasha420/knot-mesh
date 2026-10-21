@@ -247,6 +247,29 @@ knot_detect_node_id() {
           jq -r '.id' "$m"
           return 0
         fi
+      elif command -v python3 >/dev/null; then
+        local py_res="" py_rc=0
+        py_res="$(python3 -c "
+import json, sys
+h, hs, mpath = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    with open(mpath, 'r', encoding='utf-8') as f:
+        d = json.load(f)
+    if isinstance(d, dict):
+        host = d.get('hostname') or ''
+        aliases = d.get('aliases') or []
+        nid = d.get('id') or ''
+        if host == h or host == hs or h in aliases or hs in aliases or nid == h or nid == hs:
+            print(nid)
+            sys.exit(0)
+except (OSError, ValueError):
+    pass
+sys.exit(1)
+" "$h" "$h_short" "$m" 2>&1)" || py_rc=$?
+        if [ $py_rc -eq 0 ] && [ -n "$py_res" ]; then
+          echo "$py_res"
+          return 0
+        fi
       else
         local m_id m_host
         m_id="$(awk -F'"' '/"id":/ {print $4}' "$m")"

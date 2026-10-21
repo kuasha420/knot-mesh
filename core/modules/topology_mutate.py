@@ -325,7 +325,31 @@ def unlink(
                 set_edge_links(layout, target_node, opp_dir, rem_dst_links)
 
         set_edge_links(layout, src, norm_dir, [])
-        save_topology(topo_file, topo)
+
+    # Clean links list if present in topology
+    if "links" in topo and isinstance(topo["links"], list):
+        opp_dir = OPPOSITE_DIR[norm_dir]
+        if dst:
+            topo["links"] = [
+                l for l in topo["links"]
+                if not (isinstance(l, dict) and (
+                    ((l.get("from") == src or l.get("src") == src) and (l.get("to") == dst or l.get("dst") == dst) and DIR_MAP.get(str(l.get("direction", "")).lower()) == norm_dir) or
+                    ((l.get("from") == dst or l.get("src") == dst) and (l.get("to") == src or l.get("dst") == src) and DIR_MAP.get(str(l.get("direction", "")).lower()) == opp_dir)
+                ))
+            ]
+        else:
+            topo["links"] = [
+                l for l in topo["links"]
+                if not (isinstance(l, dict) and (
+                    ((l.get("from") == src or l.get("src") == src) and DIR_MAP.get(str(l.get("direction", "")).lower()) == norm_dir) or
+                    ((l.get("to") == src or l.get("dst") == src) and DIR_MAP.get(str(l.get("direction", "")).lower()) == opp_dir)
+                ))
+            ]
+
+    save_topology(topo_file, topo)
+    if dst:
+        print(f"Unlinked {src} --{norm_dir}--> {dst} and reciprocal.")
+    else:
         print(f"Unlinked all {norm_dir} links from {src} and reciprocals.")
 
 
@@ -341,22 +365,37 @@ def remove(topo_file: str, node: str) -> None:
         sys.exit(1)
 
     screens = topo.get("screens", [])
-    if node in screens:
-        screens.remove(node)
+    if isinstance(screens, list):
+        topo["screens"] = [s for s in screens if s != node]
 
     layout = topo.get("layout", {})
-    if node in layout:
+    if isinstance(layout, dict) and node in layout:
         del layout[node]
 
     # Purge all incoming directional links referencing node across other nodes
-    for other_node in list(layout.keys()):
-        node_layout = layout[other_node]
-        if not isinstance(node_layout, dict):
-            continue
-        for d in list(node_layout.keys()):
-            links = get_edge_links(layout, other_node, d)
-            filtered = [l for l in links if l.get("node") != node]
-            set_edge_links(layout, other_node, d, filtered)
+    if isinstance(layout, dict):
+        for other_node in list(layout.keys()):
+            node_layout = layout[other_node]
+            if not isinstance(node_layout, dict):
+                continue
+            for d in list(node_layout.keys()):
+                links = get_edge_links(layout, other_node, d)
+                filtered = [l for l in links if l.get("node") != node]
+                set_edge_links(layout, other_node, d, filtered)
+
+    # 1. Prune from nodes dictionary (schema / legacy)
+    if "nodes" in topo and isinstance(topo["nodes"], dict):
+        topo["nodes"].pop(node, None)
+        for nid, ndata in topo["nodes"].items():
+            if isinstance(ndata, dict) and "screens" in ndata and isinstance(ndata["screens"], list):
+                ndata["screens"] = [s for s in ndata["screens"] if s != node]
+
+    # 2. Prune from links list if present
+    if "links" in topo and isinstance(topo["links"], list):
+        topo["links"] = [
+            l for l in topo["links"]
+            if not (isinstance(l, dict) and (l.get("from") == node or l.get("to") == node or l.get("src") == node or l.get("dst") == node))
+        ]
 
     save_topology(topo_file, topo)
     print(f"Removed node '{node}' from topology.")

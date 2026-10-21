@@ -479,4 +479,35 @@ fi
 export MOCK_SSH_FAIL=0
 echo "  -> Anchor Hub API pull deletion parity & zero ghost status verified: OK"
 
+echo "=== [Test 11] Compact / Non-Standard Manifest Discovery & Sync Resilience ==="
+# Seed a compact single-line manifest with non-first id and custom attributes
+echo '{"version": 1, "id": "compact-strand", "hostname": "compact-host", "role": "strand", "port": 2222, "user": "compactuser"}' > "$HOME/.config/knot/swarms/testswarm/nodes/compact-strand.json"
+
+# Verify knot sync --mirrors correctly discovers compact-strand
+MIRRORS_OUT="$(swarm_sync_mirrors --all 2>&1)"
+if ! echo "$MIRRORS_OUT" | grep -q "Strand 'compact-strand'"; then
+  echo "Error: swarm_sync_mirrors failed to discover compact-strand: $MIRRORS_OUT" >&2
+  exit 1
+fi
+if echo "$MIRRORS_OUT" | grep -q "Strand 'id'"; then
+  echo "Error: swarm_sync_mirrors targeted phantom node 'id' instead of compact-strand!" >&2
+  exit 1
+fi
+echo "  -> swarm_sync_mirrors accurately discovers compact JSON manifest: OK"
+
+# Verify knot sync --terminfo correctly discovers compact-strand
+TERMINFO_OUT="$(swarm_sync_terminfo --all 2>&1)"
+if ! echo "$TERMINFO_OUT" | grep -q "Strand 'compact-strand'"; then
+  echo "Error: swarm_sync_terminfo failed to discover compact-strand: $TERMINFO_OUT" >&2
+  exit 1
+fi
+if echo "$TERMINFO_OUT" | grep -q "Strand 'id'"; then
+  echo "Error: swarm_sync_terminfo targeted phantom node 'id' instead of compact-strand!" >&2
+  exit 1
+fi
+echo "  -> swarm_sync_terminfo accurately discovers compact JSON manifest: OK"
+
+# Clean up compact-strand manifest
+rm -f "$HOME/.config/knot/swarms/testswarm/nodes/compact-strand.json"
+
 echo "=== [✓] ALL SWARM SYNC TESTS PASSED! ==="
