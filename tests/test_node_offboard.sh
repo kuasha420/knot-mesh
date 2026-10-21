@@ -649,6 +649,8 @@ echo ""
 echo "=== [Test 3] Non-Existent Node Removal Rejection ==="
 assert_cmd_fails_with_code 1 "not found in active swarm" \
   "knot node remove phantom-node is rejected with exit 1" "$KNOT_BIN" node remove phantom-node
+assert_cmd_fails_with_code 1 "Invalid node identifier" \
+  "knot node remove with path traversal is rejected with exit 1" "$KNOT_BIN" node remove ../phantom-node
 
 # Assert Zero State Mutation
 assert_file_exists "$NODES_DIR/steamdeck.json" "Steamdeck manifest untouched"
@@ -888,6 +890,38 @@ export MOCK_SSH_FAIL=0
 
 assert_file_not_exists "$NODES_DIR/offline-node.json" "offline-node manifest pruned despite SSH failure"
 echo "  [PASS] Graceful fallback on unreachable remote node confirmed"
+
+# -------------------------------------------------------------
+# Test 7: Compact / Multi-Field JSON Manifest Resilience & Node Listing
+# -------------------------------------------------------------
+echo ""
+echo "=== [Test 7] Compact JSON Manifest Resilience & Node Listing ==="
+# Write single-line compact JSON with fields in non-standard order
+echo '{"version": 1, "id": "compact-node", "hostname": "compact-host", "role": "strand", "port": 2222, "user": "compactuser", "ip_hint": "192.168.1.99"}' > "$NODES_DIR/compact-node.json"
+
+list_out="$("$KNOT_BIN" node list 2>&1)"
+test_total=$((test_total + 1))
+if echo "$list_out" | grep -qE "compact-node[[:space:]]+strand[[:space:]]+compact-host"; then
+  test_passed=$((test_passed + 1))
+  echo "  [PASS] knot node list extracts fields accurately from compact JSON manifest"
+else
+  echo "  [FAIL] knot node list failed to parse compact JSON manifest: $list_out" >&2
+  exit 1
+fi
+
+python3 - << 'PYEOF' "$TOPO_FILE"
+import json, sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    topo = json.load(f)
+topo["screens"].append("compact-node")
+with open(sys.argv[1], "w", encoding="utf-8") as f:
+    json.dump(topo, f, indent=2)
+PYEOF
+
+assert_cmd_succeeds "knot node remove compact-node --purge-remote handles compact manifest cleanly" \
+  "$KNOT_BIN" node remove compact-node --purge-remote
+
+assert_file_not_exists "$NODES_DIR/compact-node.json" "compact-node manifest pruned"
 
 # -------------------------------------------------------------
 # Summary & Test Verification

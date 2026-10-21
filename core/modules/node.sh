@@ -46,16 +46,25 @@ except (OSError, ValueError):
 
   # 3. Check node manifests for role: "anchor"
   if [ -n "$nodes_dir" ] && [ -d "$nodes_dir" ]; then
-    for manifest in "$nodes_dir/"*.json; do
-      [ -e "$manifest" ] || continue
-      if grep -qE '"role"[[:space:]]*:[[:space:]]*"anchor"' "$manifest"; then
-        anchor_id="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-        if [ -n "$anchor_id" ]; then
-          echo "$anchor_id"
-          return 0
-        fi
-      fi
-    done
+    local m_anchor="" m_rc=0
+    m_anchor="$(python3 -c "
+import json, os, sys, glob
+nodes_dir = sys.argv[1]
+for m in sorted(glob.glob(os.path.join(nodes_dir, '*.json'))):
+    try:
+        with open(m, 'r', encoding='utf-8') as f:
+            d = json.load(f)
+        if isinstance(d, dict) and d.get('role') == 'anchor':
+            print(d.get('id') or os.path.splitext(os.path.basename(m))[0])
+            sys.exit(0)
+    except (OSError, ValueError):
+        continue
+sys.exit(0)
+" "$nodes_dir" 2>&1)" || m_rc=$?
+    if [ $m_rc -eq 0 ] && [ -n "$m_anchor" ]; then
+      echo "$m_anchor"
+      return 0
+    fi
   fi
 
   # Fallback default anchor
@@ -300,6 +309,12 @@ node_remove() {
     return 1
   fi
 
+  # Validate node_id identifier syntax
+  if ! [[ "$node_id" =~ ^[a-zA-Z0-9]([-_a-zA-Z0-9]*[a-zA-Z0-9])?$ ]]; then
+    echo "Error: Invalid node identifier '$node_id'. Identifier must start and end with alphanumeric characters and may contain hyphens and underscores." >&2
+    return 1
+  fi
+
   # 1. Swarm discovery
   local active_swarm
   active_swarm="$(knot_get_active_swarm)"
@@ -349,12 +364,25 @@ node_remove() {
 
   # 6. Read node metadata before deleting manifest
   local target_hostname="" target_ip="" target_port=22
-  target_hostname="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest_path")"
-  target_ip="$(awk -F'"' '/"ip_hint":/ {print $4}' "$manifest_path")"
-  local p=""
-  p="$(awk -F: '/"port":/ {gsub(/[^0-9]/, "", $2); print $2}' "$manifest_path")"
-  [ -n "$p" ] && target_port="$p"
+  local meta="" m_rc=0
+  meta="$(python3 -c "
+import json, sys
+try:
+    with open(sys.argv[1], 'r', encoding='utf-8') as f:
+        d = json.load(f)
+    if isinstance(d, dict):
+        h = d.get('hostname') or ''
+        ip = d.get('ip_hint') or ''
+        p = d.get('port') or 22
+        print(f'{h}\t{ip}\t{p}')
+except (OSError, ValueError):
+    sys.exit(0)
+" "$manifest_path" 2>&1)" || m_rc=$?
+  if [ $m_rc -eq 0 ] && [ -n "$meta" ]; then
+    IFS=$'\t' read -r target_hostname target_ip target_port <<< "$meta"
+  fi
   [ -z "$target_hostname" ] && target_hostname="$node_id"
+  [ -z "$target_port" ] && target_port=22
 
   # 7. Optional remote service teardown (--purge-remote)
   if [ "$purge_remote" -eq 1 ]; then
@@ -444,7 +472,11 @@ node_remove() {
   if command -v cmd_sync >/dev/null; then
     knot_log_info "Synchronizing cluster state across remaining nodes..."
     local sync_out="" sync_rc=0
-    sync_out="$(cmd_sync --all 2>&1)" || sync_rc=$?
+    local sync_args=("--all")
+    if [ "$(knot_detect_install_type)" = "dev" ]; then
+      sync_args+=("--force-prod")
+    fi
+    sync_out="$(cmd_sync "${sync_args[@]}" 2>&1)" || sync_rc=$?
     if [ $sync_rc -ne 0 ]; then
       knot_log_warn "Notice: Cluster sync completed with warnings: $sync_out"
     fi
@@ -813,9 +845,20 @@ except (OSError, ValueError) as e:
   # 14. Remote Node ID Marker Update (over SSH if reachable)
   if [ "$old_id" != "$my_node_id" ]; then
     local target_port=22
-    local p=""
-    p="$(awk -F: '/"port":/ {gsub(/[^0-9]/, "", $2); print $2}' "$new_manifest")"
-    [ -n "$p" ] && target_port="$p"
+    local p="" p_rc=0
+    p="$(python3 -c "
+import json, sys
+try:
+    with open(sys.argv[1], 'r', encoding='utf-8') as f:
+        d = json.load(f)
+    if isinstance(d, dict):
+        print(d.get('port') or 22)
+except (OSError, ValueError):
+    sys.exit(0)
+" "$new_manifest" 2>&1)" || p_rc=$?
+    if [ $p_rc -eq 0 ] && [ -n "$p" ]; then
+      target_port="$p"
+    fi
     local rem_probe=0
     ssh -o BatchMode=yes -o ConnectTimeout=3 -p "$target_port" "$new_id" "true" 2>&1 || rem_probe=$?
     if [ $rem_probe -eq 0 ]; then
@@ -860,14 +903,21 @@ node_list() {
     return 1
   fi
   echo -e "${C_BOLD}Nodes in active swarm '$active_swarm':${C_RESET}"
-  for manifest in "$nodes_dir/"*.json; do
-    [ -e "$manifest" ] || continue
-    local nid role host
-    nid="$(awk -F'"' '/"id":/ {print $4}' "$manifest")"
-    role="$(awk -F'"' '/"role":/ {print $4}' "$manifest")"
-    host="$(awk -F'"' '/"hostname":/ {print $4}' "$manifest")"
-    printf "  %-16s %-10s %s\n" "$nid" "${role:-strand}" "${host:-unknown}"
-  done
+  python3 -c "
+import json, os, sys, glob
+nodes_dir = sys.argv[1]
+for manifest in sorted(glob.glob(os.path.join(nodes_dir, '*.json'))):
+    try:
+        with open(manifest, 'r', encoding='utf-8') as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            nid = d.get('id') or os.path.splitext(os.path.basename(manifest))[0]
+            role = d.get('role') or 'strand'
+            host = d.get('hostname') or 'unknown'
+            print(f'  {nid:<16} {role:<10} {host}')
+    except (OSError, ValueError):
+        continue
+" "$nodes_dir"
   return 0
 }
 
