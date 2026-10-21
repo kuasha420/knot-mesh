@@ -3,6 +3,30 @@ set -euo pipefail
 
 # Knot - Multi-Screen Topology & Visual Spatial Reasoning Module
 
+KNOT_ROOT="${KNOT_ROOT:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)}"
+
+topology_get_file() {
+  if [ -n "${KNOT_TOPOLOGY_FILE:-}" ]; then
+    echo "$KNOT_TOPOLOGY_FILE"
+    return 0
+  fi
+  local active_swarm
+  active_swarm="$(knot_get_active_swarm)"
+  local user_home
+  user_home="$(knot_detect_user_home)"
+  local user_topo="$user_home/.config/knot/swarms/${active_swarm}/topology.json"
+  if [ -f "$user_topo" ]; then
+    echo "$user_topo"
+    return 0
+  fi
+  local etc_topo="/etc/knot/swarms.d/${active_swarm}/topology.json"
+  if [ -f "$etc_topo" ]; then
+    echo "$etc_topo"
+    return 0
+  fi
+  echo "$user_topo"
+}
+
 topology_show() {
   if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
     echo "Usage: knot topology show"
@@ -10,9 +34,8 @@ topology_show() {
   fi
   local active_swarm
   active_swarm="$(knot_get_active_swarm)"
-  local user_home
-  user_home="$(knot_detect_user_home)"
-  local topo_file="$user_home/.config/knot/swarms/${active_swarm}/topology.json"
+  local topo_file
+  topo_file="$(topology_get_file)"
 
   if [ ! -f "$topo_file" ]; then
     knot_log_warn "No topology configuration found at: $topo_file"
@@ -176,6 +199,174 @@ with open('$target_mf', 'w') as f:
   knot_log_ok "Internal display topology synchronized with Deskflow KVM."
 }
 
+topology_link() {
+  for arg in "$@"; do
+    if [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
+      echo "Usage: knot topology link <src> <direction> <dst> [--span <MIN-MAX>] [--target-span <MIN-MAX>] [--no-reciprocal] [--topology <path>]"
+      echo ""
+      echo "Create directional spatial link between screens with optional fractional spans."
+      return 0
+    fi
+  done
+
+  if [ $# -lt 3 ]; then
+    echo "Error: Missing arguments for 'knot topology link'. Expected: <src> <dir> <dst>" >&2
+    echo "Usage: knot topology link <src> <dir> <dst> [--span <MIN-MAX>] [--target-span <MIN-MAX>] [--no-reciprocal] [--topology <path>]" >&2
+    return 1
+  fi
+
+  local extra_args=()
+  local has_topo=0
+  for a in "$@"; do
+    if [ "$a" = "--topology" ]; then
+      has_topo=1
+      break
+    fi
+  done
+
+  if [ "$has_topo" -eq 0 ]; then
+    local topo_file
+    topo_file="$(topology_get_file)"
+    extra_args+=(--topology "$topo_file")
+  fi
+
+  python3 "$KNOT_ROOT/core/modules/topology_mutate.py" link "$@" "${extra_args[@]}"
+
+  if declare -F deskflow_compile_server_config >/dev/null; then
+    local df_err="" df_rc=0
+    df_err="$(deskflow_compile_server_config "unlocked" 2>&1)" || df_rc=$?
+    if [ $df_rc -ne 0 ]; then
+      knot_log_warn "Notice: Deskflow configuration compilation warning ($df_rc): $df_err"
+    fi
+  fi
+}
+
+topology_unlink() {
+  for arg in "$@"; do
+    if [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
+      echo "Usage: knot topology unlink <src> <direction> [dst] [--topology <path>]"
+      echo ""
+      echo "Remove directional link(s) and reciprocal counterparts."
+      return 0
+    fi
+  done
+
+  if [ $# -lt 2 ]; then
+    echo "Error: Missing arguments for 'knot topology unlink'. Expected: <src> <dir> [dst]" >&2
+    echo "Usage: knot topology unlink <src> <dir> [dst] [--topology <path>]" >&2
+    return 1
+  fi
+
+  local extra_args=()
+  local has_topo=0
+  for a in "$@"; do
+    if [ "$a" = "--topology" ]; then
+      has_topo=1
+      break
+    fi
+  done
+
+  if [ "$has_topo" -eq 0 ]; then
+    local topo_file
+    topo_file="$(topology_get_file)"
+    extra_args+=(--topology "$topo_file")
+  fi
+
+  python3 "$KNOT_ROOT/core/modules/topology_mutate.py" unlink "$@" "${extra_args[@]}"
+
+  if declare -F deskflow_compile_server_config >/dev/null; then
+    local df_err="" df_rc=0
+    df_err="$(deskflow_compile_server_config "unlocked" 2>&1)" || df_rc=$?
+    if [ $df_rc -ne 0 ]; then
+      knot_log_warn "Notice: Deskflow configuration compilation warning ($df_rc): $df_err"
+    fi
+  fi
+}
+
+topology_remove() {
+  for arg in "$@"; do
+    if [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
+      echo "Usage: knot topology remove <node> [--topology <path>]"
+      echo ""
+      echo "Purge a node from topology screens and remove all associated directional links."
+      return 0
+    fi
+  done
+
+  if [ $# -lt 1 ]; then
+    echo "Error: Missing node argument for 'knot topology remove'." >&2
+    echo "Usage: knot topology remove <node> [--topology <path>]" >&2
+    return 1
+  fi
+
+  local extra_args=()
+  local has_topo=0
+  for a in "$@"; do
+    if [ "$a" = "--topology" ]; then
+      has_topo=1
+      break
+    fi
+  done
+
+  if [ "$has_topo" -eq 0 ]; then
+    local topo_file
+    topo_file="$(topology_get_file)"
+    extra_args+=(--topology "$topo_file")
+  fi
+
+  python3 "$KNOT_ROOT/core/modules/topology_mutate.py" remove "$@" "${extra_args[@]}"
+
+  if declare -F deskflow_compile_server_config >/dev/null; then
+    local df_err="" df_rc=0
+    df_err="$(deskflow_compile_server_config "unlocked" 2>&1)" || df_rc=$?
+    if [ $df_rc -ne 0 ]; then
+      knot_log_warn "Notice: Deskflow configuration compilation warning ($df_rc): $df_err"
+    fi
+  fi
+}
+
+topology_set_anchor() {
+  for arg in "$@"; do
+    if [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
+      echo "Usage: knot topology set-anchor <node> [--topology <path>]"
+      echo ""
+      echo "Set primary Anchor screen in topology."
+      return 0
+    fi
+  done
+
+  if [ $# -lt 1 ]; then
+    echo "Error: Missing node argument for 'knot topology set-anchor'." >&2
+    echo "Usage: knot topology set-anchor <node> [--topology <path>]" >&2
+    return 1
+  fi
+
+  local extra_args=()
+  local has_topo=0
+  for a in "$@"; do
+    if [ "$a" = "--topology" ]; then
+      has_topo=1
+      break
+    fi
+  done
+
+  if [ "$has_topo" -eq 0 ]; then
+    local topo_file
+    topo_file="$(topology_get_file)"
+    extra_args+=(--topology "$topo_file")
+  fi
+
+  python3 "$KNOT_ROOT/core/modules/topology_mutate.py" set-anchor "$@" "${extra_args[@]}"
+
+  if declare -F deskflow_compile_server_config >/dev/null; then
+    local df_err="" df_rc=0
+    df_err="$(deskflow_compile_server_config "unlocked" 2>&1)" || df_rc=$?
+    if [ $df_rc -ne 0 ]; then
+      knot_log_warn "Notice: Deskflow configuration compilation warning ($df_rc): $df_err"
+    fi
+  fi
+}
+
 topology_guide() {
   cat << 'GUIDE_EOF'
 ================================================================================
@@ -206,6 +397,18 @@ cmd_topology() {
     show|status|map)
       topology_show "$@"
       ;;
+    link)
+      topology_link "$@"
+      ;;
+    unlink)
+      topology_unlink "$@"
+      ;;
+    remove)
+      topology_remove "$@"
+      ;;
+    set-anchor)
+      topology_set_anchor "$@"
+      ;;
     align-internal|align)
       topology_align_internal "$@"
       ;;
@@ -217,6 +420,10 @@ cmd_topology() {
       echo -e "${C_BOLD}Knot Topology Management${C_RESET}"
       echo "Usage:"
       echo "  knot topology show            Show current 2D screen spatial layout"
+      echo "  knot topology link <src> <dir> <dst> [--span <MIN-MAX>] [--target-span <MIN-MAX>] [--no-reciprocal]"
+      echo "  knot topology unlink <src> <dir> [dst]"
+      echo "  knot topology remove <node>   Purge node from screens and directional links"
+      echo "  knot topology set-anchor <node> Set primary Anchor screen"
       echo "  knot topology align-internal  Align multi-display outputs (e.g. ROG Ally eDP-1)"
       echo "  knot topology guide           Print layout & alignment best practices"
       return 0
@@ -226,10 +433,15 @@ cmd_topology() {
       echo -e "${C_BOLD}Knot Topology Management${C_RESET}" >&2
       echo "Usage:" >&2
       echo "  knot topology show            Show current 2D screen spatial layout" >&2
+      echo "  knot topology link <src> <dir> <dst> [--span <MIN-MAX>] [--target-span <MIN-MAX>] [--no-reciprocal]" >&2
+      echo "  knot topology unlink <src> <dir> [dst]" >&2
+      echo "  knot topology remove <node>   Purge node from screens and directional links" >&2
+      echo "  knot topology set-anchor <node> Set primary Anchor screen" >&2
       echo "  knot topology align-internal  Align multi-display outputs (e.g. ROG Ally eDP-1)" >&2
       echo "  knot topology guide           Print layout & alignment best practices" >&2
       return 1
       ;;
   esac
 }
+
 

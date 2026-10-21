@@ -134,6 +134,10 @@ NESTED_COMMANDS=(
   "topology show"
   "topology align-internal"
   "topology guide"
+  "topology link"
+  "topology unlink"
+  "topology remove"
+  "topology set-anchor"
   "screen unlock"
   "screen lock"
   "screen login"
@@ -179,6 +183,7 @@ assert_exit_code 1 "knot mcp --unknown-flag" "$KNOT_BIN" mcp --unknown-flag
 assert_exit_code 1 "knot swarm --unknown-flag" "$KNOT_BIN" swarm --unknown-flag
 assert_exit_code 1 "knot display --unknown-flag" "$KNOT_BIN" display --unknown-flag
 assert_exit_code 1 "knot kdeconnect --unknown-flag" "$KNOT_BIN" kdeconnect --unknown-flag
+assert_exit_code 1 "knot topology --unknown-flag" "$KNOT_BIN" topology --unknown-flag
 
 echo ""
 echo "================================================================================"
