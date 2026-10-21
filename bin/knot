@@ -24,6 +24,7 @@ source "$KNOT_ROOT/core/modules/shutdown.sh"
 source "$KNOT_ROOT/core/modules/topology.sh"
 source "$KNOT_ROOT/core/modules/swarm_sync.sh"
 source "$KNOT_ROOT/core/modules/council.sh"
+source "$KNOT_ROOT/core/modules/node.sh"
 
 cmd_onboard() {
   local node_id="${1:-}"
@@ -2273,6 +2274,14 @@ case "${1:-}" in
     shift
     cmd_onboard "$@"
     ;;
+  node)
+    shift
+    cmd_node "$@"
+    ;;
+  offboard)
+    shift
+    cmd_node remove "$@"
+    ;;
   sync)
     shift
     cmd_sync "$@"
@@ -2378,6 +2387,8 @@ case "${1:-}" in
     echo "Usage:"
     echo "  knot update [--all|<node_id>] [--dev] Update Knot binaries & core modules (or dev git pull)"
     echo "  knot topology [show|link|unlink|remove|set-anchor|align-internal] Visual multi-screen spatial layout"
+    echo "  knot node <remove|rename|list> Manage cluster node lifecycle & decommissioning"
+    echo "  knot offboard <node_id>       Safely decommission a node from the cluster (alias)"
     echo "  knot onboard [node_id]        Enroll current device into the mesh"
     echo "  knot sync [--all | <node_id>] [--dev] Reconcile keys, configs, layout, or heal dev drift"
     echo "  knot resolve <node_id> [port] Resolve active IP across 3 tiers"
