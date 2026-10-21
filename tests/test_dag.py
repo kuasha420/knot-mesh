@@ -64,7 +64,7 @@ def hub_server_context():
     Uses KNOT_HUB_URL if set, or spins up a hermetic in-process HTTPS server with temporary DB and TLS cert.
     """
     env_url = os.environ.get("KNOT_HUB_URL")
-    if env_url:
+    if env_url and os.environ.get("KNOT_TEST_LIVE_HUB") == "1":
         yield env_url
         return
 
