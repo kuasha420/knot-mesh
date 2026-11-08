@@ -328,10 +328,14 @@ static gboolean install_kwin_barriers(gpointer user_data) {
                 if (y1 == y2 && y1 == g_screens[s].y + g_screens[s].h) {
                     y1 = g_screens[s].y + g_screens[s].h - 1;
                     y2 = y1;
+                    break;
                 }
+            }
+            for (int s = 0; s < g_num_screens; s++) {
                 if (x1 == x2 && x1 == g_screens[s].x + g_screens[s].w) {
                     x1 = g_screens[s].x + g_screens[s].w - 1;
                     x2 = x1;
+                    break;
                 }
             }
 
