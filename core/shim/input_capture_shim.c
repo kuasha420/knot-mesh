@@ -185,16 +185,51 @@ GList *xdp_input_capture_session_get_zones(XdpInputCaptureSession *session) {
     return zones;
 }
 
+typedef struct {
+    guint id;
+    int x1;
+    int y1;
+    int x2;
+    int y2;
+} CapturedBarrier;
+
+static CapturedBarrier g_captured_barriers[32];
+static int g_num_captured_barriers = 0;
+static gboolean g_has_captured_barriers = FALSE;
+static gboolean install_kwin_barriers(gpointer user_data);
+
 void xdp_input_capture_session_set_pointer_barriers(XdpInputCaptureSession *session,
                                                     GList *barriers,
                                                     GCancellable *cancellable,
                                                     GAsyncReadyCallback callback,
                                                     gpointer data) {
-    fprintf(stderr, "[knot-shim] set_pointer_barriers called with %u barriers\n", g_list_length(barriers));
+    g_num_captured_barriers = 0;
+    g_has_captured_barriers = TRUE;
+    guint len = g_list_length(barriers);
+    fprintf(stderr, "[knot-shim] set_pointer_barriers called with %u barriers:\n", len);
+
+    for (GList *l = barriers; l != NULL && g_num_captured_barriers < 32; l = l->next) {
+        GObject *obj = G_OBJECT(l->data);
+        guint id = 0;
+        gint x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+        g_object_get(obj, "id", &id, "x1", &x1, "y1", &y1, "x2", &x2, "y2", &y2, NULL);
+        g_captured_barriers[g_num_captured_barriers].id = id;
+        g_captured_barriers[g_num_captured_barriers].x1 = x1;
+        g_captured_barriers[g_num_captured_barriers].y1 = y1;
+        g_captured_barriers[g_num_captured_barriers].x2 = x2;
+        g_captured_barriers[g_num_captured_barriers].y2 = y2;
+        fprintf(stderr, "[knot-shim]   Deskflow Barrier [%d]: ID=%u (%d, %d) -> (%d, %d)\n",
+                g_num_captured_barriers, id, x1, y1, x2, y2);
+        g_num_captured_barriers++;
+    }
+
     typeof(xdp_input_capture_session_set_pointer_barriers) *orig = dlsym(RTLD_NEXT, "xdp_input_capture_session_set_pointer_barriers");
     if (orig) {
         orig(session, barriers, cancellable, callback, data);
     }
+
+    // Schedule direct KWin barrier sync to apply the exact barriers immediately
+    g_timeout_add(50, install_kwin_barriers, NULL);
 }
 
 GList *xdp_input_capture_session_set_pointer_barriers_finish(XdpInputCaptureSession *session,
@@ -208,16 +243,6 @@ GList *xdp_input_capture_session_set_pointer_barriers_finish(XdpInputCaptureSess
         g_list_free_full(failed, g_object_unref);
     }
     return NULL; // Return NULL so Deskflow treats all barriers as active!
-}
-
-static gboolean is_point_in_screens(int x, int y) {
-    for (int i = 0; i < g_num_screens; i++) {
-        if (x >= g_screens[i].x && x < g_screens[i].x + g_screens[i].w &&
-            y >= g_screens[i].y && y < g_screens[i].y + g_screens[i].h) {
-            return TRUE;
-        }
-    }
-    return FALSE;
 }
 
 static gboolean install_kwin_barriers(gpointer user_data) {
@@ -291,74 +316,12 @@ static gboolean install_kwin_barriers(gpointer user_data) {
     g_variant_builder_init(&builder, G_VARIANT_TYPE("a(u(ii)(ii))"));
     int barrier_count = 0;
 
-    // 1. Left edges (Deskflow ID = 1)
-    for (int s = 0; s < g_num_screens; s++) {
-        int x = g_screens[s].x;
-        int seg_start = -1;
-        for (int y = g_screens[s].y; y < g_screens[s].y + g_screens[s].h; y++) {
-            if (!is_point_in_screens(x - 1, y)) {
-                if (seg_start == -1) seg_start = y;
-            } else {
-                if (seg_start != -1) {
-                    g_variant_builder_add(&builder, "(u(ii)(ii))", 1, x, seg_start, x, y - 1);
-                    fprintf(stderr, "[knot-shim]   KWin Barrier (Left) ID=1: (%d, %d) -> (%d, %d)\n", x, seg_start, x, y - 1);
-                    barrier_count++;
-                    seg_start = -1;
-                }
-            }
-        }
-        if (seg_start != -1) {
-            int seg_end = g_screens[s].y + g_screens[s].h - 1;
-            g_variant_builder_add(&builder, "(u(ii)(ii))", 1, x, seg_start, x, seg_end);
-            fprintf(stderr, "[knot-shim]   KWin Barrier (Left) ID=1: (%d, %d) -> (%d, %d)\n", x, seg_start, x, seg_end);
-            barrier_count++;
-        }
-    }
-
-    // 2. Right edges (Deskflow ID = 2)
-    for (int s = 0; s < g_num_screens; s++) {
-        int x = g_screens[s].x + g_screens[s].w - 1;
-        int seg_start = -1;
-        for (int y = g_screens[s].y; y < g_screens[s].y + g_screens[s].h; y++) {
-            if (!is_point_in_screens(x + 1, y)) {
-                if (seg_start == -1) seg_start = y;
-            } else {
-                if (seg_start != -1) {
-                    g_variant_builder_add(&builder, "(u(ii)(ii))", 2, x, seg_start, x, y - 1);
-                    fprintf(stderr, "[knot-shim]   KWin Barrier (Right) ID=2: (%d, %d) -> (%d, %d)\n", x, seg_start, x, y - 1);
-                    barrier_count++;
-                    seg_start = -1;
-                }
-            }
-        }
-        if (seg_start != -1) {
-            int seg_end = g_screens[s].y + g_screens[s].h - 1;
-            g_variant_builder_add(&builder, "(u(ii)(ii))", 2, x, seg_start, x, seg_end);
-            fprintf(stderr, "[knot-shim]   KWin Barrier (Right) ID=2: (%d, %d) -> (%d, %d)\n", x, seg_start, x, seg_end);
-            barrier_count++;
-        }
-    }
-
-    // 3. Bottom edges (Deskflow ID = 3)
-    for (int s = 0; s < g_num_screens; s++) {
-        int y = g_screens[s].y + g_screens[s].h - 1;
-        int seg_start = -1;
-        for (int x = g_screens[s].x; x < g_screens[s].x + g_screens[s].w; x++) {
-            if (!is_point_in_screens(x, y + 1)) {
-                if (seg_start == -1) seg_start = x;
-            } else {
-                if (seg_start != -1) {
-                    g_variant_builder_add(&builder, "(u(ii)(ii))", 3, seg_start, y, x - 1, y);
-                    fprintf(stderr, "[knot-shim]   KWin Barrier (Bottom) ID=3: (%d, %d) -> (%d, %d)\n", seg_start, y, x - 1, y);
-                    barrier_count++;
-                    seg_start = -1;
-                }
-            }
-        }
-        if (seg_start != -1) {
-            int seg_end = g_screens[s].x + g_screens[s].w - 1;
-            g_variant_builder_add(&builder, "(u(ii)(ii))", 3, seg_start, y, seg_end, y);
-            fprintf(stderr, "[knot-shim]   KWin Barrier (Bottom) ID=3: (%d, %d) -> (%d, %d)\n", seg_start, y, seg_end, y);
+    if (g_has_captured_barriers) {
+        for (int i = 0; i < g_num_captured_barriers; i++) {
+            CapturedBarrier *b = &g_captured_barriers[i];
+            g_variant_builder_add(&builder, "(u(ii)(ii))", b->id, b->x1, b->y1, b->x2, b->y2);
+            fprintf(stderr, "[knot-shim]   KWin Barrier ID=%u: (%d, %d) -> (%d, %d)\n",
+                    b->id, b->x1, b->y1, b->x2, b->y2);
             barrier_count++;
         }
     }

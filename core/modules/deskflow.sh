@@ -565,7 +565,7 @@ has_rd() {
   if command -v gdbus >/dev/null; then
     local out=""
     if out="$(gdbus introspect --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop 2>&1)"; then
-      if echo "$out" | grep -q 'interface org.freedesktop.portal.RemoteDesktop'; then
+      if [[ "$out" == *"interface org.freedesktop.portal.RemoteDesktop"* ]]; then
         return 0
       fi
     fi
