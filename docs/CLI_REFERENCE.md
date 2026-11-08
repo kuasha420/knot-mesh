@@ -22,6 +22,7 @@ This document provides a comprehensive command-line reference for both `knot` (d
   - [knot screen](#knot-screen)
   - [knot autologin](#knot-autologin)
   - [knot kdeconnect](#knot-kdeconnect)
+  - [knot clip](#knot-clip)
   - [knot display](#knot-display)
   - [knot topology](#knot-topology)
   - [knot sleep](#knot-sleep)
@@ -306,6 +307,18 @@ knot kdeconnect set-clipboard "<payload>"           # Set local Wayland/Klipper 
 
 ---
 
+### `knot clip`
+Unified Wayland & Klipper mesh clipboard synchronization utility. Shorthand interface for reading, writing, and broadcasting clipboard contents across all active swarm strands.
+
+```bash
+knot clip sync [--all|<node>]      # Broadcast local clipboard contents across all paired strands
+knot clip test [--all|<node>]      # End-to-end automated clipboard round-trip verification sweep
+knot clip get                      # Read local Wayland/Klipper clipboard contents
+knot clip set <text...>            # Set local Wayland/Klipper clipboard and sync full-mesh (supports stdin)
+```
+
+---
+
 ### `knot display`
 Controls dynamic Wayland virtual display extension across the physical mesh. Allows an Anchor workstation to instantly expand its desktop workspace onto auxiliary laptops or docked handhelds (Steam Deck OLED, ROG Ally) without video cables or capture dongles.
 
@@ -543,16 +556,15 @@ knot worktree rebase-mesh          # Rebase and land branches across mesh worktr
 ## 4. Handheld & Graphical Cockpit Commands
 
 ### `knot kafe`
-Boots and manages the Knot Kommand Kafe cockpit (Tauri v2 lightweight desktop container and React Web UI).
+Knot Kafe (Tauri v2 + React web cockpit) has been quarantined under `labs/kafe/` to preserve a lean headless core runtime. Invoking `knot kafe` prints a quarantine notice and instructions for standalone local development.
 
 ```bash
-knot kafe open                     # Open web cockpit in default browser
-knot kafe desktop                  # Launch native Tauri v2 desktop container (<50MB RAM footprint)
-knot kafe build-desktop            # Compile release Tauri v2 container binary
-knot kafe dev                      # Launch Vite HMR development server (:5173)
-knot kafe build                    # Build production static bundle to web/dist
-knot kafe install                  # Install web cockpit npm dependencies
+knot kafe [dev|web|desktop]        # Print quarantine advisory and local run instructions
 ```
+
+For active UI development and local testing, refer to [`labs/kafe/README.md`](../labs/kafe/README.md):
+- **Web Frontend**: `pnpm --dir labs/kafe/web dev`
+- **Tauri Desktop**: `cd labs/kafe/src-tauri && cargo tauri dev`
 
 ---
 

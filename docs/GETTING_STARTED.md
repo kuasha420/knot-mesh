@@ -63,7 +63,7 @@ Before starting, ensure all machines meet these requirements:
 - **Desktop Environment**: KDE Plasma 6 running in a **native Wayland session**.
 - **User Account**: Standard user with `sudo` privileges.
 - **Network**: All devices connected to the same local Wi-Fi / LAN subnet (or bridged network).
-- **Packages**: `openssh`, `deskflow` (or `synergy` / `barrier`), `python`, `python-pillow`, `python-numpy`.
+- **Packages**: `openssh`, `deskflow`, `python`, `jq`.
 
 ---
 
@@ -229,7 +229,16 @@ knot kdeconnect pair --all
 knot kdeconnect status --all
 
 # 3. Verify end-to-end clipboard synchronization
-knot kdeconnect test-clipboard --all
+knot clip test --all
+
+# 4. Set clipboard content across the entire mesh
+knot clip set "Hello from Knot Mesh"
+
+# 5. Extend Anchor desktop onto a strand device (e.g., laptop or handheld)
+knot display extend laptop
+
+# Terminate the display stream when finished
+knot display stop laptop
 ```
 
 ---

@@ -190,10 +190,6 @@ display_capture_fleet() {
         cap_disp="wayland-0"
       fi
 
-      if [ -z "${DISPLAY:-}" ] && [ -e "/tmp/.X11-unix/X0" ]; then
-        export DISPLAY=":0"
-      fi
-
       local cap_ok=0
       if command -v spectacle >/dev/null; then
         local spec_out=""
@@ -206,21 +202,6 @@ display_capture_fleet() {
         local grim_out=""
         if grim_out="$(WAYLAND_DISPLAY="$cap_disp" grim "$out_path" 2>&1)" && [ -f "$out_path" ] && [ -s "$out_path" ]; then
           cap_ok=1
-        fi
-      fi
-
-      if [ "$cap_ok" -eq 0 ] && [ -n "${DISPLAY:-}" ]; then
-        cap_disp="$DISPLAY"
-        if command -v import >/dev/null; then
-          local imp_out=""
-          if imp_out="$(import -window root "$out_path" 2>&1)" && [ -f "$out_path" ] && [ -s "$out_path" ]; then
-            cap_ok=1
-          fi
-        elif command -v maim >/dev/null; then
-          local maim_out=""
-          if maim_out="$(maim "$out_path" 2>&1)" && [ -f "$out_path" ] && [ -s "$out_path" ]; then
-            cap_ok=1
-          fi
         fi
       fi
 
@@ -253,18 +234,11 @@ print("1920 1080")
         uid="$(id -u)"
         export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$uid}"
         disp="${WAYLAND_DISPLAY:-wayland-0}"
-        if [ -z "${DISPLAY:-}" ] && [ -e "/tmp/.X11-unix/X0" ]; then
-          export DISPLAY=":0"
-        fi
         tmp="/tmp/knot_cap_$$.png"
         ok=0
         if command -v spectacle >/dev/null && WAYLAND_DISPLAY="$disp" spectacle -b -n -o "$tmp" 2>&1; then
           [ -s "$tmp" ] && ok=1
         elif command -v grim >/dev/null && WAYLAND_DISPLAY="$disp" grim "$tmp" 2>&1; then
-          [ -s "$tmp" ] && ok=1
-        elif [ -n "${DISPLAY:-}" ] && command -v maim >/dev/null && maim "$tmp" 2>&1; then
-          [ -s "$tmp" ] && ok=1
-        elif [ -n "${DISPLAY:-}" ] && command -v import >/dev/null && import -window root "$tmp" 2>&1; then
           [ -s "$tmp" ] && ok=1
         fi
         if [ "$ok" -eq 1 ]; then

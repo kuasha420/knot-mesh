@@ -41,11 +41,8 @@ council_copy() {
     wl-copy < "$staged_file"
     knot_log_ok "Tailored prompt copied to Wayland clipboard ($(wc -c < "$staged_file") bytes)."
     echo "You can now paste directly into Antigravity 2.0 (Ctrl+V)."
-  elif command -v xclip >/dev/null; then
-    xclip -selection clipboard < "$staged_file"
-    knot_log_ok "Tailored prompt copied to X11 clipboard."
   else
-    knot_log_err "Neither wl-copy nor xclip found. Prompt location: $staged_file"
+    knot_log_err "wl-copy not found. Prompt location: $staged_file"
     return 1
   fi
 }

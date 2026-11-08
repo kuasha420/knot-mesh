@@ -9,7 +9,8 @@ import sys
 import os
 import json
 import argparse
-from typing import Dict, Any, List
+import configparser
+from typing import Dict, Any, List, Tuple
 
 DIR_MAP = {
     "left": "left",
@@ -27,7 +28,10 @@ OPP_MAP = {
     "down": "up"
 }
 
-def compile_deskflow(topology_file: str, nodes_dir: str, mode: str = "unlocked", mute_nodes: List[str] = None) -> str:
+def parse_topology_and_nodes(
+    topology_file: str,
+    nodes_dir: str
+) -> Tuple[Dict[str, Any], str, Dict[str, str], Dict[str, str], Dict[str, List[str]], set, List[str]]:
     if not os.path.isfile(topology_file):
         raise FileNotFoundError(f"Topology file not found: {topology_file}")
 
@@ -37,12 +41,10 @@ def compile_deskflow(topology_file: str, nodes_dir: str, mode: str = "unlocked",
     anchor = topo.get("anchor", "desktop")
     topo_nodes = topo.get("nodes", {})
     raw_screens = topo.get("screens", [])
-    layout = topo.get("layout", {})
-    links_list = topo.get("links", [])
 
-    # Load node manifests to map node IDs to hostnames and identify headless nodes
     id_to_host: Dict[str, str] = {}
     host_to_id: Dict[str, str] = {}
+    host_to_aliases: Dict[str, List[str]] = {}
     headless_nodes = set()
 
     if os.path.isdir(nodes_dir):
@@ -58,6 +60,14 @@ def compile_deskflow(topology_file: str, nodes_dir: str, mode: str = "unlocked",
                     if nid and hname:
                         id_to_host[nid] = hname
                         host_to_id[hname] = nid
+                        aliases: List[str] = []
+                        if "aliases" in data and isinstance(data["aliases"], list):
+                            for a in data["aliases"]:
+                                if a and a != hname and a not in aliases:
+                                    aliases.append(a)
+                        if nid != hname and nid not in aliases:
+                            aliases.append(nid)
+                        host_to_aliases[hname] = aliases
                     if (
                         data.get("role") == "headless"
                         or data.get("headless") is True
@@ -91,6 +101,75 @@ def compile_deskflow(topology_file: str, nodes_dir: str, mode: str = "unlocked",
         h = id_to_host.get(s, s)
         if h not in screen_hostnames:
             screen_hostnames.append(h)
+
+    return topo, anchor, id_to_host, host_to_id, host_to_aliases, headless_nodes, screen_hostnames
+
+
+def update_or_create_deskflow_conf(
+    conf_path: str,
+    anchor_host: str,
+    screen_hostnames: List[str],
+    host_to_aliases: Dict[str, List[str]],
+    host_to_id: Dict[str, str],
+    server_conf_path: str = None
+) -> None:
+    cp = configparser.ConfigParser(interpolation=None)
+    cp.optionxform = str
+    if os.path.isfile(conf_path):
+        try:
+            cp.read(conf_path)
+        except Exception as e:
+            sys.stderr.write(f"[compile_deskflow] Warning: error reading existing {conf_path}: {e}\n")
+
+    if "core" not in cp:
+        cp["core"] = {}
+    cp["core"]["computerName"] = anchor_host
+
+    if "server" not in cp:
+        cp["server"] = {}
+    cp["server"]["externalConfig"] = "true"
+    if server_conf_path:
+        cp["server"]["externalConfigFile"] = server_conf_path
+
+    # Clean old computer_ sections that are no longer active screens
+    for sec in list(cp.sections()):
+        if sec.startswith("computer_"):
+            cname = sec[len("computer_"):]
+            if cname not in screen_hostnames:
+                cp.remove_section(sec)
+
+    # Add/update computer sections for Deskflow 1.27
+    for h in screen_hostnames:
+        sec = f"computer_{h}"
+        if sec not in cp:
+            cp[sec] = {}
+        cp[sec]["name"] = h
+        aliases = list(host_to_aliases.get(h, []))
+        nid = host_to_id.get(h)
+        if nid and nid != h and nid not in aliases:
+            aliases.append(nid)
+        if aliases:
+            cp[sec]["aliases"] = ",".join(sorted(aliases))
+        elif "aliases" in cp[sec]:
+            del cp[sec]["aliases"]
+
+    os.makedirs(os.path.dirname(os.path.abspath(conf_path)), exist_ok=True)
+    with open(conf_path, "w") as f:
+        cp.write(f, space_around_delimiters=False)
+
+
+def compile_deskflow(
+    topology_file: str,
+    nodes_dir: str,
+    mode: str = "unlocked",
+    mute_nodes: List[str] = None
+) -> str:
+    topo, anchor, id_to_host, host_to_id, host_to_aliases, headless_nodes, screen_hostnames = parse_topology_and_nodes(
+        topology_file, nodes_dir
+    )
+
+    layout = topo.get("layout", {})
+    links_list = topo.get("links", [])
 
     # Parse layout and links into unified layout dict:
     # full_layout[source_nid][direction] = [ { "target": target_nid, "span": [s1, s2], "target_span": [t1, t2] } ]
@@ -175,20 +254,25 @@ def compile_deskflow(topology_file: str, nodes_dir: str, mode: str = "unlocked",
                 if not has_reciprocal:
                     _add_link(tgt, opp_d, src, info.get("target_span", [0, 100]), info["span"])
 
+    lines = []
+
     # 1. Section: screens
-    lines = ["section: screens"]
+    lines.append("section: screens")
     for h in screen_hostnames:
         lines.append(f"\t{h}:")
     lines.append("end\n")
 
     # 2. Section: aliases
     lines.append("section: aliases")
-    for nid, hname in sorted(id_to_host.items()):
-        if nid in headless_nodes:
-            continue
-        if nid != hname:
-            lines.append(f"\t{hname}:")
-            lines.append(f"\t\t{nid}")
+    for h in screen_hostnames:
+        aliases = list(host_to_aliases.get(h, []))
+        nid = host_to_id.get(h)
+        if nid and nid != h and nid not in aliases:
+            aliases.append(nid)
+        if aliases:
+            lines.append(f"\t{h}:")
+            for a in sorted(aliases):
+                lines.append(f"\t\t{a}")
     lines.append("end\n")
 
     # 3. Section: links
@@ -222,7 +306,7 @@ def compile_deskflow(topology_file: str, nodes_dir: str, mode: str = "unlocked",
                 lines.append(f"\t\t{direction}({span[0]},{span[1]}) = {target_host}({target_span[0]},{target_span[1]})")
     lines.append("end\n")
 
-    # 4. Section: options
+    # Section: options
     lines.append("section: options")
     lines.append("\trelativeMouseMoves = false")
     lines.append("\tclipboardSharing = false")
@@ -244,6 +328,7 @@ def main():
     parser.add_argument("--locked", type=str, choices=["true", "false", "True", "False"], default=None, help="KVM cursor confinement locked boolean")
     parser.add_argument("--mute-node", action="append", default=[], help="Node IDs or hostnames to mute/omit links for")
     parser.add_argument("--output", help="Output file path (default: stdout)")
+    parser.add_argument("--deskflow-conf", help="Path to Deskflow.conf to generate/update with computer sections")
 
     args = parser.parse_args()
 
@@ -252,13 +337,33 @@ def main():
         mode = "locked" if args.locked.lower() == "true" else "unlocked"
 
     try:
-        conf = compile_deskflow(args.topology, args.nodes_dir, mode=mode, mute_nodes=args.mute_node)
+        conf = compile_deskflow(
+            args.topology,
+            args.nodes_dir,
+            mode=mode,
+            mute_nodes=args.mute_node
+        )
+
         if args.output:
             os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
             with open(args.output, "w") as f:
                 f.write(conf)
         else:
             sys.stdout.write(conf)
+
+        if args.deskflow_conf:
+            topo, anchor, id_to_host, host_to_id, host_to_aliases, headless_nodes, screen_hostnames = parse_topology_and_nodes(
+                args.topology, args.nodes_dir
+            )
+            anchor_host = id_to_host.get(anchor, anchor)
+            update_or_create_deskflow_conf(
+                conf_path=args.deskflow_conf,
+                anchor_host=anchor_host,
+                screen_hostnames=screen_hostnames,
+                host_to_aliases=host_to_aliases,
+                host_to_id=host_to_id,
+                server_conf_path=os.path.abspath(args.output) if args.output else None
+            )
     except Exception as e:
         sys.stderr.write(f"[compile_deskflow] Error: {e}\n")
         sys.exit(1)

@@ -104,29 +104,6 @@ display_parse_wlr_randr() {
   return 1
 }
 
-display_parse_xrandr() {
-  local input
-  input="$(echo "$1" | sed -E 's/\x1B\[[0-9;]*[a-zA-Z]//g')"
-  local cur_res=""
-  local cur_refresh=""
-  local cur_scale="1.0"
-
-  while IFS= read -r line; do
-    if [[ "$line" =~ connected[[:space:]]+(primary[[:space:]]+)?([0-9]+)x([0-9]+) ]]; then
-      cur_res="${BASH_REMATCH[2]}x${BASH_REMATCH[3]}"
-    elif [[ "$line" =~ ([0-9.]+)\* ]]; then
-      cur_refresh="${BASH_REMATCH[1]}"
-      break
-    fi
-  done <<< "$input"
-
-  if [ -n "$cur_res" ]; then
-    echo "$cur_res ${cur_refresh:-60.0} $cur_scale"
-    return 0
-  fi
-  return 1
-}
-
 display_detect_specs() {
   local detected=""
 
@@ -157,15 +134,6 @@ display_detect_specs() {
     if wout="$(wlr-randr 2>&1)"; then
       if wparsed="$(display_parse_wlr_randr "$wout")"; then
         detected="$wparsed"
-      fi
-    fi
-  fi
-
-  if [ -z "$detected" ] && command -v xrandr >/dev/null; then
-    local xout=""
-    if xout="$(xrandr --current 2>&1)"; then
-      if xparsed="$(display_parse_xrandr "$xout")"; then
-        detected="$xparsed"
       fi
     fi
   fi

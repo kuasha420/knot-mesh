@@ -33,7 +33,7 @@ BANNER_EOF
 check_dependencies() {
   echo -e "\n${C_CYAN}[•] Checking system dependencies...${C_RESET}"
   local missing=()
-  local required_cmds=("git" "python3" "ssh" "openssl" "ip")
+  local required_cmds=("git" "python3" "jq" "ssh" "openssl" "ip")
 
   for cmd in "${required_cmds[@]}"; do
     if ! command -v "$cmd" >/dev/null; then
@@ -51,7 +51,12 @@ check_dependencies() {
     if [ -f "/etc/arch-release" ] && command -v sudo >/dev/null && [ -t 0 ]; then
       read -r -p "Install missing packages via pacman now? [Y/n] " install_confirm
       if [[ ! "${install_confirm,,}" =~ ^n ]]; then
-        sudo pacman -S --needed --noconfirm "${missing[@]}"
+        local pacman_pkgs=()
+        declare -A cmd_to_pkg=([ssh]="openssh" [ip]="iproute2" [python3]="python" [deskflow]="deskflow" [git]="git" [jq]="jq" [openssl]="openssl")
+        for cmd in "${missing[@]}"; do
+          pacman_pkgs+=("${cmd_to_pkg[$cmd]:-$cmd}")
+        done
+        sudo pacman -S --needed --noconfirm "${pacman_pkgs[@]}"
       fi
     else
       echo -e "${C_YELLOW}[!] Please ensure ${missing[*]} are installed via your package manager.${C_RESET}"

@@ -50,13 +50,14 @@ deskflow_compile_server_config() {
     mute_args+=(--mute-node "$2")
   fi
 
-  if [ -n "$topo_file" ] && [ -n "$nodes_dir" ] && [ -x "$KNOT_ROOT/core/modules/compile_deskflow.py" ]; then
+  if [ -n "$topo_file" ] && [ -n "$nodes_dir" ] && { [ -x "$KNOT_ROOT/core/modules/compile_deskflow.py" ] || [ -r "$KNOT_ROOT/core/modules/compile_deskflow.py" ]; }; then
     python3 "$KNOT_ROOT/core/modules/compile_deskflow.py" \
       --topology "$topo_file" \
       --nodes-dir "$nodes_dir" \
       --mode "$mode" \
       "${mute_args[@]}" \
-      --output "$cfg_dir/deskflow-server.conf"
+      --output "$cfg_dir/deskflow-server.conf" \
+      --deskflow-conf "$cfg_dir/Deskflow.conf"
     return 0
   fi
 
@@ -125,23 +126,6 @@ deskflow_toggle_mute_node() {
 deskflow_write_server_conf() {
   local mode="${1:-$(deskflow_get_lock)}"
   deskflow_compile_server_config "$mode"
-
-  local home
-  home="$(knot_detect_user_home)"
-  local cfg_dir="$home/.config/Deskflow"
-  mkdir -p "$cfg_dir"
-  local my_host
-  my_host="$(knot_detect_hostname)"
-
-  cat << CONF_EOF > "$cfg_dir/Deskflow.conf"
-[core]
-computerName=${my_host:-localhost}
-
-[server]
-externalConfig=true
-externalConfigFile=$cfg_dir/deskflow-server.conf
-CONF_EOF
-
   return 0
 }
 
@@ -288,21 +272,47 @@ deskflow_set_lock() {
   local state_dir="$home/.local/state/knot"
   mkdir -p "$state_dir"
   local state_file="$state_dir/kvm_lock"
+  local lock_file="$state_dir/kvm_lock.lock"
 
-  if [ "$target_state" = "toggle" ]; then
-    local current
-    current="$(deskflow_get_lock)"
-    if [ "$current" = "locked" ]; then
-      target_state="unlocked"
-    else
-      target_state="locked"
+  local lock_fd
+  if command -v flock >/dev/null; then
+    exec {lock_fd}>"$lock_file"
+    if ! flock -n "$lock_fd"; then
+      knot_log_warn "KVM lock operation already in progress, skipping concurrent trigger."
+      exec {lock_fd}>&-
+      return 0
     fi
   fi
 
+  case "$target_state" in
+    locked|unlocked) ;;
+    toggle)
+      local current
+      current="$(deskflow_get_lock)"
+      if [ "$current" = "locked" ]; then
+        target_state="unlocked"
+      else
+        target_state="locked"
+      fi
+      ;;
+    *)
+      knot_log_err "Invalid KVM lock target state: '$target_state' (valid: locked, unlocked, toggle)"
+      if [ -n "${lock_fd:-}" ]; then
+        exec {lock_fd}>&-
+      fi
+      return 1
+      ;;
+  esac
+
+  echo "$target_state" > "$state_file"
+
   if [ "$target_state" = "locked" ]; then
     deskflow_write_server_conf "locked"
-    echo "locked" > "$state_file"
-    systemctl --user restart knot-deskflow
+    if command -v systemctl >/dev/null; then
+      if systemctl --user is-active --quiet knot-deskflow.service; then
+        systemctl --user restart knot-deskflow.service
+      fi
+    fi
     if command -v notify-send >/dev/null; then
       if ! notify-send -a "Knot KVM" -i input-mouse "KVM Cursor Locked" "Host cursor confined to desktop screen"; then
         knot_log_warn "Failed to deliver desktop notification"
@@ -311,14 +321,21 @@ deskflow_set_lock() {
     knot_log_ok "KVM cursor locked to host desktop."
   else
     deskflow_write_server_conf "unlocked"
-    echo "unlocked" > "$state_file"
-    systemctl --user restart knot-deskflow
+    if command -v systemctl >/dev/null; then
+      if systemctl --user is-active --quiet knot-deskflow.service; then
+        systemctl --user restart knot-deskflow.service
+      fi
+    fi
     if command -v notify-send >/dev/null; then
       if ! notify-send -a "Knot KVM" -i input-mouse "KVM Crossover Active" "Cursor can move to Laptop & Steam Deck"; then
         knot_log_warn "Failed to deliver desktop notification"
       fi
     fi
     knot_log_ok "KVM cursor unlocked (multi-screen crossover enabled)."
+  fi
+
+  if [ -n "${lock_fd:-}" ]; then
+    exec {lock_fd}>&-
   fi
 }
 
@@ -388,21 +405,7 @@ NOTIFY_EOF
     flatpak permission-set kde-authorized remote-desktop deskflow-core yes
   fi
 
-  # 4. Stop and clean up legacy input-leap units and processes
-  if systemctl --user is-active --quiet knot-input-leap.service; then
-    systemctl --user stop knot-input-leap.service
-  fi
-  if systemctl --user is-enabled --quiet knot-input-leap.service; then
-    systemctl --user disable knot-input-leap.service
-  fi
-
-  for proc in input-leap input-leaps input-leapc; do
-    if pgrep -x "$proc" >/dev/null; then
-      killall -9 "$proc"
-    fi
-  done
-
-  # 5. Configure TLS certificates & mutual fingerprint trust across mesh
+  # 4. Configure TLS certificates & mutual fingerprint trust across mesh
   local tls_dir="$cfg_dir/tls"
   mkdir -p "$tls_dir"
   chmod 700 "$tls_dir"
@@ -521,6 +524,18 @@ if [ "$ACTION" = "reload" ] || [ "$ACTION" = "restart" ]; then
   exit 0
 fi
 
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+  if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+    for sock in "$XDG_RUNTIME_DIR"/wayland-[0-9]*; do
+      if [ -S "$sock" ]; then
+        export WAYLAND_DISPLAY="$(basename "$sock")"
+        break
+      fi
+    done
+  fi
+  export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
+fi
+
 KNOT_CLI=""
 if command -v knot >/dev/null; then
   KNOT_CLI="$(command -v knot)"
@@ -628,7 +643,59 @@ if [ "$IS_ANCHOR" -eq 1 ]; then
   # ==========================================
   echo "Node $MY_HOST is ANCHOR in active swarm ($ACTIVE_SWARM). Launching Deskflow Server..."
 
-  cat << CONF_EOF > "$CONF_DIR/Deskflow.conf"
+  TOPO_FILE=""
+  if [ -r "$HOME/.config/knot/swarms/${ACTIVE_SWARM}/topology.json" ]; then
+    TOPO_FILE="$HOME/.config/knot/swarms/${ACTIVE_SWARM}/topology.json"
+  elif [ -r "/etc/knot/swarms.d/${ACTIVE_SWARM}/topology.json" ]; then
+    TOPO_FILE="/etc/knot/swarms.d/${ACTIVE_SWARM}/topology.json"
+  fi
+
+  REAL_CLI=""
+  if [ -n "$KNOT_CLI" ] && command -v readlink >/dev/null; then
+    REAL_CLI="$(readlink -f "$KNOT_CLI")"
+  fi
+
+  COMPILER=""
+  for c_path in "${KNOT_ROOT:+$KNOT_ROOT/core/modules/compile_deskflow.py}" \
+                "${REAL_CLI:+$(dirname "$REAL_CLI")/../core/modules/compile_deskflow.py}" \
+                "${REAL_CLI:+$(dirname "$REAL_CLI")/../lib/knot-mesh/core/modules/compile_deskflow.py}" \
+                "${KNOT_CLI:+$(dirname "$KNOT_CLI")/../lib/knot-mesh/core/modules/compile_deskflow.py}" \
+                "${KNOT_CLI:+$(dirname "$KNOT_CLI")/../core/modules/compile_deskflow.py}" \
+                "/usr/lib/knot-mesh/core/modules/compile_deskflow.py" \
+                "/usr/local/lib/knot-mesh/core/modules/compile_deskflow.py" \
+                "/usr/share/knot-mesh/core/modules/compile_deskflow.py" \
+                "/usr/local/share/knot-mesh/core/modules/compile_deskflow.py" \
+                "$HOME/.local/share/knot-mesh/core/modules/compile_deskflow.py" \
+                "$HOME/knot/core/modules/compile_deskflow.py"; do
+    if [ -r "$c_path" ]; then
+      COMPILER="$c_path"
+      break
+    fi
+  done
+
+  LOCK_MODE="unlocked"
+  if [ -r "$HOME/.local/state/knot/kvm_lock" ] && [ "$(cat "$HOME/.local/state/knot/kvm_lock")" = "locked" ]; then
+    LOCK_MODE="locked"
+  fi
+  MUTE_ARGS=()
+  for mf in "/run/knot/vmon_muted_deskflow_"* "$HOME/.local/state/knot/vmon_muted_deskflow_"*; do
+    [ -e "$mf" ] || continue
+    m_node="$(basename "$mf" | sed 's/^vmon_muted_deskflow_//')"
+    if [ -n "$m_node" ]; then
+      MUTE_ARGS+=(--mute-node "$m_node")
+    fi
+  done
+
+  if [ -n "$TOPO_FILE" ] && [ -n "$NODES_DIR" ] && [ -n "$COMPILER" ]; then
+    python3 "$COMPILER" \
+      --topology "$TOPO_FILE" \
+      --nodes-dir "$NODES_DIR" \
+      --mode "$LOCK_MODE" \
+      "${MUTE_ARGS[@]}" \
+      --output "$CONF_DIR/deskflow-server.conf" \
+      --deskflow-conf "$CONF_DIR/Deskflow.conf"
+  elif [ ! -f "$CONF_DIR/Deskflow.conf" ]; then
+    cat << CONF_EOF > "$CONF_DIR/Deskflow.conf"
 [core]
 computerName=${MY_HOST:-localhost}
 
@@ -636,6 +703,7 @@ computerName=${MY_HOST:-localhost}
 externalConfig=true
 externalConfigFile=$CONF_DIR/deskflow-server.conf
 CONF_EOF
+  fi
 
   SHIM_SO="/usr/local/lib/knot/libinputcapture-persist.so"
   if [ -f "$SHIM_SO" ]; then
@@ -732,7 +800,8 @@ Requisite=graphical-session.target
 
 [Service]
 Type=simple
-Environment=WAYLAND_DISPLAY=wayland-0
+PassEnvironment=WAYLAND_DISPLAY
+Environment=KNOT_ROOT=$KNOT_ROOT
 Environment=XDG_CURRENT_DESKTOP=KDE
 Environment=XDG_DESKTOP_PORTAL_APP_ID=org.deskflow.deskflow
 ExecStart=%h/.local/bin/knot-deskflow

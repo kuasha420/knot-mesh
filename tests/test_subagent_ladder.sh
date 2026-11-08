@@ -21,27 +21,31 @@ fi
 echo "  -> Zero error swallowing in subagent-ladder: OK"
 
 echo "=== [Test 2] Workspace Symlink & Packaging Integrity ==="
-if [ ! -L "$WORKSPACE_SKILL" ]; then
-  echo "Error: Workspace skill symlink $WORKSPACE_SKILL does not exist or is not a symlink!" >&2
-  exit 1
+if [ -L "$WORKSPACE_SKILL" ]; then
+  target_path="$(readlink -f "$WORKSPACE_SKILL")"
+  if [ "$target_path" != "$SKILL_DIR" ]; then
+    echo "Error: Symlink target mismatch: $target_path != $SKILL_DIR" >&2
+    exit 1
+  fi
+  if ! grep -q "name: subagent-ladder" "$WORKSPACE_SKILL/SKILL.md"; then
+    echo "Error: SKILL.md missing 'name: subagent-ladder' frontmatter!" >&2
+    exit 1
+  fi
+  echo "  -> Workspace skill symlink and frontmatter: OK"
+else
+  echo "  -> Notice: Workspace skill deduplicated into global plugin; verifying runtime/skills/subagent-ladder directly"
 fi
 
-target_path="$(readlink -f "$WORKSPACE_SKILL")"
-if [ "$target_path" != "$SKILL_DIR" ]; then
-  echo "Error: Symlink target mismatch: $target_path != $SKILL_DIR" >&2
-  exit 1
-fi
-
-# Verify frontmatter in workspace skill
-if ! grep -q "name: subagent-ladder" "$WORKSPACE_SKILL/SKILL.md"; then
+# Verify frontmatter and contract in runtime skill
+if ! grep -q "name: subagent-ladder" "$SKILL_DIR/SKILL.md"; then
   echo "Error: SKILL.md missing 'name: subagent-ladder' frontmatter!" >&2
   exit 1
 fi
-if ! grep -q "Strictly user-invoked" "$WORKSPACE_SKILL/SKILL.md"; then
+if ! grep -q "Strictly user-invoked" "$SKILL_DIR/SKILL.md"; then
   echo "Error: SKILL.md missing strictly user-invoked contract!" >&2
   exit 1
 fi
-echo "  -> Workspace skill symlink and frontmatter: OK"
+echo "  -> Runtime skill frontmatter and invocation contract: OK"
 
 echo "=== [Test 3] Helper Script Functionality ==="
 TMP_TEST_DIR="$(mktemp -d)"

@@ -18,7 +18,7 @@ src-tauri/gen/
 # Local Swarm Profiles & Registries (Keep examples only)
 swarms.d/*.conf
 !templates/swarms.d/*.conf
-registry/
+/registry/
 local/
 
 # Strict Secret & Key Leakage Prevention (Defense in Depth)

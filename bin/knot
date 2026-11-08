@@ -1238,7 +1238,7 @@ cmd_kdeconnect() {
 
 cmd_display() {
   if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-    echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|vmon <status|start|stop>|toggle-kvm [<node>]|launch <node> <preset|cmd>|capture-fleet [--node <node|--all>]>"
+    echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|toggle-kvm [<node>]|launch <node> <preset|cmd>|capture-fleet [--node <node|--all>]|vmon <status|start|stop>>"
     return 0
   fi
   source "$KNOT_ROOT/core/modules/display.sh"
@@ -1249,11 +1249,14 @@ cmd_display() {
   [ $# -gt 0 ] && shift
 
   case "$action" in
-    launch)
-      display_launch_app "$@"
+    extend)
+      vmon_start "$@"
       ;;
-    capture-fleet|capture)
-      display_capture_fleet "$@"
+    stop)
+      vmon_stop "$@"
+      ;;
+    status)
+      vmon_status "$@"
       ;;
     vmon|virtual-monitor)
       if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
@@ -1282,28 +1285,89 @@ cmd_display() {
           ;;
       esac
       ;;
-    extend)
-      vmon_start "$@"
+    launch)
+      display_launch_app "$@"
       ;;
-    stop)
-      vmon_stop "$@"
-      ;;
-    status)
-      vmon_status "$@"
+    capture-fleet|capture)
+      display_capture_fleet "$@"
       ;;
     toggle-kvm|kvm-toggle|toggle)
       deskflow_toggle_mute_node "$@"
       ;;
     -h|--help)
-      echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|vmon <status|start|stop>|toggle-kvm [<node>]|launch <node> <preset|cmd>|capture-fleet [--node <node|--all>]>"
+      echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|toggle-kvm [<node>]|launch <node> <preset|cmd>|capture-fleet [--node <node|--all>]|vmon <status|start|stop>>"
       return 0
       ;;
     *)
-      echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|vmon <status|start|stop>|toggle-kvm [<node>]|launch <node> <preset|cmd>|capture-fleet [--node <node|--all>]>" >&2
+      echo "Usage: knot display <status [<node>]|extend <node>|stop [<node>]|toggle-kvm [<node>]|launch <node> <preset|cmd>|capture-fleet [--node <node|--all>]|vmon <status|start|stop>>" >&2
       return 1
       ;;
   esac
 }
+
+cmd_clip() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot clip <sync [--all|<node>]|test [--all|<node>]|get|set [<text>]>"
+    return 0
+  fi
+  local action="${1:-get}"
+  [ $# -gt 0 ] && shift
+
+  case "$action" in
+    sync)
+      kdeconnect_sync_clipboard "$@"
+      ;;
+    test)
+      kdeconnect_test_clipboard "$@"
+      ;;
+    get)
+      kdeconnect_get_clipboard "$@"
+      ;;
+    set)
+      local payload="$*"
+      if [ -z "$payload" ] && [ ! -t 0 ]; then
+        payload="$(cat)"
+      fi
+      if [ -z "$payload" ]; then
+        echo "Usage: knot clip set <text>" >&2
+        return 1
+      fi
+      kdeconnect_set_clipboard "$payload"
+      kdeconnect_sync_clipboard --all
+      ;;
+    -h|--help)
+      echo "Usage: knot clip <sync [--all|<node>]|test [--all|<node>]|get|set [<text>]>"
+      return 0
+      ;;
+    *)
+      echo "Usage: knot clip <sync [--all|<node>]|test [--all|<node>]|get|set [<text>]>" >&2
+      return 1
+      ;;
+  esac
+}
+
+cmd_kafe() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot kafe [dev|web|desktop]"
+    return 0
+  fi
+  local action="${1:-}"
+  case "$action" in
+    ""|open|dev|web|desktop|tauri|build)
+      knot_log_info "Knot Kafe (GUI cockpit) has been quarantined to 'labs/kafe/'."
+      echo "To develop or run Knot Kafe locally:"
+      echo "  1. Web frontend:  pnpm --dir \"$KNOT_ROOT/labs/kafe/web\" dev"
+      echo "  2. Tauri desktop: cd \"$KNOT_ROOT/labs/kafe/src-tauri\" && cargo tauri dev"
+      return 0
+      ;;
+    *)
+      knot_log_err "Unknown action '$action' for 'knot kafe'. Knot Kafe is quarantined in 'labs/kafe/'."
+      echo "Usage: knot kafe [dev|web|desktop]" >&2
+      return 1
+      ;;
+  esac
+}
+
 
 cmd_autologin() {
   if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
@@ -2373,9 +2437,13 @@ case "${1:-}" in
     shift
     cmd_sleep "$@"
     ;;
+  clip)
+    shift
+    cmd_clip "$@"
+    ;;
   kafe)
     shift
-    cmd_web "$@"
+    cmd_kafe "$@"
     ;;
   doctor)
     shift
@@ -2419,7 +2487,7 @@ case "${1:-}" in
     echo "  knot project <list|get>       Manage native Antigravity multi-folder projects"
     echo "  knot worktree <add|remove|list|normalize|provision|rebase-mesh> Cross-node git worktrees & parallel landing arbiter"
     echo "  knot sleep <status|prevent|allow> Enforce wholesale prevent-sleep on AC power"
-    echo "  knot kafe [open|dev|build]    Boot / open Knot Kommand Kafe cockpit"
+    echo "  knot kafe [dev]               Knot Kommand Kafe cockpit (quarantined in labs/kafe/)"
     echo "  knot doctor [node|--all]      Diagnose mesh, KVM, and portal health"
     echo "  knot shutdown [target] [opt]  Graceful swarm-wide shutdown or reboot (--all, -d, -r, -c)"
     echo "  knot exec [-P] <target|--all> <cmd> Run commands across mesh nodes (supports -P/--parallel)"
@@ -2428,7 +2496,8 @@ case "${1:-}" in
     echo "  knot screen <status|unlock|lock|login> Manage screen lock/login states"
     echo "  knot autologin [status|check|doctor|migrate-dm|local|reconcile|fix-kwallet|purge-stale|configure-timer] Manage auto-login"
     echo "  knot kdeconnect <status|sync|pair|reconcile|share|sync-clipboard|test-clipboard|prune-stale> Manage KDE Connect mesh clipboard & virtual displays"
-    echo "  knot display <status|extend|stop|launch|capture-fleet> Manage Wayland cockpits & headless fleet captures"
+    echo "  knot clip <sync|test|get|set> Manage Wayland & full-mesh clipboard synchronization"
+    echo "  knot display <status|extend|stop|launch|capture-fleet> Manage Wayland cockpits & virtual display extension"
     echo "  knot mcp <gateway|sync|status> Manage Model Context Protocol (MCP) server & gateway"
     echo "  knot color [get|set|list]     Manage terminal colors and node palette"
     exit 0

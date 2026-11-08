@@ -82,6 +82,10 @@ vmon_is_active() {
 }
 
 vmon_status() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot display status [<node_id>] (or knot display vmon status [<node_id>])"
+    return 0
+  fi
   local target="${1:-}"
   local qdbus_cmd=""
   if ! qdbus_cmd="$(kdeconnect_get_qdbus_cmd)"; then
@@ -602,9 +606,13 @@ if (screenCount > 1) {
 }
 
 vmon_start() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot display extend <node_id> (or knot display vmon start <node_id>)"
+    return 0
+  fi
   local target="${1:-}"
   if [ -z "$target" ]; then
-    knot_log_err "Usage: knot display vmon start <node_id|device_id>"
+    knot_log_err "Usage: knot display extend <node_id> (or knot display vmon start <node_id>)"
     return 1
   fi
 
@@ -768,6 +776,10 @@ vmon_start() {
 }
 
 vmon_stop() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: knot display stop [<node_id>] (or knot display vmon stop [<node_id>])"
+    return 0
+  fi
   local target="${1:-}"
   local qdbus_cmd=""
   if ! qdbus_cmd="$(kdeconnect_get_qdbus_cmd)"; then

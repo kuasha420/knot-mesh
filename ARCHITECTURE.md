@@ -50,9 +50,9 @@ The foundational infrastructure layer managing physical machines, hardware netwo
 - **Dynamic PAM Gating (`knot-auth-check`)**: Mathematical CIDR subnet validation for ephemeral passwordless sudo execution.
 - **Display Management & Auto-Unlock (`knot-autounlock`)**: Unlocking and waking Wayland/KDE display sessions on cursor entry.
 - **Dynamic Crossover Strip Daemon (`knot-stripd`)**: High-visibility border strips along active crossover boundaries with GPU-accelerated physics impulse flare animations.
-- **Full-Mesh Clipboard & Payload Transport (`knot kdeconnect`)**: Asynchronous, zero-latency payload synchronization over KDE Connect, strictly decoupled from Tier 2 cognitive agents and supervised continuously by Tier 1 systemd user timers (`knot-kdeconnect-reconcile.timer`) and NetworkManager roaming guards (`knot-guard`).
+- **Full-Mesh Clipboard & Payload Transport (`knot clip`, `knot kdeconnect`)**: Asynchronous, zero-latency payload synchronization over KDE Connect, strictly decoupled from Tier 2 cognitive agents and supervised continuously by Tier 1 systemd user timers (`knot-kdeconnect-reconcile.timer`) and NetworkManager roaming guards (`knot-guard`).
 - **Wayland Virtual Monitor Fabric (`knot kdeconnect vmon`, `knot display extend`)**: Dynamic headless display creation via KWin Wayland + `krdpserver` (`krdp`) and hardware-accelerated RDP streaming to remote strands via KRDC (`krdc` + `freerdp`). Enables docked handhelds (Steam Deck OLED, ROG Ally) and laptops to toggle instantly between independent KVM workstations and auxiliary high-density desktop displays.
-- **3-Tier Mesh Network Resolver (`core/resolver.sh`)**: Dynamic resolution hierarchy traversing WireGuard $\to$ mDNS $\to$ LAN physical fallback.
+- **3-Tier Mesh Network Resolver (`core/resolver.sh`)**: Dynamic resolution hierarchy traversing Lease Cache $\to$ mDNS $\to$ Manifest IP Hint & MAC ARP Scan.
 
 ### Tier 2: Agent-to-Agent (A2A) Cognitive Swarm Layer
 The autonomous multi-agent intelligence layer orchestrating distributed AI agent instances across the mesh:
@@ -228,9 +228,6 @@ Mesh nodes must communicate reliably despite DHCP lease shifts, roaming between 
                       [Tier 3: Hardware MAC ARP Scan] ─(Valid & Alive?)──► RESOLVED
                                   │ No
                                   ▼
-                      [WireGuard Mesh Overlay] ────────(Valid & Alive?)──► RESOLVED
-                                  │ No
-                                  ▼
                              FAILED (Exit 1)
 ```
 
@@ -239,7 +236,6 @@ Mesh nodes must communicate reliably despite DHCP lease shifts, roaming between 
 2. **Tier 1: mDNS / Zeroconf**: Probes `<hostname>.local` via `getent ahostsv4` or `avahi-resolve -n`. Ideal for zero-configuration L2 local networks.
 3. **Tier 2: Declarative IP Hint**: Inspects the node manifest (`~/.config/knot/swarms/<swarm>/nodes/<node>.json`) for statically declared `ip_hint`.
 4. **Tier 3: Hardware MAC ARP Scan**: Extracts hardware MAC addresses from the node manifest, scans the kernel ARP neighbor table (`ip neigh`), and falls back to a parallel non-blocking subnet ICMP ping sweep (`nmap -sn` or parallel background ping probes).
-5. **WireGuard Mesh Overlay**: Traverses point-to-point encrypted tunnels (`wg0`, `10.42.0.0/24`), enabling seamless cross-subnet and roaming reachability.
 
 ### Health and Port Probing
 Before returning an IP address, `resolver.sh` validates that the host is alive using `is_host_alive`:

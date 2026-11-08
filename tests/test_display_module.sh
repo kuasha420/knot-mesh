@@ -195,4 +195,21 @@ assert "connection refused" in err.lower() or "remote capture failed" in err.low
 ' "$remote_fail_out"
 echo "  -> Remote capture failure captures accurate diagnostic without error loss: OK"
 
+echo "=== [Test 6] Canonical Display Commands & VMON Compatibility ==="
+# Test knot display extend help
+out_extend_help="$("$BIN_KNOT" display extend -h)"
+echo "$out_extend_help" | grep -q "knot display vmon"
+echo "  -> knot display extend -h routes cleanly: OK"
+
+# Test knot display vmon help
+out_vmon_help="$("$BIN_KNOT" display vmon -h)"
+echo "$out_vmon_help" | grep -q "Usage: knot display vmon"
+echo "  -> knot display vmon -h routes cleanly: OK"
+
+# Test knot display usage contains canonical extend and stop
+out_disp_help="$("$BIN_KNOT" display -h)"
+echo "$out_disp_help" | grep -q "extend <node>"
+echo "$out_disp_help" | grep -q "stop \[<node>\]"
+echo "  -> knot display canonical extend & stop documented: OK"
+
 echo "=== [✓] ALL DISPLAY MODULE TESTS PASSED! ==="

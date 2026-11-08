@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://knot-mesh.org/schemas/companions.schema.json",
+  "title": "Knot Mesh Companions Registry Schema",
+  "description": "JSON Schema specification for the declarative living companion registry.",
+  "type": "object",
+  "required": ["catalog_version", "generated_date", "description", "invariants", "companions"],
+  "properties": {
+    "catalog_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "generated_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "description": {
+      "type": "string"
+    },
+    "invariants": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["name", "summary", "rule"],
+        "properties": {
+          "name": { "type": "string" },
+          "summary": { "type": "string" },
+          "rule": { "type": "string" }
+        }
+      }
+    },
+    "companions": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/companion"
+      }
+    }
+  },
+  "$defs": {
+    "companion": {
+      "type": "object",
+      "required": [
+        "name",
+        "category",
+        "status",
+        "upstream_url",
+        "license",
+        "mandatory",
+        "package_arch",
+        "binary",
+        "probe_command",
+        "version_regex",
+        "shell_extraction_filter",
+        "min_version",
+        "supported_version_range",
+        "verified_node_versions",
+        "high_risk_breaking_triggers",
+        "capabilities",
+        "operational_invariants"
+      ],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "status": {
+          "type": "string",
+          "enum": ["active", "historical"]
+        },
+        "superseded_by": {
+          "type": ["string", "null"]
+        },
+        "historical_notes": {
+          "type": ["string", "null"]
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "kvm_input",
+            "remote_display_vmon",
+            "display_topology",
+            "portals_input",
+            "transport_remote_exec",
+            "socket_triage",
+            "network_overlay",
+            "desktop_integration",
+            "sync_storage",
+            "terminal_agent",
+            "runtime_interpreter",
+            "json_stream",
+            "service_management",
+            "packaging_container",
+            "audio_media"
+          ]
+        },
+        "upstream_url": { "type": "string", "minLength": 1 },
+        "license": { "type": "string", "minLength": 1 },
+        "mandatory": { "type": "boolean" },
+        "package_arch": { "type": "string", "minLength": 1 },
+        "binary": {
+          "type": "string",
+          "pattern": "^[^\\s|]+$"
+        },
+        "probe_command": { "type": "string", "minLength": 1 },
+        "version_regex": { "type": "string", "minLength": 1 },
+        "shell_extraction_filter": { "type": "string", "minLength": 1 },
+        "min_version": { "type": "string", "minLength": 1 },
+        "supported_version_range": { "type": "string", "minLength": 1 },
+        "verified_node_versions": {
+          "type": "object",
+          "required": ["anchor_desktop", "handheld_strand"],
+          "properties": {
+            "anchor_desktop": { "type": ["string", "null"] },
+            "handheld_strand": { "type": ["string", "null"] }
+          }
+        },
+        "high_risk_breaking_triggers": { "type": "string", "minLength": 1 },
+        "capabilities": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "operational_invariants": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "fallback": { "type": "string" }
+      }
+    }
+  }
+}

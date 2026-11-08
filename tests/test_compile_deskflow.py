@@ -115,6 +115,26 @@ class TestCompileDeskflow(unittest.TestCase):
         self.assertIn("section: options", conf)
         self.assertIn("keystroke(ScrollLock) = lockCursorToScreen(toggle)", conf)
 
+        # Test Deskflow 1.27 INI configuration generation
+        deskflow_conf_path = self.tmp_path / "Deskflow.conf"
+        compile_deskflow.update_or_create_deskflow_conf(
+            str(deskflow_conf_path),
+            anchor_host="arch-desktop",
+            screen_hostnames=["arch-desktop", "arch-laptop", "deck-eos"],
+            host_to_aliases={"arch-desktop": ["desktop"], "arch-laptop": ["laptop"], "deck-eos": ["steamdeck"]},
+            host_to_id={"arch-desktop": "desktop", "arch-laptop": "laptop", "deck-eos": "steamdeck"},
+            server_conf_path="/tmp/deskflow-server.conf"
+        )
+        ini_content = deskflow_conf_path.read_text()
+        self.assertIn("[core]", ini_content)
+        self.assertIn("computerName=arch-desktop", ini_content)
+        self.assertIn("[computer_arch-desktop]", ini_content)
+        self.assertIn("aliases=desktop", ini_content)
+        self.assertIn("[computer_arch-laptop]", ini_content)
+        self.assertIn("aliases=laptop", ini_content)
+        self.assertIn("[computer_deck-eos]", ini_content)
+        self.assertIn("aliases=steamdeck", ini_content)
+
     def test_automatic_reciprocal_links(self):
         # Only define desktop -> laptop (left), expect laptop -> desktop (right) to be auto-generated
         topo = {
@@ -189,10 +209,7 @@ class TestCompileDeskflow(unittest.TestCase):
             json.dump(topo, f, indent=2)
 
         conf = compile_deskflow.compile_deskflow(str(topo_path), str(self.nodes_dir), mode="unlocked")
-        # headless-box must not appear in screens
-        screens_section = conf.split("section: screens")[1].split("end")[0]
-        self.assertNotIn("headless-box", screens_section)
-        # No link to headless-box
+        # headless-box must not appear in links or options
         self.assertNotIn("headless-box", conf)
 
     def test_locked_mode_cursor_confinement(self):
@@ -243,6 +260,7 @@ class TestCompileDeskflow(unittest.TestCase):
         }
         topo_path = self.tmp_path / "topology_cli.json"
         out_path = self.tmp_path / "deskflow-server.conf"
+        deskflow_conf_path = self.tmp_path / "Deskflow.conf"
         with open(topo_path, "w") as f:
             json.dump(topo, f, indent=2)
 
@@ -252,14 +270,20 @@ class TestCompileDeskflow(unittest.TestCase):
             "--topology", str(topo_path),
             "--nodes-dir", str(self.nodes_dir),
             "--locked", "true",
-            "--output", str(out_path)
+            "--output", str(out_path),
+            "--deskflow-conf", str(deskflow_conf_path)
         ]
         res = subprocess.run(cmd, capture_output=True, text=True)
         self.assertEqual(res.returncode, 0, f"CLI execution failed: {res.stderr}")
         self.assertTrue(out_path.exists())
         content = out_path.read_text()
         self.assertIn("section: screens", content)
+        self.assertIn("section: links", content)
         self.assertIn("arch-desktop:", content)
+        self.assertTrue(deskflow_conf_path.exists())
+        df_content = deskflow_conf_path.read_text()
+        self.assertIn("[computer_arch-desktop]", df_content)
+        self.assertIn("[computer_arch-laptop]", df_content)
 
     def test_links_list_format(self):
         topo = {

@@ -7,6 +7,7 @@ arch=('any')
 url="https://github.com/kuasha420/knot-mesh"
 license=('MIT')
 depends=(
+    'git'
     'python'
     'python-pyqt6'
     'layer-shell-qt'
@@ -16,19 +17,25 @@ depends=(
     'deskflow'
     'libportal'
     'kde-cli-tools'
+    'jq>=1.6'
 )
 optdepends=(
     'kscreen-doctor: Wayland display auto-discovery on KDE Plasma 6'
     'wlr-randr: Wayland display auto-discovery for wlroots compositors'
     'libnotify: Desktop notification support for KVM cursor locking'
-    'webkit2gtk-4.1: Knot Kommand Kafe Tauri v2 native desktop container'
-    'gtk3: Native system tray and Wayland/X11 container support'
     'kdeconnect: Full-mesh clipboard synchronization and Wayland Virtual Monitor signaling'
     'krdp: Wayland headless virtual display creation and RDP streaming (host)'
     'krdc: Wayland remote desktop client for Virtual Monitor rendering (client)'
     'freerdp: RDP protocol engine for KRDC'
     'ncurses: Terminal terminfo compiler and infocmp database tools'
+    'kitty>=0.26: GPU-accelerated terminal multiplexer for Swarm Council Confluence cockpits'
     'kitty-terminfo: Terminal terminfo definitions for kitty remote control'
+    'flatpak: Managing Wayland remote desktop portal permissions for Deskflow'
+    'socat: Bidirectional socket proxying and sub-second port probing for SSH ProxyCommand'
+    'openbsd-netcat: Fast zero-I/O port scanning and SSH proxy command transport'
+    'rsync: Incremental delta-transfer synchronizer for swarm deployment and fleet updates'
+    'pipewire: Low-latency multimedia and DMA-BUF screencasting substrate for KRdp'
+    'wireplumber: Session management for PipeWire'
 )
 source=("knot-mesh-${pkgver}.tar.gz::https://github.com/kuasha420/knot-mesh/archive/refs/tags/v1.0.0-rc6.tar.gz")
 sha256sums=('SKIP')
@@ -52,18 +59,6 @@ package() {
     # Copy systemd units if present
     if [ -d "systemd" ]; then
         cp -r systemd "${destdir}/"
-    fi
-
-    # Copy web and src-tauri if present
-    if [ -d "web" ]; then
-        cp -r web "${destdir}/"
-    fi
-    if [ -d "src-tauri" ]; then
-        cp -r src-tauri "${destdir}/"
-        if [ -f "src-tauri/target/release/knot-kafe" ]; then
-            install -Dm755 "src-tauri/target/release/knot-kafe" "${destdir}/bin/knot-kafe"
-            ln -sf "/usr/lib/knot-mesh/bin/knot-kafe" "${pkgdir}/usr/bin/knot-kafe"
-        fi
     fi
 
     # Symlink executables to /usr/bin

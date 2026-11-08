@@ -1,0 +1,1521 @@
+{
+  "$schema": "./companions.schema.json",
+  "catalog_version": "1.0.0",
+  "generated_date": "2026-10-21",
+  "description": "Living declarative registry of all 3rd-party companion applications, runtime utilities, system services, and libraries consumed by knot-mesh.",
+  "invariants": {
+    "headless_qt6_offscreen": {
+      "name": "Headless Qt6 Crash Invariant",
+      "summary": "Mandate QT_QPA_PLATFORM=offscreen for all Qt6/KDE CLI probes in headless, SSH, or background contexts to avoid SIGABRT / exit code 134.",
+      "rule": "export QT_QPA_PLATFORM=offscreen"
+    },
+    "krdp_patcher_abi": {
+      "name": "KRdp Patcher ABI Invariant",
+      "summary": "Prevent stale /usr/local/lib/knot-vmon/libKRdp.so library mismatches when system krdp package upgrades. Patcher must verify matching ABI.",
+      "rule": "Audit system libKRdp.so.6 version before launching patched wrapper"
+    },
+    "deskflow_ini_dialect_bridge": {
+      "name": "Deskflow 1.26 vs 1.27 INI Dialect Bridge",
+      "summary": "Deskflow 1.26 uses legacy 4-section Synergy syntax; Deskflow 1.27 uses QSettings INI. Knot bridges both via externalConfigFile pointer.",
+      "rule": "Maintain externalConfig=true in Deskflow.conf pointing to compiled deskflow-server.conf"
+    },
+    "jq_dependency_packaging": {
+      "name": "Jq Dependency Packaging Invariant",
+      "summary": "jq is ubiquitous across knot-mesh core modules, auth, hub, council, and tests. It must be strictly declared in PKGBUILD depends and install.sh required_cmds.",
+      "rule": "depends+=('jq>=1.6') in PKGBUILD and required_cmds+=('jq') in install.sh"
+    },
+    "controlmaster_108_byte_safety": {
+      "name": "ControlMaster 108-Byte Socket Path Safety",
+      "summary": "Linux kernel sockaddr_un.sun_path limit is 108 bytes. Knot enforces ControlPath cm_%C (40-char SHA1 hash) to guarantee zero path overflow.",
+      "rule": "ControlPath ~/.cache/knot/ssh/cm_%C"
+    },
+    "sockets_fallback_cascade": {
+      "name": "Sockets Fallback Cascade",
+      "summary": "Sub-second port probing and SSH ProxyCommand bridge cascades from nc -> socat -> /dev/tcp to ensure zero-failure connectivity on handhelds lacking netcat.",
+      "rule": "Check nc, then socat, then bash /dev/tcp fallback"
+    },
+    "login_shell_ssh_promotion": {
+      "name": "Login Shell SSH Promotion",
+      "summary": "Non-interactive SSH commands must execute via bash -lc to source user profiles (~/.bash_profile, ~/.profile) and expose %h/.local/bin in PATH.",
+      "rule": "ssh <target> \"bash -lc $(printf %q \"$cmd\")\""
+    }
+  },
+  "companions": {
+    "deskflow": {
+      "name": "Deskflow",
+      "category": "kvm_input",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://github.com/deskflow/deskflow",
+      "license": "GPL-2.0-only",
+      "mandatory": true,
+      "package_arch": "deskflow",
+      "binary": "deskflow-core",
+      "probe_command": "QT_QPA_PLATFORM=offscreen deskflow-core --version 2>&1 | head -n1",
+      "version_regex": "^deskflow-core\\s+v?([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^deskflow-core[[:space:]]+v?([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "1.26.0",
+      "supported_version_range": ">=1.26.0 <2.0.0",
+      "verified_node_versions": {
+        "anchor_desktop": "1.27.0-1",
+        "handheld_strand": "1.27.0-1"
+      },
+      "high_risk_breaking_triggers": "Deprecation of externalConfig/externalConfigFile directive in Deskflow.conf; CLI argument changes between deskflow-core and deskflow; libportal InputCapture session revocation. File citations: PKGBUILD:16, install.sh:45-47, core/modules/deskflow.sh:10-753, core/modules/compile_deskflow.py:1-269, systemd/knot-deskflow.service:1-19, bin/knot:784-870.",
+      "capabilities": [
+        "kvm_server",
+        "kvm_client",
+        "tls_fingerprint_pinning",
+        "wayland_input_capture",
+        "barrier_layout"
+      ],
+      "operational_invariants": [
+        "headless_qt6_offscreen",
+        "deskflow_ini_dialect_bridge"
+      ]
+    },
+    "barrier": {
+      "name": "Barrier",
+      "category": "kvm_input",
+      "status": "historical",
+      "superseded_by": "deskflow",
+      "historical_notes": "Predecessor to Deskflow (fork of Synergy). Lacks native Wayland InputCapture protocol support under Plasma 6; superseded by Deskflow. Fully purged from runtime codebase, build scripts, and documentation.",
+      "upstream_url": "https://github.com/debauchee/barrier",
+      "license": "GPL-2.0-only",
+      "mandatory": false,
+      "package_arch": "barrier",
+      "binary": "barriers",
+      "probe_command": "barriers --version 2>&1 | head -n1",
+      "version_regex": "^barriers?\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^barriers?[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "2.4.0",
+      "supported_version_range": ">=2.4.0",
+      "verified_node_versions": {
+        "anchor_desktop": null,
+        "handheld_strand": null
+      },
+      "high_risk_breaking_triggers": "Lacks native Wayland InputCapture protocol support under Plasma 6; superseded by Deskflow. Historical predecessor purged across codebase and documentation.",
+      "capabilities": [
+        "legacy_kvm_layout"
+      ],
+      "operational_invariants": []
+    },
+    "synergy": {
+      "name": "Synergy",
+      "category": "kvm_input",
+      "status": "historical",
+      "superseded_by": "deskflow",
+      "historical_notes": "Proprietary/legacy X11 KVM software. Requires X11/XTest and lacks modern Wayland InputCapture support; superseded by Deskflow. Fully purged from runtime codebase and documentation.",
+      "upstream_url": "https://github.com/symless/synergy-core",
+      "license": "GPL-2.0-only",
+      "mandatory": false,
+      "package_arch": "synergy",
+      "binary": "synergys",
+      "probe_command": "synergys --version 2>&1 | head -n1",
+      "version_regex": "^synergys?\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^synergys?[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "1.14.0",
+      "supported_version_range": ">=1.14.0",
+      "verified_node_versions": {
+        "anchor_desktop": null,
+        "handheld_strand": null
+      },
+      "high_risk_breaking_triggers": "Proprietary/legacy dialect fork; requires X11/XTest. Superseded by Deskflow; historical predecessor purged across codebase and documentation.",
+      "capabilities": [
+        "legacy_kvm_layout"
+      ],
+      "operational_invariants": []
+    },
+    "input_leap": {
+      "name": "Input Leap",
+      "category": "kvm_input",
+      "status": "historical",
+      "superseded_by": "deskflow",
+      "historical_notes": "Wayland fork of Barrier. Superseded by Deskflow as Knot Mesh's unified KVM engine; dead process cleanup and legacy units purged from codebase.",
+      "upstream_url": "https://github.com/input-leap/input-leap",
+      "license": "GPL-2.0-only",
+      "mandatory": false,
+      "package_arch": "input-leap",
+      "binary": "input-leaps",
+      "probe_command": "input-leaps --version 2>&1 | head -n1",
+      "version_regex": "^input-leaps?\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^input-leaps?[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "3.0.0",
+      "supported_version_range": ">=3.0.0",
+      "verified_node_versions": {
+        "anchor_desktop": null,
+        "handheld_strand": null
+      },
+      "high_risk_breaking_triggers": "Process conflict with deskflow-core; superseded by Deskflow. Legacy service cleanup fully retired from core/modules/deskflow.sh.",
+      "capabilities": [
+        "wayland_input_capture"
+      ],
+      "operational_invariants": []
+    },
+    "krdp": {
+      "name": "KRdp Server",
+      "category": "remote_display_vmon",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://invent.kde.org/plasma/krdp",
+      "license": "LGPL-2.1-or-later",
+      "mandatory": false,
+      "package_arch": "krdp",
+      "binary": "krdpserver",
+      "probe_command": "QT_QPA_PLATFORM=offscreen /usr/bin/krdpserver --version 2>&1 | head -n1",
+      "version_regex": "^krdp-server\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^krdp-server[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "6.0.0",
+      "supported_version_range": ">=6.0.0",
+      "verified_node_versions": {
+        "anchor_desktop": "6.8.2-1",
+        "handheld_strand": "6.8.2-1"
+      },
+      "high_risk_breaking_triggers": "Upstream plasma/krdp#47 hardcoded metadata cursor mode breaking client cursor visibility; system libKRdp.so.6 upgrade breaking LD_LIBRARY_PATH patch wrapper in /usr/local/lib/knot-vmon. File citations: PKGBUILD:27, core/modules/vmon.sh:4, 51, 94-99, 177-216, bin/knot-vmon-patch-krdp:1-126.",
+      "capabilities": [
+        "wayland_virtual_monitor",
+        "rdp_server",
+        "screencast_dma_buf"
+      ],
+      "operational_invariants": [
+        "headless_qt6_offscreen",
+        "krdp_patcher_abi"
+      ]
+    },
+    "krdc": {
+      "name": "KRDC Client",
+      "category": "remote_display_vmon",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://invent.kde.org/network/krdc",
+      "license": "GPL-2.0-or-later",
+      "mandatory": false,
+      "package_arch": "krdc",
+      "binary": "krdc",
+      "probe_command": "QT_QPA_PLATFORM=offscreen krdc --version 2>&1 | head -n1",
+      "version_regex": "^krdc\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^krdc[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "24.02.0",
+      "supported_version_range": ">=24.02.0",
+      "verified_node_versions": {
+        "anchor_desktop": "26.08.3-1",
+        "handheld_strand": "26.08.3-1"
+      },
+      "high_risk_breaking_triggers": "CLI argument drift (--fullscreen %u); krdcrc config structure shifts in [hostpreferences]; fullscreen window management under KWin. File citations: PKGBUILD:28, core/modules/vmon.sh:55, 102-107, 230-234, 262-308, bin/knot-vmon-keepalive:4, 106-135.",
+      "capabilities": [
+        "rdp_client",
+        "fullscreen_overlay",
+        "kwin_rule_matching"
+      ],
+      "operational_invariants": [
+        "headless_qt6_offscreen"
+      ]
+    },
+    "freerdp": {
+      "name": "FreeRDP",
+      "category": "remote_display_vmon",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://github.com/FreeRDP/FreeRDP",
+      "license": "Apache-2.0",
+      "mandatory": false,
+      "package_arch": "freerdp",
+      "binary": "xfreerdp3",
+      "probe_command": "xfreerdp3 --version 2>&1 | head -n1",
+      "version_regex": "FreeRDP\\s+version\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/.*FreeRDP[[:space:]]+version[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "3.0.0",
+      "supported_version_range": ">=3.0.0",
+      "verified_node_versions": {
+        "anchor_desktop": "3.32.2-1",
+        "handheld_strand": "3.32.1-1"
+      },
+      "high_risk_breaking_triggers": "FreeRDP 2 -> 3 certificate storage layout change (~/.config/freerdp/server/<ip>_<port>.pem); untrusted cert dialog interactive blocking. File citations: PKGBUILD:29, core/modules/vmon.sh:259-261.",
+      "capabilities": [
+        "rdp_protocol_core",
+        "tls_cert_pinning"
+      ],
+      "operational_invariants": []
+    },
+    "wayvnc": {
+      "name": "wayvnc",
+      "category": "remote_display_vmon",
+      "status": "historical",
+      "superseded_by": "krdp",
+      "historical_notes": "VNC server targeting wlroots zwlr_screencopy_v1 protocol exclusively. Incompatible with KDE Plasma 6 KWin screencasting; superseded by KRdp Server and KRDC.",
+      "upstream_url": "https://github.com/any1/wayvnc",
+      "license": "ISC",
+      "mandatory": false,
+      "package_arch": "wayvnc",
+      "binary": "wayvnc",
+      "probe_command": "wayvnc --version 2>&1 | head -n1",
+      "version_regex": "^wayvnc:\\s+version\\s+v?([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^wayvnc:[[:space:]]+version[[:space:]]+v?([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "0.8.0",
+      "supported_version_range": ">=0.8.0",
+      "verified_node_versions": {
+        "anchor_desktop": null,
+        "handheld_strand": null
+      },
+      "high_risk_breaking_triggers": "Only compatible with wlroots compositors supporting zwlr_screencopy_v1; incompatible with KDE Plasma 6 KWin screencast. Superseded by KRdp / KRDC.",
+      "capabilities": [
+        "vnc_server",
+        "wlroots_screencopy"
+      ],
+      "operational_invariants": []
+    },
+    "sunshine": {
+      "name": "Sunshine",
+      "category": "remote_display_vmon",
+      "status": "historical",
+      "superseded_by": "krdp",
+      "historical_notes": "GameStream host server requiring cap_sys_admin+ep root capabilities for KMS screen capture or dummy display dongles. Superseded by native KWin headless virtual displays and KRdp/KRDC RDP streaming without elevated capabilities.",
+      "upstream_url": "https://github.com/LizardByte/Sunshine",
+      "license": "GPL-3.0-only",
+      "mandatory": false,
+      "package_arch": "sunshine",
+      "binary": "sunshine",
+      "probe_command": "sunshine --version 2>&1 | head -n1",
+      "version_regex": "^Sunshine\\s+v?([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^Sunshine[[:space:]]+v?([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "0.21.0",
+      "supported_version_range": ">=0.21.0",
+      "verified_node_versions": {
+        "anchor_desktop": null,
+        "handheld_strand": null
+      },
+      "high_risk_breaking_triggers": "Requires cap_sys_admin+ep for KMS capture under Wayland or dedicated virtual display dummy driver; knot-mesh utilizes KRdp/KWin screencast instead. File citations: display-ops skill.",
+      "capabilities": [
+        "gamestream_server",
+        "kms_capture"
+      ],
+      "operational_invariants": []
+    },
+    "kscreen_doctor": {
+      "name": "kscreen-doctor",
+      "category": "display_topology",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://invent.kde.org/plasma/libkscreen",
+      "license": "GPL-2.0-or-later",
+      "mandatory": false,
+      "package_arch": "libkscreen",
+      "binary": "kscreen-doctor",
+      "probe_command": "pacman -Q libkscreen 2>&1 | awk '{print $2}'",
+      "version_regex": "^([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "6.0.0",
+      "supported_version_range": ">=6.0.0",
+      "verified_node_versions": {
+        "anchor_desktop": "6.8.2-1",
+        "handheld_strand": "6.8.2-1"
+      },
+      "high_risk_breaking_triggers": "JSON output structure changes in -j flag; output.<name>.priority vs primary output handling under Plasma 6. File citations: PKGBUILD:21, core/installer/display.sh:13-82, 146-153, core/modules/vmon.sh:324-327, 473, 481, 492, 496, 518.",
+      "capabilities": [
+        "plasma6_display_query",
+        "virtual_monitor_placement",
+        "scaling_reconfiguration"
+      ],
+      "operational_invariants": []
+    },
+    "wlr_randr": {
+      "name": "wlr-randr",
+      "category": "display_topology",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://github.com/emersion/wlr-randr",
+      "license": "MIT",
+      "mandatory": false,
+      "package_arch": "wlr-randr",
+      "binary": "wlr-randr",
+      "probe_command": "wlr-randr --version 2>&1 | head -n1",
+      "version_regex": "^wlr-randr\\s+version\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^wlr-randr[[:space:]]+version[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "0.4.0",
+      "supported_version_range": ">=0.4.0",
+      "verified_node_versions": {
+        "anchor_desktop": null,
+        "handheld_strand": null
+      },
+      "high_risk_breaking_triggers": "Regex parsing failures when scale is integer vs float; only operates under wlroots Wayland compositors. File citations: PKGBUILD:22, core/installer/display.sh:84-105, 155-162.",
+      "capabilities": [
+        "wlroots_display_query"
+      ],
+      "operational_invariants": []
+    },
+    "drm_info": {
+      "name": "drm_info",
+      "category": "display_topology",
+      "status": "historical",
+      "superseded_by": "kscreen_doctor",
+      "historical_notes": "Direct DRM/KMS node debugging utility. Useful for low-level GPU diagnostics, but never integrated into Knot Mesh runtime automation; superseded by kscreen-doctor and KWin D-Bus APIs.",
+      "upstream_url": "https://gitlab.freedesktop.org/emersion/drm_info",
+      "license": "MIT",
+      "mandatory": false,
+      "package_arch": "drm_info",
+      "binary": "drm_info",
+      "probe_command": "drm_info -V 2>&1 | head -n1",
+      "version_regex": "^drm_info\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^drm_info[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "2.6.0",
+      "supported_version_range": ">=2.6.0",
+      "verified_node_versions": {
+        "anchor_desktop": null,
+        "handheld_strand": null
+      },
+      "high_risk_breaking_triggers": "Requires direct GPU node access (/dev/dri/card*); diagnostic only.",
+      "capabilities": [
+        "drm_plane_inspection"
+      ],
+      "operational_invariants": []
+    },
+    "vkms": {
+      "name": "VKMS (Virtual Kernel Modesetting)",
+      "category": "display_topology",
+      "status": "historical",
+      "superseded_by": "kscreen_doctor",
+      "historical_notes": "Virtual Kernel Modesetting test driver requiring root modprobe privileges and manual DRM pipeline configuration. Superseded by zero-root KWin headless virtual monitors and kscreen-doctor.",
+      "upstream_url": "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git",
+      "license": "GPL-2.0-only",
+      "mandatory": false,
+      "package_arch": "linux",
+      "binary": "vkms",
+      "probe_command": "modinfo -F vermagic vkms 2>&1 | head -n1",
+      "version_regex": "^([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "5.4.0",
+      "supported_version_range": ">=5.4.0",
+      "verified_node_versions": {
+        "anchor_desktop": "builtin_module",
+        "handheld_strand": "builtin_module"
+      },
+      "high_risk_breaking_triggers": "Requires root modprobe privileges and kernel DRM arbitration; knot-mesh bypasses vkms by using KWin native virtual monitor creation.",
+      "capabilities": [
+        "kernel_dummy_display"
+      ],
+      "operational_invariants": []
+    },
+    "evdi": {
+      "name": "EVDI (Extensible Virtual Display Interface)",
+      "category": "display_topology",
+      "status": "historical",
+      "superseded_by": "kscreen_doctor",
+      "historical_notes": "DisplayLink Extensible Virtual Display Interface out-of-tree kernel module. Prone to frequent DKMS compilation breakages across rolling Linux kernel upgrades. Superseded by native user-space KWin headless virtual display allocation via kscreen-doctor and KWin D-Bus.",
+      "upstream_url": "https://github.com/DisplayLink/evdi",
+      "license": "GPL-2.0-only",
+      "mandatory": false,
+      "package_arch": "evdi",
+      "binary": "evdi",
+      "probe_command": "modinfo -F vermagic evdi 2>&1 | head -n1",
+      "version_regex": "^([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "1.14.0",
+      "supported_version_range": ">=1.14.0",
+      "verified_node_versions": {
+        "anchor_desktop": null,
+        "handheld_strand": null
+      },
+      "high_risk_breaking_triggers": "DKMS compilation failures on newer Linux kernels; out-of-tree module required. Knot-mesh avoids EVDI in favor of KWin headless screencasting.",
+      "capabilities": [
+        "virtual_display_framebuffer"
+      ],
+      "operational_invariants": []
+    },
+    "libportal": {
+      "name": "libportal",
+      "category": "portals_input",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://github.com/flatpak/libportal",
+      "license": "LGPL-3.0-only",
+      "mandatory": true,
+      "package_arch": "libportal",
+      "binary": "libportal",
+      "probe_command": "pkg-config --modversion libportal 2>&1",
+      "version_regex": "^([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "awk '{print $1}'",
+      "min_version": "0.8.0",
+      "supported_version_range": ">=0.8.0",
+      "verified_node_versions": {
+        "anchor_desktop": "0.9.1-1",
+        "handheld_strand": "0.9.0-1"
+      },
+      "high_risk_breaking_triggers": "InputCapture API 1 vs API 2 ABI compatibility; shim upgrade logic in core/shim/input_capture_shim.c; session restore token persistence. File citations: PKGBUILD:17, core/shim/input_capture_shim.c:9-152, core/modules/deskflow.sh:466.",
+      "capabilities": [
+        "input_capture_api2",
+        "session_persistence_token",
+        "remote_desktop_portal"
+      ],
+      "operational_invariants": []
+    },
+    "libei": {
+      "name": "libei / libeis",
+      "category": "portals_input",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://gitlab.freedesktop.org/libinput/libei",
+      "license": "MIT",
+      "mandatory": false,
+      "package_arch": "libei",
+      "binary": "libei",
+      "probe_command": "pkg-config --modversion libei-1.0 2>&1",
+      "version_regex": "^([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "awk '{print $1}'",
+      "min_version": "1.2.0",
+      "supported_version_range": ">=1.2.0",
+      "verified_node_versions": {
+        "anchor_desktop": "1.4.1-1",
+        "handheld_strand": "1.4.0-1"
+      },
+      "high_risk_breaking_triggers": "EIS socket path negotiation changes under KWin (/org/kde/KWin/EIS/InputCapture); barrier array tuple signature changes in enable method. File citations: core/shim/input_capture_shim.c:236-392, core/modules/doctor.sh:91.",
+      "capabilities": [
+        "emulated_input_client",
+        "emulated_input_server",
+        "kwin_eis_binding"
+      ],
+      "operational_invariants": []
+    },
+    "xdg_desktop_portal": {
+      "name": "xdg-desktop-portal",
+      "category": "portals_input",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://github.com/flatpak/xdg-desktop-portal",
+      "license": "LGPL-2.1-or-later",
+      "mandatory": false,
+      "package_arch": "xdg-desktop-portal",
+      "binary": "/usr/lib/xdg-desktop-portal",
+      "probe_command": "pacman -Q xdg-desktop-portal 2>&1 | awk '{print $2}'",
+      "version_regex": "^([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "1.18.0",
+      "supported_version_range": ">=1.18.0",
+      "verified_node_versions": {
+        "anchor_desktop": "1.20.0-1",
+        "handheld_strand": "1.18.4-1"
+      },
+      "high_risk_breaking_triggers": "Unclean restart during active KWin EIS grab causes desktop session input freeze; systemd start ordering vs backend portal daemon. File citations: systemd/knot-deskflow.service:4-5, core/modules/deskflow.sh:569, 715-721, core/modules/doctor.sh:91-105.",
+      "capabilities": [
+        "portal_desktop_bus",
+        "input_capture_interface",
+        "remote_desktop_interface"
+      ],
+      "operational_invariants": []
+    },
+    "xdg_desktop_portal_kde": {
+      "name": "plasma-xdg-desktop-portal-kde",
+      "category": "portals_input",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://invent.kde.org/plasma/xdg-desktop-portal-kde",
+      "license": "LGPL-2.0-or-later",
+      "mandatory": false,
+      "package_arch": "xdg-desktop-portal-kde",
+      "binary": "/usr/lib/xdg-desktop-portal-kde",
+      "probe_command": "pacman -Q xdg-desktop-portal-kde 2>&1 | awk '{print $2}'",
+      "version_regex": "^([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "6.0.0",
+      "supported_version_range": ">=6.0.0",
+      "verified_node_versions": {
+        "anchor_desktop": "6.8.2-1",
+        "handheld_strand": "6.8.2-1"
+      },
+      "high_risk_breaking_triggers": "D-Bus notification spam on session restore; systemd unit activation order race condition with xdg-desktop-portal.conf. File citations: systemd/knot-deskflow.service:4-5, core/modules/deskflow.sh:358-382, 714-721, core/modules/doctor.sh:107-143.",
+      "capabilities": [
+        "kwin_portal_backend",
+        "screencast_backend",
+        "inputcapture_backend"
+      ],
+      "operational_invariants": []
+    },
+    "openssh": {
+      "name": "OpenSSH",
+      "category": "transport_remote_exec",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://github.com/openssh/openssh-portable",
+      "license": "BSD-3-Clause",
+      "mandatory": true,
+      "package_arch": "openssh",
+      "binary": "ssh",
+      "probe_command": "ssh -V 2>&1",
+      "version_regex": "OpenSSH_([0-9]+\\.[0-9]+(?:p[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/.*OpenSSH_([0-9]+\\.[0-9]+(p[0-9]+)?).*/\\1/p'",
+      "min_version": "8.7p1",
+      "supported_version_range": ">=8.7p1",
+      "verified_node_versions": {
+        "anchor_desktop": "10.6p1-2",
+        "handheld_strand": "10.6p1-1"
+      },
+      "high_risk_breaking_triggers": "ControlPath 108-byte sockaddr_un buffer overflow if %C hash is replaced by long paths; sshd_config.d drop-in support requirement; deprecation of legacy RSA keys. File citations: PKGBUILD:13, install.sh:36, core/modules/ssh.sh:14-293, bin/knot:385, 587, 726, 747, tests/test_exec_parallel.sh:28-120.",
+      "capabilities": [
+        "control_master_multiplexing",
+        "proxy_command",
+        "ed25519_keygen",
+        "batch_mode"
+      ],
+      "operational_invariants": [
+        "controlmaster_108_byte_safety",
+        "login_shell_ssh_promotion"
+      ]
+    },
+    "rsync": {
+      "name": "Rsync",
+      "category": "transport_remote_exec",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://github.com/WayneD/rsync",
+      "license": "GPL-3.0-only",
+      "mandatory": false,
+      "package_arch": "rsync",
+      "binary": "rsync",
+      "probe_command": "rsync --version 2>&1 | head -n1",
+      "version_regex": "rsync\\s+version\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/.*rsync[[:space:]]+version[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "3.1.0",
+      "supported_version_range": ">=3.1.0",
+      "verified_node_versions": {
+        "anchor_desktop": "3.5.1-3",
+        "handheld_strand": "3.5.1-2"
+      },
+      "high_risk_breaking_triggers": "Argument parsing shifts between --protect-args and --old-args on whitespace paths; absence on minimal handhelds mitigated by streaming tar fallback. File citations: core/modules/swarm_sync.sh:61-120, bin/knot:2047-2056, tests/test_swarm_sync.sh:96-160.",
+      "capabilities": [
+        "differential_sync",
+        "ssh_transport_integration",
+        "permission_preservation"
+      ],
+      "operational_invariants": [],
+      "fallback": "tar -czf - | ssh tar -xzf -"
+    },
+    "socat": {
+      "name": "Socat",
+      "category": "socket_triage",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "http://www.dest-unreach.org/socat/",
+      "license": "GPL-2.0-only",
+      "mandatory": false,
+      "package_arch": "socat",
+      "binary": "socat",
+      "probe_command": "socat -V 2>&1 | head -n2",
+      "version_regex": "socat\\s+version\\s+([0-9a-zA-Z.]+)",
+      "shell_extraction_filter": "sed -nE 's/.*socat[[:space:]]+version[[:space:]]+([0-9a-zA-Z.]+).*/\\1/p'",
+      "min_version": "1.7.4",
+      "supported_version_range": ">=1.7.4",
+      "verified_node_versions": {
+        "anchor_desktop": "1.8.1.3-1",
+        "handheld_strand": "1.8.1.3-1"
+      },
+      "high_risk_breaking_triggers": "SYN timeout hang if connect-timeout parameter is omitted; STDIO socket bridging syntax. File citations: core/resolver.sh:124, 300, 360, docs/RELEASES_DIFF_LEDGER.md:439.",
+      "capabilities": [
+        "tcp_connect_timeout",
+        "stdio_stream_bridge",
+        "handheld_proxy_bridge"
+      ],
+      "operational_invariants": [
+        "sockets_fallback_cascade"
+      ]
+    },
+    "netcat": {
+      "name": "Netcat (nc)",
+      "category": "socket_triage",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://netcat.sourceforge.net/",
+      "license": "GPL-2.0-only",
+      "mandatory": false,
+      "package_arch": "gnu-netcat",
+      "binary": "nc",
+      "probe_command": "nc -h 2>&1 | head -n1",
+      "version_regex": "(?:GNU\\s+[Nn]etcat\\s+|version\\s+)([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/.*[Nn]etcat[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "0.7.1",
+      "supported_version_range": ">=0.7.1",
+      "verified_node_versions": {
+        "anchor_desktop": "0.7.1-12",
+        "handheld_strand": null
+      },
+      "high_risk_breaking_triggers": "Flag incompatibility between openbsd-netcat (-z -n -w) and gnu-netcat (rejects combined -z -n -w); absent on stock SteamOS baseline reference. File citations: core/resolver.sh:116-121, 298, 357, bin/knot:419-422.",
+      "capabilities": [
+        "zero_io_port_scan",
+        "ssh_proxy_forwarding"
+      ],
+      "operational_invariants": [
+        "sockets_fallback_cascade"
+      ],
+      "fallback": "socat or /dev/tcp"
+    },
+    "wireguard_tools": {
+      "name": "WireGuard Tools",
+      "category": "network_overlay",
+      "status": "historical",
+      "superseded_by": "openssh",
+      "historical_notes": "Evaluated in early mesh architecture roadmaps as a kernel VPN overlay (wg0). Demoted and purged from architecture because Knot Mesh operates over direct local LAN with dynamic mDNS/ARP resolution (core/resolver.sh) and end-to-end encrypted OpenSSH ControlMaster multiplexing (core/modules/ssh.sh), eliminating TUN/TAP interfaces, iptables/nftables firewall rules, and out-of-band key coordination.",
+      "upstream_url": "https://git.zx2c4.com/wireguard-tools/",
+      "license": "GPL-2.0-only",
+      "mandatory": false,
+      "package_arch": "wireguard-tools",
+      "binary": "wg",
+      "probe_command": "wg --version 2>&1 | head -n1",
+      "version_regex": "wireguard-tools\\s+v?([0-9a-zA-Z.]+)",
+      "shell_extraction_filter": "sed -nE 's/.*wireguard-tools[[:space:]]+v?([0-9a-zA-Z.]+).*/\\1/p'",
+      "min_version": "1.0.20200827",
+      "supported_version_range": ">=1.0.20200827",
+      "verified_node_versions": {
+        "anchor_desktop": null,
+        "handheld_strand": null
+      },
+      "high_risk_breaking_triggers": "wg-quick firewall backend requirement (iptables vs nftables); silent tunnel freeze behind NAT unless PersistentKeepalive=25 is set. Early roadmap overlay superseded by 3-tier resolver.",
+      "capabilities": [
+        "curve25519_key_management",
+        "wg_quick_lifecycle",
+        "point_to_point_overlay"
+      ],
+      "operational_invariants": []
+    },
+    "tailscale": {
+      "name": "Tailscale",
+      "category": "network_overlay",
+      "status": "historical",
+      "superseded_by": "openssh",
+      "historical_notes": "Evaluated in early mesh networking roadmaps (docs/SWARM_VISION_AND_ROADMAP.md). Superseded by native point-to-point OpenSSH ControlMaster encrypted multiplexing (core/modules/ssh.sh) and dynamic 3-tier local peer resolution (core/resolver.sh), avoiding external coordination servers, userspace TUN overhead, and tailscale0 interface requirements.",
+      "upstream_url": "https://github.com/tailscale/tailscale",
+      "license": "BSD-3-Clause",
+      "mandatory": false,
+      "package_arch": "tailscale",
+      "binary": "tailscale",
+      "probe_command": "tailscale version 2>&1 | head -n1",
+      "version_regex": "^([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "awk '{print $1}'",
+      "min_version": "1.38.0",
+      "supported_version_range": ">=1.38.0",
+      "verified_node_versions": {
+        "anchor_desktop": null,
+        "handheld_strand": null
+      },
+      "high_risk_breaking_triggers": "JSON schema drift in tailscale status --json; userspace networking mode lacking tailscale0 interface. File citations: docs/SWARM_VISION_AND_ROADMAP.md:24.",
+      "capabilities": [
+        "cgnat_routing",
+        "derp_nat_traversal",
+        "magicdns"
+      ],
+      "operational_invariants": []
+    },
+    "kdeconnect": {
+      "name": "KDE Connect",
+      "category": "desktop_integration",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://invent.kde.org/network/kdeconnect-kde",
+      "license": "GPL-2.0-or-later",
+      "mandatory": false,
+      "package_arch": "kdeconnect",
+      "binary": "kdeconnect-cli",
+      "probe_command": "kdeconnect-cli --version 2>&1 | head -n1",
+      "version_regex": "kdeconnect-cli\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/.*kdeconnect-cli[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "24.02.0",
+      "supported_version_range": ">=24.02.0",
+      "verified_node_versions": {
+        "anchor_desktop": "26.08.3-1",
+        "handheld_strand": "26.08.3-1"
+      },
+      "high_risk_breaking_triggers": "qdbus vs qdbus6 tool renaming; org.kde.kdeconnect.daemon.devices D-Bus method signature drift (takes 2 bools in modern releases); network refresh terminating active Virtual Monitor streams. File citations: PKGBUILD:26, systemd/knot-kdeconnect-reconcile.service:1-12, core/modules/kdeconnect.sh:19-1231, core/modules/vmon.sh:68-836.",
+      "capabilities": [
+        "clipboard_fabric",
+        "virtual_monitor_dbus_signaling",
+        "operator_push_messaging",
+        "custom_devices_routing"
+      ],
+      "operational_invariants": []
+    },
+    "syncthing": {
+      "name": "Syncthing",
+      "category": "sync_storage",
+      "status": "historical",
+      "superseded_by": "rsync",
+      "historical_notes": "Evaluated for peer-to-peer directory replication. Superseded by lightweight rsync over SSH and tar streaming in core/modules/swarm_sync.sh, avoiding background daemon resource overhead and sync lock contention.",
+      "upstream_url": "https://github.com/syncthing/syncthing",
+      "license": "MPL-2.0",
+      "mandatory": false,
+      "package_arch": "syncthing",
+      "binary": "syncthing",
+      "probe_command": "syncthing --version 2>&1 | head -n1",
+      "version_regex": "syncthing\\s+v([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/.*syncthing[[:space:]]+v([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "1.23.0",
+      "supported_version_range": ">=1.23.0",
+      "verified_node_versions": {
+        "anchor_desktop": null,
+        "handheld_strand": null
+      },
+      "high_risk_breaking_triggers": "Config XML schema version drift; .stfolder marker requirement causing stopped states on clean git clones; public relay leak if globalAnnounce is not disabled.",
+      "capabilities": [
+        "decentralized_folder_sync",
+        "rest_api_v37",
+        "lan_discovery"
+      ],
+      "operational_invariants": []
+    },
+    "iproute2": {
+      "name": "iproute2",
+      "category": "transport_remote_exec",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://git.kernel.org/pub/scm/network/iproute2/iproute2.git",
+      "license": "GPL-2.0-only",
+      "mandatory": true,
+      "package_arch": "iproute2",
+      "binary": "ip",
+      "probe_command": "ip -V 2>&1 | head -n1",
+      "version_regex": "iproute2-?([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/.*iproute2-?([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "6.0.0",
+      "supported_version_range": ">=6.0.0",
+      "verified_node_versions": {
+        "anchor_desktop": "7.2.0-1",
+        "handheld_strand": "7.2.0-1"
+      },
+      "high_risk_breaking_triggers": "ip -o link show syntax changes; ss listening socket table output parsing in knot doctor. File citations: PKGBUILD:15, install.sh:36, core/lib.sh:138, core/modules/doctor.sh:220.",
+      "capabilities": [
+        "interface_discovery",
+        "arp_cache_scan",
+        "socket_inspection"
+      ],
+      "operational_invariants": []
+    },
+    "kitty": {
+      "name": "Kitty",
+      "category": "terminal_agent",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://github.com/kovidgoyal/kitty",
+      "license": "GPL-3.0-only",
+      "mandatory": false,
+      "package_arch": "kitty",
+      "binary": "kitty",
+      "probe_command": "kitty --version 2>&1 | head -n1",
+      "version_regex": "^kitty\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^kitty[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "0.26.0",
+      "supported_version_range": ">=0.26.0",
+      "verified_node_versions": {
+        "anchor_desktop": "0.49.2-1",
+        "handheld_strand": null
+      },
+      "high_risk_breaking_triggers": "Remote control permission security changes (allow_remote_control=yes vs socket-only); IPC socket path permissions under /tmp. File citations: core/modules/council.sh:538-1189, runtime/skills/swarm-council/scripts/confluence.py:147-395, core/hub/limit_visualizer.py:540-558.",
+      "capabilities": [
+        "gpu_multiplexer",
+        "remote_control_ipc",
+        "spatial_confluence_layout",
+        "window_title_matching"
+      ],
+      "operational_invariants": []
+    },
+    "kitty_terminfo": {
+      "name": "kitty-terminfo",
+      "category": "terminal_agent",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://github.com/kovidgoyal/kitty",
+      "license": "GPL-3.0-only",
+      "mandatory": false,
+      "package_arch": "kitty-terminfo",
+      "binary": "kitty-terminfo",
+      "probe_command": "pacman -Q kitty-terminfo 2>&1 | awk '{print $2}'",
+      "version_regex": "^([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "0.26.0",
+      "supported_version_range": ">=0.26.0",
+      "verified_node_versions": {
+        "anchor_desktop": "0.49.2-1",
+        "handheld_strand": null
+      },
+      "high_risk_breaking_triggers": "SSH into remote nodes from Kitty terminal fails with 'unknown terminal: xterm-kitty' unless terminfo is deployed. File citations: PKGBUILD:31.",
+      "capabilities": [
+        "xterm_kitty_terminfo"
+      ],
+      "operational_invariants": []
+    },
+    "ncurses": {
+      "name": "ncurses",
+      "category": "terminal_agent",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://invisible-island.net/ncurses/",
+      "license": "MIT-open-group",
+      "mandatory": false,
+      "package_arch": "ncurses",
+      "binary": "infocmp",
+      "probe_command": "infocmp -V 2>&1 | head -n1",
+      "version_regex": "ncurses\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/.*ncurses[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "6.2",
+      "supported_version_range": ">=6.2",
+      "verified_node_versions": {
+        "anchor_desktop": "6.6.20251230",
+        "handheld_strand": "6.6.20251230"
+      },
+      "high_risk_breaking_triggers": "Terminfo format incompatibilities across custom terminal descriptions. File citations: PKGBUILD:30.",
+      "capabilities": [
+        "terminfo_compiler",
+        "terminal_capabilities_probe"
+      ],
+      "operational_invariants": []
+    },
+    "bash": {
+      "name": "GNU Bash",
+      "category": "runtime_interpreter",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://git.savannah.gnu.org/git/bash.git",
+      "license": "GPL-3.0-or-later",
+      "mandatory": true,
+      "package_arch": "bash",
+      "binary": "bash",
+      "probe_command": "bash --version 2>&1 | head -n1",
+      "version_regex": "GNU\\s+bash,\\s+version\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/.*version[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "4.4.0",
+      "supported_version_range": ">=4.4.0",
+      "verified_node_versions": {
+        "anchor_desktop": "5.3.20(1)-release",
+        "handheld_strand": "5.3.20(1)-release"
+      },
+      "high_risk_breaking_triggers": "macOS /bin/bash 3.2 lacks parameter case conversion (${var,,}) and associative arrays (declare -A); non-interactive SSH dispatch requires bash -lc. File citations: 100% of core/modules/*.sh, bin/knot, install.sh.",
+      "capabilities": [
+        "set_euo_pipefail",
+        "associative_arrays",
+        "lowercase_expansion",
+        "dev_tcp_virtual_probing"
+      ],
+      "operational_invariants": [
+        "login_shell_ssh_promotion"
+      ]
+    },
+    "python": {
+      "name": "Python 3",
+      "category": "runtime_interpreter",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://github.com/python/cpython",
+      "license": "Python-2.0",
+      "mandatory": true,
+      "package_arch": "python",
+      "binary": "python3",
+      "probe_command": "/usr/bin/python3 --version 2>&1 | head -n1",
+      "version_regex": "^Python\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^Python[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "3.10.0",
+      "supported_version_range": ">=3.10.0",
+      "verified_node_versions": {
+        "anchor_desktop": "3.14.8",
+        "handheld_strand": "3.14.7"
+      },
+      "high_risk_breaking_triggers": "PEP 585 / PEP 604 type syntax (dict[str, Any] | None); removal of deprecated standard libraries in Python 3.14; PSL AST integrity check prohibiting swallowed exceptions. File citations: PKGBUILD:10, install.sh:36, core/palette.py, core/hub/*.py, core/mcp/*.py, bin/knot-stripd.",
+      "capabilities": [
+        "asyncio_mcp_gateway",
+        "http_tuplespace_hub",
+        "pyqt6_desktop_runtime",
+        "wcag_palette_engine"
+      ],
+      "operational_invariants": []
+    },
+    "python_pyqt6": {
+      "name": "PyQt6",
+      "category": "runtime_interpreter",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://riverbankcomputing.com/software/pyqt/",
+      "license": "GPL-3.0-only",
+      "mandatory": true,
+      "package_arch": "python-pyqt6",
+      "binary": "PyQt6",
+      "probe_command": "/usr/bin/python3 -c 'import PyQt6.QtCore; print(PyQt6.QtCore.PYQT_VERSION_STR)' 2>&1",
+      "version_regex": "^([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "awk '{print $1}'",
+      "min_version": "6.5.0",
+      "supported_version_range": ">=6.5.0",
+      "verified_node_versions": {
+        "anchor_desktop": "6.8.0-1",
+        "handheld_strand": "6.7.1-1"
+      },
+      "high_risk_breaking_triggers": "QtQuick / QML plugin loading failures in wayland layer shell environments; knot-stripd GUI execution. File citations: PKGBUILD:11, bin/knot-stripd:34-36.",
+      "capabilities": [
+        "qtquick_qml",
+        "wayland_crossover_strip",
+        "layer_shell_integration"
+      ],
+      "operational_invariants": []
+    },
+    "layer_shell_qt": {
+      "name": "layer-shell-qt",
+      "category": "desktop_integration",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://invent.kde.org/plasma/layer-shell-qt",
+      "license": "LGPL-2.1-or-later",
+      "mandatory": true,
+      "package_arch": "layer-shell-qt",
+      "binary": "layer-shell-qt",
+      "probe_command": "pacman -Q layer-shell-qt 2>&1 | awk '{print $2}'",
+      "version_regex": "^([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "6.0.0",
+      "supported_version_range": ">=6.0.0",
+      "verified_node_versions": {
+        "anchor_desktop": "6.8.2-1",
+        "handheld_strand": "6.8.2-1"
+      },
+      "high_risk_breaking_triggers": "Wayland layer-shell protocol version mismatch causing window surface binding failure. File citations: PKGBUILD:12, bin/knot-stripd.",
+      "capabilities": [
+        "wayland_exclusive_zone",
+        "panel_overlay_anchoring"
+      ],
+      "operational_invariants": []
+    },
+    "jq": {
+      "name": "jq",
+      "category": "json_stream",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://github.com/jqlang/jq",
+      "license": "MIT",
+      "mandatory": true,
+      "package_arch": "jq",
+      "binary": "jq",
+      "probe_command": "jq --version 2>&1 | head -n1",
+      "version_regex": "^jq-([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^jq-([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "1.6",
+      "supported_version_range": ">=1.6",
+      "verified_node_versions": {
+        "anchor_desktop": "1.8.2-1",
+        "handheld_strand": "1.8.2-1"
+      },
+      "high_risk_breaking_triggers": "Missing in PKGBUILD depends and install.sh required_cmds; usage of advanced filters (.. | objects, @tsv, to_entries[]?) across lib.sh, auth.sh, council.sh, and hub.sh fails immediately on minimal hosts without jq. File citations: core/lib.sh:242, core/modules/auth.sh:138, core/modules/hub.sh:237, core/modules/council.sh:173.",
+      "capabilities": [
+        "stream_json_filtering",
+        "tsv_serialization",
+        "recursive_object_descent",
+        "colorized_output"
+      ],
+      "operational_invariants": [
+        "jq_dependency_packaging"
+      ]
+    },
+    "systemd": {
+      "name": "systemd",
+      "category": "service_management",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://github.com/systemd/systemd",
+      "license": "LGPL-2.1-or-later",
+      "mandatory": true,
+      "package_arch": "systemd",
+      "binary": "systemctl",
+      "probe_command": "systemctl --version 2>&1 | head -n1",
+      "version_regex": "^systemd\\s+([0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^systemd[[:space:]]+([0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "250",
+      "supported_version_range": ">=250",
+      "verified_node_versions": {
+        "anchor_desktop": "262 (262.1-1-arch)",
+        "handheld_strand": "262 (262-1-arch)"
+      },
+      "high_risk_breaking_triggers": "%h user-home specifier expansion in ExecStart directives; systemd-run --user --pipe environment isolation; journalctl --user-unit streaming in strip daemon. File citations: systemd/knot-*.service, core/modules/antigravity.sh:101-108, core/hub/agent.py:476.",
+      "capabilities": [
+        "user_systemd_supervisor",
+        "transient_user_units",
+        "user_journal_streaming",
+        "timer_reconcilers"
+      ],
+      "operational_invariants": []
+    },
+    "pacman": {
+      "name": "pacman",
+      "category": "packaging_container",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://gitlab.archlinux.org/pacman/pacman",
+      "license": "GPL-2.0-or-later",
+      "mandatory": false,
+      "package_arch": "pacman",
+      "binary": "pacman",
+      "probe_command": "pacman -V 2>&1 | grep -i pacman | head -n1",
+      "version_regex": "Pacman\\s+v([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/.*Pacman[[:space:]]+v([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "6.0.0",
+      "supported_version_range": ">=6.0.0",
+      "verified_node_versions": {
+        "anchor_desktop": "7.1.0 (libalpm 16.0.1)",
+        "handheld_strand": "7.1.0 (libalpm 16.0.1)"
+      },
+      "high_risk_breaking_triggers": "Pacman 7.0 download engine refactor; mirrorlist distribution over swarm sync. File citations: install.sh:54, core/modules/swarm_sync.sh:607-674, PKGBUILD.",
+      "capabilities": [
+        "arch_package_manager",
+        "package_query_alpm",
+        "dependency_resolution"
+      ],
+      "operational_invariants": []
+    },
+    "flatpak": {
+      "name": "Flatpak",
+      "category": "packaging_container",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://github.com/flatpak/flatpak",
+      "license": "LGPL-2.1-or-later",
+      "mandatory": false,
+      "package_arch": "flatpak",
+      "binary": "flatpak",
+      "probe_command": "flatpak --version 2>&1 | head -n1",
+      "version_regex": "^Flatpak\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^Flatpak[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "1.14.0",
+      "supported_version_range": ">=1.14.0",
+      "verified_node_versions": {
+        "anchor_desktop": "1.18.4",
+        "handheld_strand": "1.18.4"
+      },
+      "high_risk_breaking_triggers": "flatpak permission-set kde-authorized table format shifts; permission db corruption. File citations: core/modules/deskflow.sh:384-389, core/modules/doctor.sh:966-972.",
+      "capabilities": [
+        "portal_permission_store",
+        "sandboxed_remote_desktop_auth"
+      ],
+      "operational_invariants": []
+    },
+    "ostree": {
+      "name": "OSTree",
+      "category": "packaging_container",
+      "status": "historical",
+      "superseded_by": "confinement",
+      "historical_notes": "Evaluated as an architectural baseline reference for SteamOS A/B read-only root filesystem immutability. Knot Mesh guarantees 100% user-space confinement in %h/.local/bin and ~/.config/knot, eliminating any need to unlock or manage OSTree deployments.",
+      "upstream_url": "https://github.com/ostreedev/ostree",
+      "license": "LGPL-2.0-or-later",
+      "mandatory": false,
+      "package_arch": "ostree",
+      "binary": "ostree",
+      "probe_command": "ostree --version 2>&1 | grep -i Version | head -n1",
+      "version_regex": "Version:\\s+'?([0-9]+(?:\\.[0-9]+)?)'?",
+      "shell_extraction_filter": "sed -nE \"s/.*Version:[[:space:]]+'?([0-9]+(\\.[0-9]+)?).*/\\1/p\"",
+      "min_version": "2022.1",
+      "supported_version_range": ">=2022.1",
+      "verified_node_versions": {
+        "anchor_desktop": "2026.4",
+        "handheld_strand": "2026.4"
+      },
+      "high_risk_breaking_triggers": "Stock SteamOS baseline compatibility: A/B immutable root filesystem locking (/usr read-only); knot-mesh guarantees 100% user-space confinement in %h/.local/bin across both EndeavourOS fleet and stock SteamOS. File citations: tests/test_steamdeck_sidequest.sh:1-49.",
+      "capabilities": [
+        "immutable_rootfs_compatibility",
+        "atomic_deployment"
+      ],
+      "operational_invariants": []
+    },
+    "pipewire": {
+      "name": "PipeWire",
+      "category": "audio_media",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://gitlab.freedesktop.org/pipewire/pipewire",
+      "license": "MIT",
+      "mandatory": false,
+      "package_arch": "pipewire",
+      "binary": "pipewire",
+      "probe_command": "pipewire --version 2>&1 | head -n2",
+      "version_regex": "libpipewire\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/.*libpipewire[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "1.0.0",
+      "supported_version_range": ">=1.0.0",
+      "verified_node_versions": {
+        "anchor_desktop": "1.6.9-1",
+        "handheld_strand": "1.6.9-1"
+      },
+      "high_risk_breaking_triggers": "DMA-BUF screencasting buffer sharing failures between KWin and KRdp; PipeWire socket availability under user runtime directory. File citations: ARCHITECTURE.md:192.",
+      "capabilities": [
+        "dma_buf_screencast_transport",
+        "low_latency_media_pipeline"
+      ],
+      "operational_invariants": []
+    },
+    "wireplumber": {
+      "name": "WirePlumber",
+      "category": "audio_media",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://gitlab.freedesktop.org/pipewire/wireplumber",
+      "license": "MIT",
+      "mandatory": false,
+      "package_arch": "wireplumber",
+      "binary": "wireplumber",
+      "probe_command": "wireplumber --version 2>&1 | head -n2",
+      "version_regex": "libwireplumber\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/.*libwireplumber[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "0.5.0",
+      "supported_version_range": ">=0.5.0",
+      "verified_node_versions": {
+        "anchor_desktop": "0.5.18-1",
+        "handheld_strand": "0.5.18-1"
+      },
+      "high_risk_breaking_triggers": "WirePlumber 0.4 -> 0.5 Lua to SPA/JSON configuration schema rewrite; session policy stalls.",
+      "capabilities": [
+        "pipewire_session_manager"
+      ],
+      "operational_invariants": []
+    },
+    "kde_cli_tools": {
+      "name": "kde-cli-tools",
+      "category": "desktop_integration",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://invent.kde.org/plasma/kde-cli-tools",
+      "license": "GPL-2.0-or-later",
+      "mandatory": true,
+      "package_arch": "kde-cli-tools",
+      "binary": "kwriteconfig6",
+      "probe_command": "pacman -Q kde-cli-tools 2>&1 | awk '{print $2}'",
+      "version_regex": "^([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "6.0.0",
+      "supported_version_range": ">=6.0.0",
+      "verified_node_versions": {
+        "anchor_desktop": "6.8.2-1",
+        "handheld_strand": "6.8.2-1"
+      },
+      "high_risk_breaking_triggers": "kwriteconfig5 vs kwriteconfig6 binary naming in Plasma 6; config key group writing in ~/.config/krdpserverrc and krdcrc. File citations: PKGBUILD:18, core/modules/vmon.sh:201-205, 231-234, 276-287.",
+      "capabilities": [
+        "plasma6_config_writer",
+        "kconfig_ini_serialization"
+      ],
+      "operational_invariants": []
+    },
+    "qt6_tools": {
+      "name": "qt6-tools (qdbus6)",
+      "category": "desktop_integration",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://code.qt.io/cgit/qt/qttools.git",
+      "license": "LGPL-3.0-only",
+      "mandatory": false,
+      "package_arch": "qt6-tools",
+      "binary": "qdbus6",
+      "probe_command": "pacman -Q qt6-tools 2>&1 | awk '{print $2}'",
+      "version_regex": "^([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "6.5.0",
+      "supported_version_range": ">=6.5.0",
+      "verified_node_versions": {
+        "anchor_desktop": "6.12.0-1",
+        "handheld_strand": "6.12.0-1"
+      },
+      "high_risk_breaking_triggers": "qdbus binary missing in Arch Qt6; qdbus6 required for all D-Bus queries to KWin, KDE Connect, Klipper, and ScreenSaver. File citations: core/modules/kdeconnect.sh:19-28, core/modules/vmon.sh:304, bin/knot-vmon-keepalive:162.",
+      "capabilities": [
+        "qt6_dbus_cli",
+        "kwin_reconfigure_trigger",
+        "screensaver_inhibit_call"
+      ],
+      "operational_invariants": []
+    },
+    "wl_clipboard": {
+      "name": "wl-clipboard",
+      "category": "desktop_integration",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://github.com/bugaevc/wl-clipboard",
+      "license": "GPL-3.0-only",
+      "mandatory": false,
+      "package_arch": "wl-clipboard",
+      "binary": "wl-copy",
+      "probe_command": "wl-copy --version 2>&1 | head -n1",
+      "version_regex": "wl-clipboard\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/.*wl-clipboard[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "2.1.0",
+      "supported_version_range": ">=2.1.0",
+      "verified_node_versions": {
+        "anchor_desktop": "2.3.0-1",
+        "handheld_strand": null
+      },
+      "high_risk_breaking_triggers": "Wayland compositor access requirement (WAYLAND_DISPLAY); fallback to Klipper D-Bus when absent. File citations: core/modules/kdeconnect.sh:30-89.",
+      "capabilities": [
+        "wayland_clipboard_copy",
+        "wayland_clipboard_paste"
+      ],
+      "operational_invariants": []
+    },
+    "libnotify": {
+      "name": "libnotify",
+      "category": "desktop_integration",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://gitlab.gnome.org/GNOME/libnotify",
+      "license": "LGPL-2.1-or-later",
+      "mandatory": false,
+      "package_arch": "libnotify",
+      "binary": "notify-send",
+      "probe_command": "notify-send --version 2>&1 | head -n1",
+      "version_regex": "notify-send\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/.*notify-send[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "0.7.0",
+      "supported_version_range": ">=0.7.0",
+      "verified_node_versions": {
+        "anchor_desktop": "0.8.9-1",
+        "handheld_strand": "0.8.8-1"
+      },
+      "high_risk_breaking_triggers": "Headless execution fails without active notification daemon on DBus. File citations: PKGBUILD:23, core/modules/deskflow.sh.",
+      "capabilities": [
+        "desktop_notification_popup"
+      ],
+      "operational_invariants": []
+    },
+    "curl": {
+      "name": "curl",
+      "category": "transport_remote_exec",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://github.com/curl/curl",
+      "license": "curl",
+      "mandatory": true,
+      "package_arch": "curl",
+      "binary": "curl",
+      "probe_command": "curl --version 2>&1 | head -n1",
+      "version_regex": "^curl\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^curl[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "7.80.0",
+      "supported_version_range": ">=7.80.0",
+      "verified_node_versions": {
+        "anchor_desktop": "8.23.0-1",
+        "handheld_strand": "8.22.0-1"
+      },
+      "high_risk_breaking_triggers": "HTTP/2 and TLS 1.3 negotiation; install.sh bootstrap download pipe. File citations: install.sh:5, core/modules/hub.sh:220.",
+      "capabilities": [
+        "http_tls_client",
+        "standalone_installer_fetch"
+      ],
+      "operational_invariants": []
+    },
+    "git": {
+      "name": "git",
+      "category": "transport_remote_exec",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://github.com/git/git",
+      "license": "GPL-2.0-only",
+      "mandatory": true,
+      "package_arch": "git",
+      "binary": "git",
+      "probe_command": "git --version 2>&1 | head -n1",
+      "version_regex": "^git\\s+version\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^git[[:space:]]+version[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "2.30.0",
+      "supported_version_range": ">=2.30.0",
+      "verified_node_versions": {
+        "anchor_desktop": "2.56.0-1",
+        "handheld_strand": "2.56.0-1"
+      },
+      "high_risk_breaking_triggers": "git-worktree lockfile contention and orphan worktrees; safe.directory ownership checks across mesh. File citations: install.sh:36, 75, core/gitops.sh:1-450, bin/knot:worktree.",
+      "capabilities": [
+        "worktree_isolation",
+        "fleet_codebase_sync",
+        "gpg_signed_commits"
+      ],
+      "operational_invariants": []
+    },
+    "github_cli": {
+      "name": "GitHub CLI (gh)",
+      "category": "packaging_container",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://github.com/cli/cli",
+      "license": "MIT",
+      "mandatory": false,
+      "package_arch": "github-cli",
+      "binary": "gh",
+      "probe_command": "gh --version 2>&1 | head -n1",
+      "version_regex": "^gh\\s+version\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^gh[[:space:]]+version[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "2.40.0",
+      "supported_version_range": ">=2.40.0",
+      "verified_node_versions": {
+        "anchor_desktop": "2.102.0-1",
+        "handheld_strand": "2.102.0-1"
+      },
+      "high_risk_breaking_triggers": "gh release create and gh release edit pre-release flag changes; token authentication scopes.",
+      "capabilities": [
+        "github_release_automation",
+        "tag_synchronization"
+      ],
+      "operational_invariants": []
+    },
+    "spectacle": {
+      "name": "Spectacle",
+      "category": "desktop_integration",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://invent.kde.org/plasma/spectacle",
+      "license": "LGPL-2.0-or-later",
+      "mandatory": false,
+      "package_arch": "spectacle",
+      "binary": "spectacle",
+      "probe_command": "QT_QPA_PLATFORM=offscreen spectacle --version 2>&1 | head -n1",
+      "version_regex": "^spectacle\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/^spectacle[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "24.02.0",
+      "supported_version_range": ">=24.02.0",
+      "verified_node_versions": {
+        "anchor_desktop": "6.8.2-1",
+        "handheld_strand": "6.8.2-1"
+      },
+      "high_risk_breaking_triggers": "Crashes with SIGABRT over headless SSH without QT_QPA_PLATFORM=offscreen.",
+      "capabilities": [
+        "wayland_screengrab"
+      ],
+      "operational_invariants": [
+        "headless_qt6_offscreen"
+      ]
+    },
+    "btrfs_progs": {
+      "name": "btrfs-progs",
+      "category": "sync_storage",
+      "status": "historical",
+      "superseded_by": "workstation_maintenance",
+      "historical_notes": "Btrfs filesystem administration utilities (btrfs-progs). Used for host partition setup and workstation snapshotting, but out of product runtime scope as Knot Mesh does not perform filesystem-level mutations.",
+      "upstream_url": "https://github.com/kdave/btrfs-progs",
+      "license": "GPL-2.0-only",
+      "mandatory": false,
+      "package_arch": "btrfs-progs",
+      "binary": "btrfs",
+      "probe_command": "btrfs --version 2>&1 | head -n1",
+      "version_regex": "btrfs-progs\\s+v([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/.*btrfs-progs[[:space:]]+v([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "6.0",
+      "supported_version_range": ">=6.0",
+      "verified_node_versions": {
+        "anchor_desktop": "v7.1",
+        "handheld_strand": "v7.1"
+      },
+      "high_risk_breaking_triggers": "Subvolume layout variations across root partition subvolids; workstation snapshot automation.",
+      "capabilities": [
+        "btrfs_subvolume_snapshot",
+        "ssd_discard_async"
+      ],
+      "operational_invariants": []
+    },
+    "timeshift": {
+      "name": "Timeshift",
+      "category": "sync_storage",
+      "status": "historical",
+      "superseded_by": "workstation_maintenance",
+      "historical_notes": "System snapshot utility requiring root execution. Maintained solely for manual developer workstation rollback and disaster recovery; not integrated into Knot Mesh runtime automation.",
+      "upstream_url": "https://github.com/linuxmint/timeshift",
+      "license": "GPL-3.0-only",
+      "mandatory": false,
+      "package_arch": "timeshift",
+      "binary": "timeshift",
+      "probe_command": "timeshift --version 2>&1 | head -n1",
+      "version_regex": "Timeshift\\s+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "sed -nE 's/.*Timeshift[[:space:]]+([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p'",
+      "min_version": "22.06.0",
+      "supported_version_range": ">=22.06.0",
+      "verified_node_versions": {
+        "anchor_desktop": "26.09.0",
+        "handheld_strand": null
+      },
+      "high_risk_breaking_triggers": "Root execution requirement; external developer workstation maintenance only.",
+      "capabilities": [
+        "system_state_rollback"
+      ],
+      "operational_invariants": []
+    },
+    "webkit2gtk_4_1": {
+      "name": "webkit2gtk-4.1",
+      "category": "desktop_integration",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://webkitgtk.org/",
+      "license": "LGPL-2.1-or-later",
+      "mandatory": false,
+      "package_arch": "webkit2gtk-4.1",
+      "binary": "webkit2gtk-4.1",
+      "probe_command": "pkg-config --modversion webkit2gtk-4.1 2>&1",
+      "version_regex": "^([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "awk '{print $1}'",
+      "min_version": "2.40.0",
+      "supported_version_range": ">=2.40.0",
+      "verified_node_versions": {
+        "anchor_desktop": "2.48.2-1",
+        "handheld_strand": "2.46.6-1"
+      },
+      "high_risk_breaking_triggers": "WebKit IPC crashes if webview hardware acceleration fails on Wayland; required for Knot Kafe Tauri v2 desktop container. File citations: PKGBUILD:24.",
+      "capabilities": [
+        "tauri_v2_webview",
+        "wayland_hardware_acceleration"
+      ],
+      "operational_invariants": []
+    },
+    "gtk3": {
+      "name": "GTK 3",
+      "category": "desktop_integration",
+      "status": "active",
+      "superseded_by": null,
+      "historical_notes": null,
+      "upstream_url": "https://gitlab.gnome.org/GNOME/gtk",
+      "license": "LGPL-2.1-or-later",
+      "mandatory": false,
+      "package_arch": "gtk3",
+      "binary": "gtk3",
+      "probe_command": "pkg-config --modversion gtk+-3.0 2>&1",
+      "version_regex": "^([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)",
+      "shell_extraction_filter": "awk '{print $1}'",
+      "min_version": "3.24.0",
+      "supported_version_range": ">=3.24.0",
+      "verified_node_versions": {
+        "anchor_desktop": "3.24.48-1",
+        "handheld_strand": "3.24.43-1"
+      },
+      "high_risk_breaking_triggers": "System tray icon protocol differences between AppIndicator and StatusNotifierItem under KDE Plasma 6. File citations: PKGBUILD:25.",
+      "capabilities": [
+        "system_tray_indicator",
+        "tauri_native_window"
+      ],
+      "operational_invariants": []
+    }
+  }
+}

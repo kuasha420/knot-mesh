@@ -960,7 +960,8 @@ doctor_repair_local() {
     systemctl --user stop knot-deskflow.service
     sleep 0.5
     systemctl --user restart xdg-desktop-portal.service
-    sleep 1
+    systemctl --user restart plasma-xdg-desktop-portal-kde.service
+    sleep 2
   fi
 
   # 3. Flatpak Remote Desktop Permissions

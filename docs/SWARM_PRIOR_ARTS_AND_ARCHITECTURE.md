@@ -83,7 +83,7 @@ Rather than having every agent connect to dozens of disparate MCP servers on mul
   - Calls to `deck_*` (e.g., `deck_screen_capture`, `deck_gamepad_read`) are routed to the Steam Deck.
   - Calls to `gpu_*` or `x86_build_*` are routed to the Laptop's RTX 3050 and Ryzen 5800H.
   - Calls to `mesh_*` or `kvm_*` are handled locally on the Anchor.
-- **Zero-Config Forwarding**: Strands expose lightweight HTTP/Stdio MCP endpoints reachable over the secure WireGuard/mDNS mesh.
+- **Zero-Config Forwarding**: Strands expose lightweight HTTP/Stdio MCP endpoints reachable over the secure OpenSSH/mDNS mesh.
 
 ---
 
@@ -140,7 +140,7 @@ The **Knot Kommand Kafe** will be built as an ultra-fast, local-first GUI dashbo
 |  - Memory Palace Hybrid Index (Wings, Halls, Drawers via sqlite-vec)    |
 +-------------------------------------------------------------------------+
               |                                            |
-   SSH / WireGuard Pipe                         SSH / WireGuard Pipe
+   OpenSSH Multiplexed Pipe                     OpenSSH Multiplexed Pipe
               v                                            v
 +-----------------------------+              +-----------------------------+
 |    STRAND 1: LAPTOP (x86)   |              |  STRAND 2: STEAM DECK (EOS) |

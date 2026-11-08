@@ -73,6 +73,7 @@ SUBCOMMANDS=(
   "project"
   "worktree"
   "sleep"
+  "clip"
   "kafe"
   "doctor"
   "shutdown"
@@ -121,6 +122,8 @@ NESTED_COMMANDS=(
   "council board"
   "swarm switch"
   "swarm wave"
+  "display extend"
+  "display stop"
   "display vmon"
   "auth login"
   "auth import"
@@ -176,6 +179,7 @@ assert_exit_code 1 "knot memory (purged command)" "$KNOT_BIN" memory
 assert_exit_code 1 "knot repair (purged command)" "$KNOT_BIN" repair
 assert_exit_code 1 "knot kafe unknown-action" "$KNOT_BIN" kafe unknown-action
 assert_exit_code 1 "knot sleep unknown-action" "$KNOT_BIN" sleep unknown-action
+assert_exit_code 1 "knot clip unknown-action" "$KNOT_BIN" clip unknown-action
 assert_exit_code 1 "knot topology unknown-sub" "$KNOT_BIN" topology unknown-sub
 assert_exit_code 1 "knot node unknown-action" "$KNOT_BIN" node unknown-action
 
@@ -189,6 +193,7 @@ assert_exit_code 1 "knot mcp --unknown-flag" "$KNOT_BIN" mcp --unknown-flag
 assert_exit_code 1 "knot swarm --unknown-flag" "$KNOT_BIN" swarm --unknown-flag
 assert_exit_code 1 "knot display --unknown-flag" "$KNOT_BIN" display --unknown-flag
 assert_exit_code 1 "knot kdeconnect --unknown-flag" "$KNOT_BIN" kdeconnect --unknown-flag
+assert_exit_code 1 "knot clip --unknown-flag" "$KNOT_BIN" clip --unknown-flag
 assert_exit_code 1 "knot topology --unknown-flag" "$KNOT_BIN" topology --unknown-flag
 assert_exit_code 1 "knot node --unknown-flag" "$KNOT_BIN" node --unknown-flag
 assert_exit_code 1 "knot offboard --unknown-flag" "$KNOT_BIN" offboard --unknown-flag
