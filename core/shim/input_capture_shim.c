@@ -319,9 +319,25 @@ static gboolean install_kwin_barriers(gpointer user_data) {
     if (g_has_captured_barriers) {
         for (int i = 0; i < g_num_captured_barriers; i++) {
             CapturedBarrier *b = &g_captured_barriers[i];
-            g_variant_builder_add(&builder, "(u(ii)(ii))", b->id, b->x1, b->y1, b->x2, b->y2);
+            int x1 = b->x1, y1 = b->y1, x2 = b->x2, y2 = b->y2;
+
+            // KWin expects inclusive pixel coordinates on the active monitor canvas (e.g. 0..w-1, 0..h-1).
+            // Deskflow generates 1-past-the-end coordinates for Bottom (y = y + h) and Right (x = x + w).
+            // Adjust them to the edge pixel so KWin's hitTest(QPointF) exact coordinate check matches!
+            for (int s = 0; s < g_num_screens; s++) {
+                if (y1 == y2 && y1 == g_screens[s].y + g_screens[s].h) {
+                    y1 = g_screens[s].y + g_screens[s].h - 1;
+                    y2 = y1;
+                }
+                if (x1 == x2 && x1 == g_screens[s].x + g_screens[s].w) {
+                    x1 = g_screens[s].x + g_screens[s].w - 1;
+                    x2 = x1;
+                }
+            }
+
+            g_variant_builder_add(&builder, "(u(ii)(ii))", b->id, x1, y1, x2, y2);
             fprintf(stderr, "[knot-shim]   KWin Barrier ID=%u: (%d, %d) -> (%d, %d)\n",
-                    b->id, b->x1, b->y1, b->x2, b->y2);
+                    b->id, x1, y1, x2, y2);
             barrier_count++;
         }
     }
