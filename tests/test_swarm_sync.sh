@@ -122,6 +122,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+if [ -n "${MOCK_SSH_TARGETS_LOG:-}" ] && [ -n "$target" ]; then
+  echo "$target" >> "$MOCK_SSH_TARGETS_LOG"
+fi
+if [ -n "${MOCK_SSH_FAIL_HOST:-}" ] && [ "$target" = "$MOCK_SSH_FAIL_HOST" ]; then
+  echo "ssh: connect to host $target: Connection refused" >&2
+  exit 255
+fi
+
 if [ -z "$cmd" ] || [ "$cmd" = "echo ok" ] || [ "$cmd" = "echo ping" ]; then
   echo "ok"
   exit 0
@@ -509,5 +517,69 @@ echo "  -> swarm_sync_terminfo accurately discovers compact JSON manifest: OK"
 
 # Clean up compact-strand manifest
 rm -f "$HOME/.config/knot/swarms/testswarm/nodes/compact-strand.json"
+
+echo "=== [Test 12] Multi-Strand knot sync --all Iteration & Per-Strand Failure Resilience ==="
+export HOME="$TMP_DIR/home"
+export MOCK_REMOTE_HOME="$TMP_DIR/remote_home"
+export KNOT_NODE_ID="desktop"
+export MOCK_SSH_FAIL=0
+export MOCK_ENABLE_RSYNC=0
+
+# Seed three additional strands alongside desktop (anchor) and laptop
+cat << 'STR_A' > "$HOME/.config/knot/swarms/testswarm/nodes/strand-a.json"
+{"id": "strand-a", "hostname": "strand-a-host", "role": "strand", "port": 22, "user": "stranduser"}
+STR_A
+cat << 'STR_B' > "$HOME/.config/knot/swarms/testswarm/nodes/strand-b.json"
+{"id": "strand-b", "hostname": "strand-b-host", "role": "strand", "port": 22, "user": "stranduser"}
+STR_B
+cat << 'STR_C' > "$HOME/.config/knot/swarms/testswarm/nodes/strand-c.json"
+{"id": "strand-c", "hostname": "strand-c-host", "role": "strand", "port": 22, "user": "stranduser"}
+STR_C
+
+# Part A: All strands healthy -> knot sync --all iterates past the first strand to all strands
+export MOCK_SSH_TARGETS_LOG="$TMP_DIR/ssh_targets_all.log"
+rm -f "$MOCK_SSH_TARGETS_LOG"
+unset MOCK_SSH_FAIL_HOST
+
+SYNC_ALL_OUT="$("$KNOT_ROOT/bin/knot" sync --all --force-prod 2>&1)"
+for expected_strand in laptop strand-a strand-b strand-c; do
+  if ! grep -qxF "$expected_strand" "$MOCK_SSH_TARGETS_LOG"; then
+    echo "Error: knot sync --all did not reach strand '$expected_strand'!" >&2
+    echo "Targets log: $(cat "$MOCK_SSH_TARGETS_LOG")" >&2
+    echo "Output: $SYNC_ALL_OUT" >&2
+    exit 1
+  fi
+done
+echo "  -> Multi-strand knot sync --all iterated across all 4 strands: OK"
+
+# Part B: One strand fails (strand-b) -> remaining strands (strand-c) still sync, command exits non-zero
+export MOCK_SSH_TARGETS_LOG="$TMP_DIR/ssh_targets_partial.log"
+rm -f "$MOCK_SSH_TARGETS_LOG"
+export MOCK_SSH_FAIL_HOST="strand-b"
+
+partial_rc=0
+PARTIAL_OUT="$("$KNOT_ROOT/bin/knot" sync --all --force-prod 2>&1)" || partial_rc=$?
+unset MOCK_SSH_FAIL_HOST
+
+if [ "$partial_rc" -eq 0 ]; then
+  echo "Error: knot sync --all must exit non-zero when a strand fails!" >&2
+  echo "Output: $PARTIAL_OUT" >&2
+  exit 1
+fi
+for expected_strand in laptop strand-a strand-b strand-c; do
+  if ! grep -qxF "$expected_strand" "$MOCK_SSH_TARGETS_LOG"; then
+    echo "Error: knot sync --all aborted early and did not reach '$expected_strand' after strand-b failure!" >&2
+    echo "Targets log: $(cat "$MOCK_SSH_TARGETS_LOG")" >&2
+    echo "Output: $PARTIAL_OUT" >&2
+    exit 1
+  fi
+done
+echo "  -> Multi-strand knot sync --all continued past failing strand-b to strand-c and exited non-zero ($partial_rc): OK"
+
+# Clean up multi-strand test fixtures
+rm -f "$HOME/.config/knot/swarms/testswarm/nodes/strand-a.json" \
+      "$HOME/.config/knot/swarms/testswarm/nodes/strand-b.json" \
+      "$HOME/.config/knot/swarms/testswarm/nodes/strand-c.json"
+unset MOCK_SSH_TARGETS_LOG
 
 echo "=== [✓] ALL SWARM SYNC TESTS PASSED! ==="

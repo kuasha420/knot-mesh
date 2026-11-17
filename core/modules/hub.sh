@@ -550,7 +550,11 @@ cmd_sleep() {
           echo "$resp" | jq -r '.nodes[] | [
             .id,
             .status,
-            (if .power.on_ac == true then "YES (Mains)" elif .power.on_ac == false then "NO (Battery)" else "Unknown" end),
+            (if .power.on_ac == true then
+               (if .power.battery_percent != null then "YES (AC \(.power.battery_percent)%)" else "YES (Mains)" end)
+             elif .power.on_ac == false then
+               (if .power.battery_percent != null then "NO (Bat \(.power.battery_percent)%)" else "NO (Battery)" end)
+             else "Unknown" end),
             (if .power.sleep_inhibited == true then "ACTIVE (Locked)" else "Inactive" end),
             (if .power.is_executing_task == true then "YES" else "No" end)
           ] | @tsv' | while IFS=$'\t' read -r nid nstatus nac ninhib nexec; do

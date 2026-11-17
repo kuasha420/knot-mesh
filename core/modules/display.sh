@@ -184,10 +184,17 @@ display_capture_fleet() {
       local uid
       uid="$(id -u)"
       export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$uid}"
-      if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+      export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+      if [ -n "${WAYLAND_DISPLAY:-}" ] && [ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; then
         cap_disp="$WAYLAND_DISPLAY"
-      elif [ -S "$XDG_RUNTIME_DIR/wayland-0" ]; then
-        cap_disp="wayland-0"
+      else
+        local wl_sock
+        for wl_sock in "$XDG_RUNTIME_DIR"/wayland-[0-9]*; do
+          if [ -S "$wl_sock" ]; then
+            cap_disp="$(basename "$wl_sock")"
+            break
+          fi
+        done
       fi
 
       local cap_ok=0
@@ -230,16 +237,30 @@ print("1920 1080")
       fi
     else
       # Remote node capture via SSH
+      cap_disp="auto"
       local remote_cap_script='
         uid="$(id -u)"
         export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$uid}"
-        disp="${WAYLAND_DISPLAY:-wayland-0}"
+        export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+        disp=""
+        for wl_sock in "$XDG_RUNTIME_DIR"/wayland-[0-9]*; do
+          if [ -S "$wl_sock" ]; then
+            disp="$(basename "$wl_sock")"
+            break
+          fi
+        done
+        disp="${disp:-${WAYLAND_DISPLAY:-wayland-0}}"
         tmp="/tmp/knot_cap_$$.png"
         ok=0
-        if command -v spectacle >/dev/null && WAYLAND_DISPLAY="$disp" spectacle -b -n -o "$tmp" 2>&1; then
-          [ -s "$tmp" ] && ok=1
-        elif command -v grim >/dev/null && WAYLAND_DISPLAY="$disp" grim "$tmp" 2>&1; then
-          [ -s "$tmp" ] && ok=1
+        if command -v spectacle >/dev/null && WAYLAND_DISPLAY="$disp" spectacle -b -n -o "$tmp" >&2; then
+          if [ -s "$tmp" ]; then
+            ok=1
+          fi
+        fi
+        if [ "$ok" -eq 0 ] && command -v grim >/dev/null && WAYLAND_DISPLAY="$disp" grim "$tmp" >&2; then
+          if [ -s "$tmp" ]; then
+            ok=1
+          fi
         fi
         if [ "$ok" -eq 1 ]; then
           cat "$tmp"
@@ -278,7 +299,7 @@ print("1920 1080")
         fi
         rm -f "$out_path"
         cap_status="error"
-        cap_err="Remote capture failed on node '\''$node'\'': ${ssh_err:-unreachable or display server inactive}"
+        cap_err="Remote capture failed on node '$node': ${ssh_err:-unreachable or display server inactive}"
       fi
     fi
 

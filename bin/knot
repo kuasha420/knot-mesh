@@ -274,6 +274,7 @@ cmd_sync() {
       fi
 
       local sync_count=0
+      local sync_failures=0
       local strands_meta="" s_rc=0
       strands_meta="$(python3 -c "
 import json, os, sys, glob
@@ -297,11 +298,22 @@ for mf in sorted(glob.glob(os.path.join(nodes_dir, '*.json'))):
 print('\n'.join(res))
 " "$nodes_dir" "$anchor_id" "$anchor_host" "$my_host" 2>&1)" || s_rc=$?
       if [ $s_rc -eq 0 ] && [ -n "$strands_meta" ]; then
-        while IFS= read -r id; do
+        local -a strand_ids=()
+        mapfile -t strand_ids <<< "$strands_meta"
+        local id
+        for id in "${strand_ids[@]}"; do
           [ -n "$id" ] || continue
-          swarm_sync_anchor_push "$id" "$active_swarm" "$nodes_dir" "$topo_file" "$swarm_conf" 0 "$force_prod"
-          sync_count=$((sync_count + 1))
-        done <<< "$strands_meta"
+          if swarm_sync_anchor_push "$id" "$active_swarm" "$nodes_dir" "$topo_file" "$swarm_conf" 0 "$force_prod"; then
+            sync_count=$((sync_count + 1))
+          else
+            knot_log_err "Failed to synchronize Strand '$id' (continuing with remaining strands)."
+            sync_failures=$((sync_failures + 1))
+          fi
+        done
+      fi
+      if [ "$sync_failures" -gt 0 ]; then
+        knot_log_warn "Mesh-wide swarm synchronization completed with $sync_failures failure(s) ($sync_count Strands updated)."
+        return 1
       fi
       knot_log_ok "Mesh-wide swarm synchronization complete ($sync_count Strands updated)."
     elif [ -n "$target" ] && [ "$target" != "$my_node_id" ] && [ "$target" != "$my_host" ] && [ "$target" != "$anchor_id" ] && [ "$target" != "local" ] && [ "$target" != "localhost" ]; then

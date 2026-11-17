@@ -8,6 +8,7 @@ Zero external dependencies (uses standard library Python 3).
 """
 
 import base64
+import contextlib
 import glob
 import io
 import json
@@ -16,10 +17,12 @@ import os
 import logging
 import re
 import secrets
+import shlex
 import shutil
 import socket
 import sqlite3
 import ssl
+import stat
 import subprocess
 import sys
 import tarfile
@@ -476,6 +479,61 @@ def get_canonical_node_id(node_id: str) -> str:
     return node_id
 
 
+def get_registered_swarm_node_ids() -> set[str]:
+    """Returns canonical node IDs registered in the active swarm's manifest directories."""
+    active_swarm, _ = get_active_swarm_info()
+    user_home = os.path.expanduser("~")
+    registered: set[str] = set()
+    for nodes_dir in (
+        os.path.join(user_home, f".config/knot/swarms/{active_swarm}/nodes"),
+        f"/etc/knot/swarms.d/{active_swarm}/nodes",
+    ):
+        if not os.path.isdir(nodes_dir):
+            continue
+        for fname in os.listdir(nodes_dir):
+            if not fname.endswith(".json"):
+                continue
+            fpath = os.path.join(nodes_dir, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as jf:
+                    m = json.load(jf)
+                    can_id = m.get("id") or fname[:-5]
+                    if can_id:
+                        registered.add(str(can_id))
+            except Exception as e:
+                sys.stderr.write(f"Notice: [hub] Failed to parse node manifest {fpath}: {e}\n")
+    return registered
+
+
+def _detect_local_wayland_display(uid: int) -> str:
+    """Detects the active local Wayland socket (e.g. wayland-1 or wayland-0)."""
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{uid}"
+    env_disp = os.environ.get("WAYLAND_DISPLAY")
+    if env_disp:
+        env_sock = os.path.join(runtime_dir, env_disp)
+        try:
+            if stat.S_ISSOCK(os.stat(env_sock).st_mode):
+                return env_disp
+        except OSError as e:
+            logger.debug("WAYLAND_DISPLAY socket %s unavailable: %s", env_sock, e)
+    if os.path.isdir(runtime_dir):
+        candidates = sorted(
+            (
+                name for name in os.listdir(runtime_dir)
+                if re.match(r"^wayland-\d+$", name)
+            ),
+            key=lambda n: int(n.split("-")[1]),
+        )
+        for cand in candidates:
+            sock_path = os.path.join(runtime_dir, cand)
+            try:
+                if stat.S_ISSOCK(os.stat(sock_path).st_mode):
+                    return cand
+            except OSError:
+                continue
+    return env_disp or "wayland-0"
+
+
 def _get_screen_lock(node_id: str) -> threading.Lock:
     with _screen_locks_mutex:
         if node_id not in _node_screen_locks:
@@ -497,7 +555,12 @@ def _generate_screen_placeholder_svg(node_id: str, message: str = "Display Offli
     return svg.encode("utf-8")
 
 
-def capture_node_screen(node_id: str, force: bool = False, quality: str = "low") -> tuple[bytes | None, str]:
+def capture_node_screen(
+    node_id: str,
+    force: bool = False,
+    quality: str = "low",
+    db_path: str | None = None,
+) -> tuple[bytes | None, str]:
     if not re.match(r"^[a-zA-Z0-9_-]+$", str(node_id)):
         return None, "image/jpeg"
 
@@ -550,8 +613,12 @@ def capture_node_screen(node_id: str, force: bool = False, quality: str = "low")
         raw_bytes = None
         if is_local:
             env = os.environ.copy()
-            env.setdefault("WAYLAND_DISPLAY", "wayland-0")
-            env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+            uid = os.getuid()
+            runtime_dir = env.get("XDG_RUNTIME_DIR") or f"/run/user/{uid}"
+            env["XDG_RUNTIME_DIR"] = runtime_dir
+            env["WAYLAND_DISPLAY"] = _detect_local_wayland_display(uid)
+            if not env.get("DBUS_SESSION_BUS_ADDRESS"):
+                env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={runtime_dir}/bus"
             cmd_capture = ["spectacle", "-b", "-n", "-o", raw_png]
             res1 = subprocess.run(cmd_capture, env=env, capture_output=True, text=True, timeout=4)
             if res1.returncode == 0 and os.path.isfile(raw_png):
@@ -560,7 +627,23 @@ def capture_node_screen(node_id: str, force: bool = False, quality: str = "low")
             elif res1.returncode != 0:
                 logger.warning("Local spectacle screen capture failed (rc=%s): %s", res1.returncode, res1.stderr.strip())
         else:
-            ip = manifest.get("ip_hint") or ""
+            # Prefer live heartbeat IP from Hub DB over potentially stale DHCP ip_hint in manifest
+            resolved_db_path = db_path or os.environ.get("KNOT_HUB_DB", DEFAULT_DB_PATH)
+            ip = ""
+            try:
+                if resolved_db_path and os.path.isfile(resolved_db_path):
+                    with contextlib.closing(sqlite3.connect(resolved_db_path, timeout=2.0)) as _conn:
+                        _row = _conn.execute(
+                            "SELECT ip FROM nodes WHERE id = ? OR hostname = ? "
+                            "ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, last_heartbeat DESC LIMIT 1",
+                            (node_id, manifest.get("hostname") or node_id, node_id),
+                        ).fetchone()
+                        if _row and _row[0] and _row[0] not in ("127.0.0.1", "::1"):
+                            ip = _row[0]
+            except Exception as _ip_err:
+                logger.warning("Error querying live DB IP for %s: %s", node_id, _ip_err)
+            if not ip:
+                ip = manifest.get("ip_hint") or ""
             if not ip and "interfaces" in manifest:
                 for iface in manifest["interfaces"].values():
                     if isinstance(iface, dict) and iface.get("ip"):
@@ -570,10 +653,15 @@ def capture_node_screen(node_id: str, force: bool = False, quality: str = "low")
             port = str(manifest.get("port") or 22)
 
             if ip:
-                remote_cmd = (
-                    f"WAYLAND_DISPLAY=wayland-0 spectacle -b -n -o /tmp/knot_screen_{node_id}.png && "
+                remote_script = (
+                    f"uid=$(id -u); xdg=\"/run/user/$uid\"; "
+                    f"wl=\"\"; for s in \"$xdg\"/wayland-[0-9]*; do [ -S \"$s\" ] && wl=$(basename \"$s\") && break; done; "
+                    f"WAYLAND_DISPLAY=\"${{wl:-wayland-0}}\" XDG_RUNTIME_DIR=\"$xdg\" "
+                    f"DBUS_SESSION_BUS_ADDRESS=\"unix:path=$xdg/bus\" "
+                    f"spectacle -b -n -o /tmp/knot_screen_{node_id}.png >&2 && "
                     f"cat /tmp/knot_screen_{node_id}.png && rm -f /tmp/knot_screen_{node_id}.png"
                 )
+                remote_cmd = f"sh -c {shlex.quote(remote_script)}"
                 ssh_cmd = [
                     "ssh", "-o", "ConnectTimeout=3", "-o", "StrictHostKeyChecking=accept-new",
                     "-p", port, f"{user}@{ip}", remote_cmd
@@ -2604,16 +2692,31 @@ class Database:
         broadcast_event("node_heartbeat", {"node_id": node_id, "selected_model": selected_model})
         return {"id": node_id, "status": "ONLINE", "last_heartbeat": now, "selected_model": selected_model}
 
+    def delete_node(self, node_id: str) -> int:
+        """Removes a decommissioned node record from the Hub SQLite table."""
+        can_id = get_canonical_node_id(node_id)
+        conn = self.get_connection()
+        with conn:
+            cur = conn.execute("DELETE FROM nodes WHERE id = ? OR id = ?", (node_id, can_id))
+            deleted = cur.rowcount
+        with self._activities_lock:
+            self._node_activities.pop(node_id, None)
+            self._node_activities.pop(can_id, None)
+        return deleted
+
     def list_nodes(self) -> list[dict]:
         conn = self.get_connection()
         cur = conn.cursor()
         cur.execute("SELECT * FROM nodes ORDER BY last_heartbeat DESC")
         rows = cur.fetchall()
         now = int(time.time())
+        registered_ids = get_registered_swarm_node_ids()
         result_map = {}
         for r in rows:
             d = dict(r)
             can_id = get_canonical_node_id(d.get("id", ""))
+            if registered_ids and can_id not in registered_ids:
+                continue
             if can_id in result_map:
                 continue
             d["id"] = can_id
@@ -2663,7 +2766,7 @@ class Database:
                     d["power"] = json.loads(d["power_state"])
                 except Exception as e:
                     sys.stderr.write(f"Notice: [hub] Failed to parse power_state JSON: {e}\n")
-            d["activity"] = self._node_activities.get(can_id, {})
+            d["activity"] = self.get_node_activity(can_id)
             if isinstance(d["power"], dict) and d["activity"]:
                 d["power"]["activity"] = d["activity"]
             if now - d.get("last_heartbeat", 0) > 30:
@@ -3031,7 +3134,8 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 node_id = parts[1]
                 force = "force" in query or query.get("force", ["0"])[0] in ("1", "true")
                 quality = query.get("quality", ["low"])[0]
-                img_data, ctype = capture_node_screen(node_id, force=force, quality=quality)
+                db_path_arg = getattr(self.db, "db_path", None) if self.db is not None else None
+                img_data, ctype = capture_node_screen(node_id, force=force, quality=quality, db_path=db_path_arg)
                 if img_data:
                     self._send_image(img_data, ctype)
                 else:
@@ -3570,6 +3674,19 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 ip=client_ip
             )
             self._send_json(resp, 200)
+
+        elif path in ("/node/remove", "/nodes/remove"):
+            if not isinstance(body, dict):
+                self._send_error("Request body must be a JSON object", 400)
+                return
+            raw_node_id = body.get("node_id")
+            node_id = raw_node_id.strip() if isinstance(raw_node_id, str) else ""
+            if not node_id:
+                self._send_error("Field 'node_id' is required", 400)
+                return
+            deleted = self.db.delete_node(node_id)
+            broadcast_event("node_removed", {"node_id": node_id})
+            self._send_json({"ok": True, "node_id": node_id, "deleted": deleted}, 200)
 
         elif path == "/node/activity":
             node_id = body.get("node_id", "").strip()

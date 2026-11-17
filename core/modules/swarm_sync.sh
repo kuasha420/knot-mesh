@@ -601,6 +601,7 @@ swarm_sync_dev() {
       fi
 
       local sync_count=0
+      local sync_failures=0
       local strands_meta="" s_rc=0
       strands_meta="$(python3 -c "
 import json, os, sys, glob
@@ -621,12 +622,15 @@ for mf in sorted(glob.glob(os.path.join(nodes_dir, '*.json'))):
 print('\n'.join(res))
 " "$nodes_dir" "$my_host" 2>&1)" || s_rc=$?
       if [ $s_rc -eq 0 ] && [ -n "$strands_meta" ]; then
-        while IFS= read -r id; do
+        local -a strand_ids=()
+        mapfile -t strand_ids <<< "$strands_meta"
+        local id
+        for id in "${strand_ids[@]}"; do
           [ -n "$id" ] || continue
 
           # Probe remote install type
           local r_type=""
-          if ! r_type="$(ssh -o BatchMode=yes -o ConnectTimeout=4 "$id" '
+          if ! r_type="$(ssh -n -o BatchMode=yes -o ConnectTimeout=4 "$id" '
             if [ -f "$HOME/.config/knot/install_type" ]; then
               tr -d "[:space:]" < "$HOME/.config/knot/install_type"
             elif [ -d "$HOME/Dev/knot-mesh/.git" ] || [ -d "$HOME/knot-mesh/.git" ]; then
@@ -641,15 +645,31 @@ print('\n'.join(res))
 
           if [ "$r_type" = "prod" ] && [ "$force" -eq 0 ]; then
             knot_log_warn "Strand '$id' is a PRODUCTION installation. Skipping dev drift healing (use --force-dev to override)."
-            swarm_sync_anchor_push "$id" "$active_swarm" "$nodes_dir" "$topo_file" "$swarm_conf" 0 1
-            sync_count=$((sync_count + 1))
+            if swarm_sync_anchor_push "$id" "$active_swarm" "$nodes_dir" "$topo_file" "$swarm_conf" 0 1; then
+              sync_count=$((sync_count + 1))
+            else
+              knot_log_err "Failed to synchronize production Strand '$id' (continuing with remaining strands)."
+              sync_failures=$((sync_failures + 1))
+            fi
             continue
           fi
 
-          swarm_sync_dev_heal_remote "$id"
-          swarm_sync_anchor_push "$id" "$active_swarm" "$nodes_dir" "$topo_file" "$swarm_conf" 1
-          sync_count=$((sync_count + 1))
-        done <<< "$strands_meta"
+          if ! swarm_sync_dev_heal_remote "$id"; then
+            knot_log_err "Failed to heal development repo on Strand '$id' (continuing with remaining strands)."
+            sync_failures=$((sync_failures + 1))
+            continue
+          fi
+          if swarm_sync_anchor_push "$id" "$active_swarm" "$nodes_dir" "$topo_file" "$swarm_conf" 1; then
+            sync_count=$((sync_count + 1))
+          else
+            knot_log_err "Failed to synchronize development Strand '$id' (continuing with remaining strands)."
+            sync_failures=$((sync_failures + 1))
+          fi
+        done
+      fi
+      if [ "$sync_failures" -gt 0 ]; then
+        knot_log_warn "Mesh-wide development synchronization completed with $sync_failures failure(s) ($sync_count Strands updated and healed)."
+        return 1
       fi
       knot_log_ok "Mesh-wide development synchronization complete ($sync_count Strands updated and healed)."
     elif [ -n "$target" ] && [ "$target" != "$my_host" ] && [ "$target" != "local" ] && [ "$target" != "localhost" ]; then

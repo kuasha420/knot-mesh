@@ -759,8 +759,12 @@ class AgentWorker:
             if self.agy_auth == "AUTHENTICATED" and (now - self.last_quota_fetch > 300):
                 threading.Thread(target=self._refresh_quota_bg, daemon=True).start()
 
+            on_ac = is_on_ac_power()
+            batt_cap = get_battery_capacity()
             power_status = {
-                "on_ac": is_on_ac_power(),
+                "on_ac": on_ac,
+                "battery_percent": batt_cap,
+                "power_source": "AC" if on_ac else "BATTERY",
                 "sleep_inhibited": bool((self.power_inhibitor_proc and self.power_inhibitor_proc.poll() is None) or self.dbus_inhibit_cookie is not None),
                 "is_executing_task": self.is_executing_task,
                 "activity": self.current_activity

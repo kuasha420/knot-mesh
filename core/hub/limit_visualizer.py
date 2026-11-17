@@ -114,14 +114,44 @@ def try_hub_request(path: str, hub_url: str = DEFAULT_HUB_URL, timeout: float = 
         return None
 
 
+def extract_node_power(node: Dict[str, Any], power_payload: Any) -> Optional[Dict[str, Any]]:
+    """Extracts a node's power telemetry dict from /power/status or /nodes payload."""
+    nid = node.get("id") or node.get("node_id")
+    if isinstance(power_payload, dict) and nid:
+        # 1. Live Hub /power/status schema: {"nodes": [{"id": "steamdeck", "power": {...}}, ...]}
+        p_nodes = power_payload.get("nodes")
+        if isinstance(p_nodes, list):
+            for entry in p_nodes:
+                if isinstance(entry, dict) and entry.get("id") == nid:
+                    p_info = entry.get("power")
+                    if isinstance(p_info, dict) and p_info:
+                        return p_info
+        else:
+            # 2. Legacy flat map: {"steamdeck": {"battery_percent": 84, ...}}
+            direct = power_payload.get(nid)
+            if isinstance(direct, dict):
+                return direct
+    # 3. Embedded power dict from /nodes entry
+    node_pwr = node.get("power")
+    if isinstance(node_pwr, dict) and node_pwr:
+        return node_pwr
+    return None
+
+
 def format_power_string(power_info: Optional[Dict[str, Any]], is_offline: bool = False) -> str:
     """Derives a human-readable power/battery string dynamically from node telemetry."""
     if is_offline:
         return "Offline"
-    if not isinstance(power_info, dict):
+    if not isinstance(power_info, dict) or not power_info:
         return "AC Power"
     bat = power_info.get("battery_percent")
-    src = power_info.get("power_source") or power_info.get("source") or "AC"
+    src = power_info.get("power_source") or power_info.get("source")
+    if not src and "on_ac" in power_info:
+        if power_info.get("on_ac") is False:
+            src = "BATTERY"
+        elif power_info.get("on_ac") is True:
+            src = "AC"
+    src = src or "AC"
     if bat is not None:
         if src == "BATTERY":
             return f"Bat {bat}%"
@@ -129,6 +159,8 @@ def format_power_string(power_info: Optional[Dict[str, Any]], is_offline: bool =
             return f"Bat {bat}% (AC)"
         else:
             return f"Bat {bat}% ({src})"
+    if src == "BATTERY":
+        return "Battery"
     if src:
         return f"{src} Power" if src in ("AC", "DC") else str(src)
     return "AC Power"
@@ -213,14 +245,43 @@ class QuotaDataAggregator:
         fallback_nodes = self._discover_local_nodes()
         return fallback_nodes, power_data
 
+    def _resolve_active_swarm(self, home: str) -> str:
+        env_swarm = os.environ.get("KNOT_ACTIVE_SWARM", "").strip()
+        if env_swarm and env_swarm != "none":
+            return env_swarm
+        runtime_dir = os.environ.get("KNOT_RUNTIME_DIR") or "/run/knot"
+        for state_path in (
+            os.path.join(runtime_dir, "active_swarm"),
+            os.path.join(home, ".local", "state", "knot", "active_swarm"),
+        ):
+            if os.path.isfile(state_path):
+                try:
+                    with open(state_path, "r", encoding="utf-8") as sf:
+                        val = sf.read().strip()
+                        if val and val != "none":
+                            return val
+                except OSError as e:
+                    if os.environ.get("KNOT_DEBUG"):
+                        sys.stderr.write(f"[DEBUG] Failed to read active swarm file {state_path}: {e}\n")
+        return "home"
+
     def _discover_local_nodes(self) -> List[Dict[str, Any]]:
         home = os.path.expanduser("~")
+        active_swarm = self._resolve_active_swarm(home)
         node_files: List[str] = []
         for p in [
-            f"{home}/.config/knot/swarms/*/nodes/*.json",
-            f"/etc/knot/swarms.d/*/nodes/*.json",
+            f"{home}/.config/knot/swarms/{active_swarm}/nodes/*.json",
+            f"/etc/knot/swarms.d/{active_swarm}/nodes/*.json",
         ]:
             node_files.extend(glob.glob(p))
+
+        if not node_files:
+            for p in [
+                f"{home}/.config/knot/swarms/*/nodes/*.json",
+                f"/etc/knot/swarms.d/*/nodes/*.json",
+            ]:
+                node_files.extend(glob.glob(p))
+        node_files = sorted(node_files)
 
         seen = set()
         nodes: List[Dict[str, Any]] = []
@@ -252,23 +313,24 @@ class QuotaDataAggregator:
                 if os.environ.get("KNOT_DEBUG"):
                     sys.stderr.write(f"[DEBUG] Failed to parse node manifest {fn}: {e}\n")
 
-        for def_id in default_node_ids:
-            if def_id not in seen:
-                seen.add(def_id)
-                nodes.append({
-                    "id": def_id,
-                    "hostname": def_id,
-                    "status": "ONLINE" if def_id in ("desktop", "laptop") else "STANDBY",
-                    "ip": "127.0.0.1",
-                    "selected_model": "gemini-3.8-flash-high" if def_id in ("laptop", "steamdeck", "rog-ally") else "gemini-3.1-pro-high",
-                    "quota_5h_gemini": 0.85 if def_id == "laptop" else 1.0,
-                    "quota_weekly_gemini": 1.0,
-                    "quota_data": {
-                        "gemini_5h_reset_in": "in 1h 42m",
-                        "gemini_weekly_reset_in": "in 5d 18h",
-                        "account": {"email": "operator@knot.mesh", "subscription": "Google AI Pro"},
-                    },
-                })
+        if not nodes:
+            for def_id in default_node_ids:
+                if def_id not in seen:
+                    seen.add(def_id)
+                    nodes.append({
+                        "id": def_id,
+                        "hostname": def_id,
+                        "status": "ONLINE" if def_id in ("desktop", "laptop") else "STANDBY",
+                        "ip": "127.0.0.1",
+                        "selected_model": "gemini-3.8-flash-high" if def_id in ("laptop", "steamdeck", "rog-ally") else "gemini-3.1-pro-high",
+                        "quota_5h_gemini": 0.85 if def_id == "laptop" else 1.0,
+                        "quota_weekly_gemini": 1.0,
+                        "quota_data": {
+                            "gemini_5h_reset_in": "in 1h 42m",
+                            "gemini_weekly_reset_in": "in 5d 18h",
+                            "account": {"email": "operator@knot.mesh", "subscription": "Google AI Pro"},
+                        },
+                    })
 
         return nodes
 
@@ -334,7 +396,7 @@ class LimitVisualizerRenderer:
 
             has_5h = qdata.get("has_5h_limit", True) and (g_5h is not None)
             bar_wk = render_progress_bar(g_wk, is_offline=is_offline, width=bar_width)
-            pwr_info = power.get(nid) if isinstance(power, dict) else None
+            pwr_info = extract_node_power(n, power)
             pwr_str = format_power_string(pwr_info, is_offline=is_offline)
 
             account = n.get("account") or qdata.get("account") or {}
@@ -459,7 +521,7 @@ class LimitVisualizerRenderer:
 
             bar_wk = render_progress_bar(g_wk, is_offline=is_offline, width=8)
 
-            pwr_info = power.get(nid) if isinstance(power, dict) else None
+            pwr_info = extract_node_power(n, power)
             pwr_str = format_power_string(pwr_info, is_offline=is_offline)
 
             row_items = [

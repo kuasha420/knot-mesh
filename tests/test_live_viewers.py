@@ -44,6 +44,7 @@ from core.hub.limit_visualizer import (
     parse_countdown_seconds,
     format_countdown_string,
     format_power_string,
+    extract_node_power,
 )
 
 
@@ -188,16 +189,46 @@ def test_board_viewer_helpers():
 # 2. Limit Visualizer Tests
 # ==============================================================================
 
-def test_limit_visualizer_aggregator_local_fallback():
+def test_limit_visualizer_aggregator_local_fallback(tmp_path, monkeypatch):
+    # 1. With real manifests present, ONLY manifested nodes from active swarm are returned (no phantom rog-ally or /etc leak)
+    nodes_dir = tmp_path / ".config" / "knot" / "swarms" / "home" / "nodes"
+    nodes_dir.mkdir(parents=True)
+    for nid in ("desktop", "laptop", "steamdeck"):
+        (nodes_dir / f"{nid}.json").write_text(json.dumps({"id": nid, "hostname": nid}), encoding="utf-8")
+
+    # Seed an inactive swarm to verify active-swarm scoping does not leak ghost nodes
+    inactive_dir = tmp_path / ".config" / "knot" / "swarms" / "archive_swarm" / "nodes"
+    inactive_dir.mkdir(parents=True)
+    (inactive_dir / "ghost-node.json").write_text(json.dumps({"id": "ghost-node", "hostname": "ghost"}), encoding="utf-8")
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("KNOT_ACTIVE_SWARM", "home")
+
+    import glob as real_glob_mod
+    real_glob = real_glob_mod.glob
+
+    def hermetic_glob(pattern, *args, **kwargs):
+        if str(pattern).startswith("/etc/knot/"):
+            return []
+        return real_glob(pattern, *args, **kwargs)
+
     aggregator = QuotaDataAggregator(hub_url="http://invalid.hub.local:9999")
-    nodes, power = aggregator.fetch_all()
+    with patch("core.hub.limit_visualizer.glob.glob", side_effect=hermetic_glob):
+        nodes, _ = aggregator.fetch_all()
     assert aggregator.using_hub is False
-    assert len(nodes) >= 4
     node_ids = {n["id"] for n in nodes}
-    assert "desktop" in node_ids
-    assert "laptop" in node_ids
-    assert "rog-ally" in node_ids
-    assert "steamdeck" in node_ids
+    assert node_ids == {"desktop", "laptop", "steamdeck"}
+    assert "rog-ally" not in node_ids
+    assert "ghost-node" not in node_ids
+
+    # 2. When zero manifests exist at all, synthetic defaults are used for smoke rendering
+    empty_home = tmp_path / "empty_home"
+    empty_home.mkdir()
+    monkeypatch.setenv("HOME", str(empty_home))
+    with patch("core.hub.limit_visualizer.glob.glob", return_value=[]):
+        nodes_empty, _ = aggregator.fetch_all()
+        assert len(nodes_empty) >= 4
+        assert {"desktop", "laptop", "rog-ally", "steamdeck"}.issubset({n["id"] for n in nodes_empty})
 
 
 def test_limit_visualizer_aggregator_hub_mock():
@@ -264,8 +295,24 @@ def test_limit_visualizer_helpers():
     assert format_power_string({"battery_percent": 84, "power_source": "BATTERY"}) == "Bat 84%"
     assert format_power_string({"battery_percent": 98, "power_source": "AC"}) == "Bat 98% (AC)"
     assert format_power_string({"power_source": "AC"}) == "AC Power"
+    assert format_power_string({"on_ac": False, "battery_percent": 90}) == "Bat 90%"
+    assert format_power_string({"on_ac": False}) == "Battery"
+    assert format_power_string({"on_ac": True, "battery_percent": 100}) == "Bat 100% (AC)"
+    assert format_power_string({"on_ac": True}) == "AC Power"
     assert format_power_string(None, is_offline=True) == "Offline"
     assert format_power_string(None, is_offline=False) == "AC Power"
+
+    # Nested live Hub /power/status schema extraction
+    hub_power_payload = {
+        "swarm_active": False,
+        "nodes": [
+            {"id": "steamdeck", "power": {"on_ac": False, "battery_percent": 90}},
+            {"id": "desktop", "power": {"on_ac": True}},
+        ],
+    }
+    assert extract_node_power({"id": "steamdeck"}, hub_power_payload) == {"on_ac": False, "battery_percent": 90}
+    assert format_power_string(extract_node_power({"id": "steamdeck"}, hub_power_payload)) == "Bat 90%"
+    assert format_power_string(extract_node_power({"id": "laptop", "power": {"on_ac": True, "battery_percent": 100}}, {})) == "Bat 100% (AC)"
 
 
 def test_limit_visualizer_rendering():
@@ -410,4 +457,188 @@ def test_display_launch_hub_url_injection():
     res = subprocess.run(cmd, env=env, capture_output=True, text=True, check=True)
     assert "KNOT_HUB_URL='https://192.168.1.100:4242'" in res.stdout
     assert "knot council board --compact" in res.stdout
+
+
+def test_hub_filters_unregistered_ghost_nodes_and_deletes(tmp_path, monkeypatch):
+    """Verify Hub list_nodes() excludes offboarded ghost nodes and delete_node() purges them from SQLite."""
+    from core.hub import hub as hub_mod
+
+    db_file = str(tmp_path / "hub.db")
+    db = hub_mod.Database(db_file)
+    db.register_node_heartbeat("desktop", "kuasha-z490ud", ["anchor"])
+    db.register_node_heartbeat("steamdeck", "psl-0000", ["handheld"], power={"on_ac": False, "battery_percent": 90})
+    db.register_node_heartbeat("rog-ally", "psl-0000", ["handheld"])
+
+    # With active swarm manifests containing only desktop & steamdeck, rog-ally is filtered out
+    with patch.object(hub_mod, "get_registered_swarm_node_ids", return_value={"desktop", "steamdeck"}):
+        nodes = db.list_nodes()
+        ids = {n["id"] for n in nodes}
+        assert ids == {"desktop", "steamdeck"}
+        assert "rog-ally" not in ids
+
+    # delete_node() physically removes the row from SQLite
+    deleted = db.delete_node("rog-ally")
+    assert deleted >= 1
+    with patch.object(hub_mod, "get_registered_swarm_node_ids", return_value=set()):
+        nodes_after = db.list_nodes()
+        assert "rog-ally" not in {n["id"] for n in nodes_after}
+
+
+def test_hub_detect_local_wayland_display(tmp_path, monkeypatch):
+    """Verify _detect_local_wayland_display() detects live sockets, validates S_ISSOCK, and sorts numerically."""
+    import socket as sock_mod
+    from core.hub import hub as hub_mod
+
+    sock_10 = tmp_path / "wayland-10"
+    sock_2 = tmp_path / "wayland-2"
+    fake_env_file = tmp_path / "wayland-fake"
+    fake_env_file.write_text("not a socket", encoding="utf-8")
+
+    s10 = sock_mod.socket(sock_mod.AF_UNIX, sock_mod.SOCK_STREAM)
+    s2 = sock_mod.socket(sock_mod.AF_UNIX, sock_mod.SOCK_STREAM)
+    try:
+        s10.bind(str(sock_10))
+        s2.bind(str(sock_2))
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        # Regular file in WAYLAND_DISPLAY must be rejected in favor of real socket, sorted numerically (2 < 10)
+        monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-fake")
+        assert hub_mod._detect_local_wayland_display(os.getuid()) == "wayland-2"
+    finally:
+        s10.close()
+        s2.close()
+
+
+def test_extract_node_power_key_collision_resistance():
+    """Verify nested Hub /power/status nodes list takes precedence over top-level keys like 'activity'."""
+    hub_payload = {
+        "swarm_active": True,
+        "activity": {"active": True, "reasons": ["recent_activity"]},
+        "nodes": [
+            {"id": "activity", "power": {"on_ac": False, "battery_percent": 72}},
+            {"id": "desktop", "power": {"on_ac": True}},
+        ],
+    }
+    assert extract_node_power({"id": "activity"}, hub_payload) == {"on_ac": False, "battery_percent": 72}
+    assert format_power_string(extract_node_power({"id": "activity"}, hub_payload)) == "Bat 72%"
+
+    # Even if node 'activity' has empty power inside nodes list, it must NOT collide with top-level 'activity'
+    hub_payload_empty = {
+        "swarm_active": True,
+        "activity": {"active": True, "reasons": ["tasks_running"]},
+        "nodes": [
+            {"id": "activity", "power": {}},
+        ],
+    }
+    assert extract_node_power({"id": "activity"}, hub_payload_empty) is None
+
+
+def test_hub_post_nodes_remove_endpoint(tmp_path):
+    """Verify POST /nodes/remove deletes valid nodes and rejects missing/null/non-string node_id with HTTP 400."""
+    import threading
+    import urllib.request
+    import urllib.error
+    from core.hub import hub as hub_mod
+
+    db_file = str(tmp_path / "hub_remove.db")
+    db = hub_mod.Database(db_file)
+    db.register_node_heartbeat("rog-ally", "psl-0000", ["handheld"])
+    db.set_node_activity("rog-ally", {"state": "active"})
+
+    class TestHandler(hub_mod.HubRequestHandler):
+        pass
+
+    TestHandler.db = db
+    server = hub_mod.ThreadingHTTPServer(("127.0.0.1", 0), TestHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    def post_remove(payload):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/nodes/remove",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as err:
+            return err.code, json.loads(err.read().decode("utf-8"))
+
+    try:
+        # 1. Valid node removal -> HTTP 200
+        status_ok, body_ok = post_remove({"node_id": "rog-ally"})
+        assert status_ok == 200
+        assert body_ok["ok"] is True
+        assert body_ok["node_id"] == "rog-ally"
+        assert body_ok["deleted"] >= 1
+        assert db.get_node_activity("rog-ally") == {}
+
+        # 2. Missing node_id -> HTTP 400
+        status_missing, _ = post_remove({})
+        assert status_missing == 400
+
+        # 3. Null node_id -> HTTP 400
+        status_null, _ = post_remove({"node_id": None})
+        assert status_null == 400
+
+        # 4. Non-string node_id -> HTTP 400
+        status_int, _ = post_remove({"node_id": 12345})
+        assert status_int == 400
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_capture_node_screen_live_db_ip_disambiguation(tmp_path, monkeypatch):
+    """Verify capture_node_screen() prefers live DB IP and disambiguates shared hostnames (psl-0000) by exact id."""
+    from core.hub import hub as hub_mod
+
+    db_file = str(tmp_path / "hub_screen.db")
+    db = hub_mod.Database(db_file)
+    db.register_node_heartbeat("steamdeck", "psl-0000", ["handheld"], ip="192.168.1.50")
+    db.register_node_heartbeat("rog-ally", "psl-0000", ["handheld"], ip="192.168.1.99")
+
+    # Make rog-ally's heartbeat strictly newer so a naive hostname query would pick 192.168.1.99
+    conn = sqlite3.connect(db_file)
+    conn.execute("UPDATE nodes SET last_heartbeat = last_heartbeat + 500 WHERE id = 'rog-ally'")
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(hub_mod, "SCREEN_CACHE_DIR", str(tmp_path / "screens"))
+    monkeypatch.setenv("KNOT_HUB_DB", db_file)
+
+    captured_cmds = []
+    fake_png = b"\x89PNG\r\n\x1a\n" + (b"\x00" * 600)
+
+    def fake_run(cmd, *args, **kwargs):
+        captured_cmds.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout=fake_png, stderr=b"")
+
+    manifest = {
+        "id": "steamdeck",
+        "hostname": "psl-0000",
+        "role": "strand",
+        "ip_hint": "192.168.1.10",
+        "user": "deck",
+        "port": 22,
+    }
+    with patch.object(hub_mod, "get_node_manifest", return_value=manifest), \
+         patch.object(hub_mod.subprocess, "run", side_effect=fake_run):
+        data, _ctype = hub_mod.capture_node_screen("steamdeck", force=True, db_path=db_file)
+
+    assert data is not None
+    assert len(captured_cmds) == 1
+    ssh_cmd = captured_cmds[0]
+    assert "deck@192.168.1.50" in ssh_cmd, f"Expected exact-id live IP 192.168.1.50, got {ssh_cmd}"
+    assert "deck@192.168.1.99" not in ssh_cmd
+    assert "deck@192.168.1.10" not in ssh_cmd
+    # Remote command must be wrapped in POSIX sh -c and redirect spectacle stdout to stderr
+    remote_arg = ssh_cmd[-1]
+    assert remote_arg.startswith("sh -c "), f"Expected POSIX sh -c wrapper, got {remote_arg}"
+    assert "spectacle -b -n -o /tmp/knot_screen_steamdeck.png >&2" in remote_arg
+
+
 

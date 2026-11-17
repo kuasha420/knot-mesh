@@ -479,6 +479,34 @@ except (OSError, ValueError):
   knot_log_info "De-provisioning KDE Connect pairing and customDevices..."
   node_unpair_kdeconnect "$node_id" "$target_hostname" "$target_ip" "$user_home"
 
+  # 12b. Subsystems De-provisioning: Knot Hub SQLite Registry
+  local hub_db_path="${KNOT_HUB_DB:-$user_home/.config/knot/hub.db}"
+  if [ -f "$hub_db_path" ]; then
+    knot_log_info "Purging '$node_id' from Knot Hub SQLite registry ($hub_db_path)..."
+    python3 -c "
+import sqlite3, sys
+db_path, nid = sys.argv[1], sys.argv[2]
+try:
+    conn = sqlite3.connect(db_path, timeout=3.0)
+    conn.execute('DELETE FROM nodes WHERE id = ?', (nid,))
+    conn.commit()
+    conn.close()
+except sqlite3.Error as e:
+    sys.stderr.write(f'Notice: Hub DB purge skipped for {nid}: {e}\n')
+" "$hub_db_path" "$node_id"
+  fi
+  if command -v curl >/dev/null && command -v hub_resolve_url >/dev/null; then
+    local hub_url=""
+    if hub_url="$(hub_resolve_url)" && [ -n "$hub_url" ]; then
+      local hub_rm_out="" hub_rm_rc=0
+      hub_rm_out="$(curl -k -sS -f --connect-timeout 2 -X POST -H "Content-Type: application/json" \
+        -d "{\"node_id\":\"${node_id}\"}" "$hub_url/nodes/remove" 2>&1)" || hub_rm_rc=$?
+      if [ $hub_rm_rc -ne 0 ]; then
+        knot_log_warn "Notice: Hub /nodes/remove returned exit code $hub_rm_rc (Hub may be offline): $hub_rm_out"
+      fi
+    fi
+  fi
+
   # 13. Cluster Synchronization
   if command -v cmd_sync >/dev/null; then
     knot_log_info "Synchronizing cluster state across remaining nodes..."
